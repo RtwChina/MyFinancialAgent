@@ -1,6 +1,6 @@
 -- 股票数据自动化复盘系统数据库结构
 -- 适用于 Cloudflare D1 (SQLite 兼容)
--- 版本: v2.2
+-- 版本: v3.0
 
 -- ============================================================
 -- 表 A：原始价格表
@@ -49,13 +49,20 @@ CREATE TABLE IF NOT EXISTS stock_news_raw (
 CREATE TABLE IF NOT EXISTS stock_archive (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     archive_date TEXT NOT NULL,        -- 复盘日期
+    review_status TEXT NOT NULL DEFAULT 'draft', -- 状态: draft/completed
     hist_price_level TEXT,             -- 历史价位复盘
     news_summary TEXT,                 -- 新闻总结
     market_sentiment TEXT,             -- 大盘流动性追踪
     sector_rotation TEXT,              -- 大宗商品与板块轮动
     asset_plan TEXT,                   -- 个股与资产操作计划
+    custom_notes TEXT,                 -- 自定义补充内容
     trading_summary TEXT,              -- 深度思考与交易总结
-    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    source_snapshot_json TEXT,         -- 页面回填的源数据快照
+    carry_forward_from_date TEXT,      -- 回填参考来源日期
+    reviewed_at DATETIME,              -- 完成复盘时间
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE(archive_date)
 );
 
 -- ============================================================
@@ -80,4 +87,6 @@ CREATE INDEX IF NOT EXISTS idx_stock_news_pub_date ON stock_news_raw(pub_date);
 CREATE INDEX IF NOT EXISTS idx_stock_news_source ON stock_news_raw(source);
 CREATE INDEX IF NOT EXISTS idx_stock_news_type ON stock_news_raw(type);
 CREATE INDEX IF NOT EXISTS idx_stock_archive_date ON stock_archive(archive_date);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_stock_archive_unique_date ON stock_archive(archive_date);
+CREATE INDEX IF NOT EXISTS idx_stock_archive_status_date ON stock_archive(review_status, archive_date);
 CREATE INDEX IF NOT EXISTS idx_news_analysis_date ON news_analysis(analysis_date);

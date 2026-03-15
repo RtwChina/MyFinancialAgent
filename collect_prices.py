@@ -8,11 +8,11 @@ import sys
 from datetime import datetime, timedelta
 import pandas as pd
 import yfinance as yf
-from openpyxl import load_workbook
 
-from config import ALL_SYMBOLS, STOCK_SYMBOLS, INDEX_SYMBOLS, OUTPUT_DIR
+from config import ALL_SYMBOLS, OUTPUT_DIR, ENABLE_REMOTE_WRITE
+from cloudflare_ingest import CloudflareIngestError, is_remote_write_configured, send_prices
 from logger_utils import get_logger
-from db_utils import init_database, batch_insert_prices, get_price_by_date
+from db_utils import init_database, batch_insert_prices
 
 logger = get_logger("collect_prices")
 
@@ -144,16 +144,22 @@ def main():
     logger.info("=" * 60)
 
     try:
-        # 初始化数据库
-        init_database()
-
         # 收集价格数据
         prices_df = collect_all_prices()
 
-        # 写入数据库 (自动去重)
         prices_list = prices_df.to_dict('records')
-        inserted_count = batch_insert_prices(prices_list)
-        logger.info(f"数据库写入完成: 新增 {inserted_count} 条，跳过重复 {len(prices_list) - inserted_count} 条")
+        if ENABLE_REMOTE_WRITE and is_remote_write_configured():
+            remote_result = send_prices(prices_list)
+            inserted_count = remote_result.get('inserted', 0)
+            logger.info(
+                "Cloudflare D1 写入完成: 新增 %s 条，跳过重复 %s 条",
+                inserted_count,
+                remote_result.get('ignored', 0),
+            )
+        else:
+            init_database()
+            inserted_count = batch_insert_prices(prices_list)
+            logger.info(f"数据库写入完成: 新增 {inserted_count} 条，跳过重复 {len(prices_list) - inserted_count} 条")
 
         # 导出到 Excel
         filepath = export_to_excel(prices_df)
@@ -170,6 +176,9 @@ def main():
         logger.info("股票价格采集脚本执行完成")
         return 0
 
+    except CloudflareIngestError as e:
+        logger.error(f"Cloudflare 写入失败: {str(e)}", exc_info=True)
+        return 1
     except Exception as e:
         logger.error(f"脚本执行失败: {str(e)}", exc_info=True)
         return 1

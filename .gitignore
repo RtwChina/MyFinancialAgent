@@ -35,9 +35,16 @@ logs/
 # IDE
 .idea/
 .vscode/
+.codex/
 *.swp
 *.swo
 *~
+
+# Cloudflare / Node
+node_modules/
+.wrangler/
+.dev.vars
+npm-debug.log*
 
 # 环境变量
 .env

@@ -34,6 +34,8 @@ def init_database(db_path: str = None):
     conn = get_db_connection(db_path)
     cursor = conn.cursor()
 
+    _migrate_legacy_tables(conn)
+
     # 读取 schema.sql
     schema_path = os.path.join(os.path.dirname(__file__), 'schema.sql')
     with open(schema_path, 'r', encoding='utf-8') as f:
@@ -45,6 +47,35 @@ def init_database(db_path: str = None):
     conn.close()
 
     logger.info(f"数据库初始化完成: {db_path or LOCAL_DB_PATH}")
+
+
+def _migrate_legacy_tables(conn: sqlite3.Connection):
+    """在老的本地 SQLite 上补齐新 schema 需要的列"""
+    cursor = conn.cursor()
+    cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='stock_archive'")
+    if not cursor.fetchone():
+        return
+
+    cursor.execute("PRAGMA table_info(stock_archive)")
+    existing_columns = {row[1] for row in cursor.fetchall()}
+    required_columns = {
+        "review_status": "TEXT NOT NULL DEFAULT 'draft'",
+        "custom_notes": "TEXT",
+        "source_snapshot_json": "TEXT",
+        "carry_forward_from_date": "TEXT",
+        "reviewed_at": "DATETIME",
+        "updated_at": "DATETIME DEFAULT CURRENT_TIMESTAMP",
+    }
+
+    for column_name, column_type in required_columns.items():
+        if column_name not in existing_columns:
+            cursor.execute(f"ALTER TABLE stock_archive ADD COLUMN {column_name} {column_type}")
+
+    cursor.execute(
+        "CREATE UNIQUE INDEX IF NOT EXISTS idx_stock_archive_unique_date ON stock_archive(archive_date)"
+    )
+
+    conn.commit()
 
 
 def generate_news_hash(title: str, content: str, pub_date: str = None) -> str:
@@ -211,23 +242,47 @@ def get_news_by_date_range(start_time: datetime, end_time: datetime, db_path: st
 # ========== 复盘数据操作 ==========
 
 def save_archive(data: Dict[str, Any], db_path: str = None) -> bool:
-    """保存复盘记录"""
+    """按日期保存或更新复盘记录"""
     try:
         conn = get_db_connection(db_path)
         cursor = conn.cursor()
 
         cursor.execute('''
             INSERT INTO stock_archive
-            (archive_date, hist_price_level, news_summary, market_sentiment, sector_rotation, asset_plan, trading_summary)
-            VALUES (?, ?, ?, ?, ?, ?, ?)
+            (
+                archive_date, review_status, hist_price_level, news_summary,
+                market_sentiment, sector_rotation, asset_plan, custom_notes,
+                trading_summary, source_snapshot_json, carry_forward_from_date,
+                reviewed_at, updated_at
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(archive_date) DO UPDATE SET
+                review_status = excluded.review_status,
+                hist_price_level = excluded.hist_price_level,
+                news_summary = excluded.news_summary,
+                market_sentiment = excluded.market_sentiment,
+                sector_rotation = excluded.sector_rotation,
+                asset_plan = excluded.asset_plan,
+                custom_notes = excluded.custom_notes,
+                trading_summary = excluded.trading_summary,
+                source_snapshot_json = excluded.source_snapshot_json,
+                carry_forward_from_date = excluded.carry_forward_from_date,
+                reviewed_at = excluded.reviewed_at,
+                updated_at = excluded.updated_at
         ''', (
             data.get('archive_date'),
+            data.get('review_status', 'draft'),
             data.get('hist_price_level'),
             data.get('news_summary'),
             data.get('market_sentiment'),
             data.get('sector_rotation'),
             data.get('asset_plan'),
+            data.get('custom_notes'),
             data.get('trading_summary'),
+            data.get('source_snapshot_json'),
+            data.get('carry_forward_from_date'),
+            data.get('reviewed_at'),
+            data.get('updated_at', datetime.now().strftime('%Y-%m-%d %H:%M:%S')),
         ))
 
         conn.commit()

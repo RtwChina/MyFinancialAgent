@@ -12,11 +12,15 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 import requests
 import yfinance as yf
 import pandas as pd
+import pandas_market_calendars as mcal
+import pytz
 
 from config import (
     OUTPUT_DIR,
     LLM_API_KEY, LLM_BASE_URL, LLM_MODEL_ID,
+    ENABLE_REMOTE_WRITE,
 )
+from cloudflare_ingest import CloudflareIngestError, is_remote_write_configured, send_news, send_news_analysis
 from logger_utils import get_logger
 from db_utils import init_database, batch_insert_news, save_news_analysis
 
@@ -463,6 +467,37 @@ def _parse_llm_output(summary: str) -> dict:
     return result
 
 
+def build_analysis_record(summary: str) -> dict:
+    """根据 LLM 输出或规则输出构造分析记录"""
+    if not summary:
+        return {}
+
+    parsed = _parse_llm_output(summary)
+    analysis_date = get_latest_closed_trading_day()
+    return {
+        'analysis_date': analysis_date,
+        'global_news': parsed['global_news'],
+        'market_news': parsed['market_news'],
+        'market_analysis': parsed['market_analysis'],
+        'raw_summary': summary,
+    }
+
+
+def get_latest_closed_trading_day() -> str:
+    """按 NYSE 日历计算最近一个已收盘交易日"""
+    ny_tz = pytz.timezone('America/New_York')
+    now_ny = datetime.now(ny_tz)
+    nyse = mcal.get_calendar('NYSE')
+    schedule = nyse.schedule(start_date=now_ny.date() - pd.Timedelta(days=10), end_date=now_ny.date())
+    closed_sessions = schedule[schedule['market_close'] <= now_ny]
+
+    if closed_sessions.empty:
+        return now_ny.strftime('%Y-%m-%d')
+
+    latest_close = closed_sessions.iloc[-1].name
+    return latest_close.strftime('%Y-%m-%d')
+
+
 def analyze_with_llm(news_list: list, news_type: str) -> str:
     """
     用 LLM 分析新闻
@@ -491,21 +526,7 @@ def analyze_with_llm(news_list: list, news_type: str) -> str:
     success, result = _call_llm_api_with_retry(important_news, news_type)
 
     if success:
-        summary = result.get('summary', '')
-
-        # 解析 LLM 输出
-        parsed = _parse_llm_output(summary)
-
-        # 保存到数据库
-        save_news_analysis({
-            'analysis_date': datetime.now().strftime('%Y-%m-%d'),
-            'global_news': parsed['global_news'],
-            'market_news': parsed['market_news'],
-            'market_analysis': parsed['market_analysis'],
-            'raw_summary': summary
-        })
-
-        return summary
+        return result.get('summary', '')
     else:
         # 降级: 使用规则生成摘要
         logger.warning("LLM 分析失败，使用规则生成摘要作为降级")
@@ -623,15 +644,26 @@ def main():
     logger.info("=" * 60)
 
     try:
-        # 初始化数据库
-        init_database()
-
         # 采集新闻
         news_list, summary = collect_all_news()
+        analysis_record = build_analysis_record(summary)
 
-        # 写入数据库 (自动去重)
-        inserted_count = batch_insert_news(news_list)
-        logger.info(f"数据库写入完成: 新增 {inserted_count} 条，跳过重复 {len(news_list) - inserted_count} 条")
+        if ENABLE_REMOTE_WRITE and is_remote_write_configured():
+            remote_result = send_news(news_list)
+            inserted_count = remote_result.get('inserted', 0)
+            logger.info(
+                "Cloudflare D1 新闻写入完成: 新增 %s 条，跳过重复 %s 条",
+                inserted_count,
+                remote_result.get('ignored', 0),
+            )
+            if analysis_record:
+                send_news_analysis(analysis_record)
+        else:
+            init_database()
+            inserted_count = batch_insert_news(news_list)
+            logger.info(f"数据库写入完成: 新增 {inserted_count} 条，跳过重复 {len(news_list) - inserted_count} 条")
+            if analysis_record:
+                save_news_analysis(analysis_record)
 
         # 导出到 Excel
         filepath = export_to_excel(news_list, summary)
@@ -650,6 +682,9 @@ def main():
         logger.info("新闻采集脚本执行完成")
         return 0
 
+    except CloudflareIngestError as e:
+        logger.error(f"Cloudflare 写入失败: {str(e)}", exc_info=True)
+        return 1
     except Exception as e:
         logger.error(f"执行失败: {str(e)}", exc_info=True)
         return 1

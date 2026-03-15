@@ -1,0 +1,15 @@
+{
+  "name": "my-financial-agent-cloudflare",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "wrangler dev cloudflare/worker/src/index.js --config wrangler.toml",
+    "deploy": "wrangler deploy --config wrangler.toml",
+    "check:worker": "node --check cloudflare/worker/src/index.js",
+    "check:web": "node --check cloudflare/web/app.js"
+  },
+  "devDependencies": {
+    "wrangler": "^4.6.0"
+  }
+}

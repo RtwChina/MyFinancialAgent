@@ -1,12 +1,11 @@
 """
 主入口脚本 - 运行所有采集任务
 """
-import os
 import sys
 from datetime import datetime
-import pandas as pd
 
-from config import OUTPUT_DIR
+from config import ENABLE_REMOTE_WRITE
+from cloudflare_ingest import is_remote_write_configured, send_news, send_news_analysis, send_prices
 from logger_utils import get_logger
 from db_utils import init_database
 
@@ -20,11 +19,15 @@ def run_price_collector():
         from collect_prices import collect_all_prices, export_to_excel, batch_insert_prices
         prices_df = collect_all_prices()
 
-        # 写入数据库
-        init_database()
         prices_list = prices_df.to_dict('records')
-        inserted_count = batch_insert_prices(prices_list)
-        logger.info(f"价格数据库写入: 新增 {inserted_count} 条")
+        if ENABLE_REMOTE_WRITE and is_remote_write_configured():
+            remote_result = send_prices(prices_list)
+            inserted_count = remote_result.get('inserted', 0)
+            logger.info("Cloudflare 价格数据库写入: 新增 %s 条", inserted_count)
+        else:
+            init_database()
+            inserted_count = batch_insert_prices(prices_list)
+            logger.info(f"价格数据库写入: 新增 {inserted_count} 条")
 
         filepath = export_to_excel(prices_df)
         return filepath
@@ -37,14 +40,24 @@ def run_news_collector():
     """运行新闻采集"""
     logger.info("开始执行新闻采集...")
     try:
-        from collect_news_v3 import collect_all_news, export_to_excel as export_news, init_database as news_init_db, batch_insert_news
-        # 初始化数据库
-        news_init_db()
+        from collect_news_v3 import collect_all_news, export_to_excel as export_news, init_database as news_init_db, batch_insert_news, build_analysis_record
         # 采集新闻
         news_list, summary = collect_all_news()
-        # 写入数据库
-        inserted_count = batch_insert_news(news_list)
-        logger.info(f"新闻数据库写入: 新增 {inserted_count} 条")
+        analysis_record = build_analysis_record(summary)
+
+        if ENABLE_REMOTE_WRITE and is_remote_write_configured():
+            remote_result = send_news(news_list)
+            inserted_count = remote_result.get('inserted', 0)
+            logger.info("Cloudflare 新闻数据库写入: 新增 %s 条", inserted_count)
+            if analysis_record:
+                send_news_analysis(analysis_record)
+        else:
+            news_init_db()
+            inserted_count = batch_insert_news(news_list)
+            logger.info(f"新闻数据库写入: 新增 {inserted_count} 条")
+            if analysis_record:
+                from db_utils import save_news_analysis
+                save_news_analysis(analysis_record)
         # 导出 Excel
         filepath = export_news(news_list, summary)
         return filepath
