@@ -1,0 +1,16 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(pip install:*)",
+      "Bash(python:*)",
+      "Bash(source:*)",
+      "Bash(ls:*)",
+      "Bash(/Users/rtw/Project/PythonProject/MyFinancialAgent/.venv/bin/python --version)",
+      "mcp__ide__getDiagnostics",
+      "Bash(python3:*)",
+      "WebFetch(domain:wallstreetcn.com)",
+      "WebFetch(domain:www.cls.cn)",
+      "WebFetch(domain:www.eastmoney.com)"
+    ]
+  }
+}
