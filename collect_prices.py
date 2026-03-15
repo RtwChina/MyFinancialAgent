@@ -9,8 +9,9 @@ from datetime import datetime, timedelta
 import pandas as pd
 import yfinance as yf
 
-from config import ALL_SYMBOLS, OUTPUT_DIR, ENABLE_REMOTE_WRITE
+from config import ALL_SYMBOLS, OUTPUT_DIR, ENABLE_REMOTE_WRITE, USE_DEMO_DATA
 from cloudflare_ingest import CloudflareIngestError, is_remote_write_configured, send_prices
+from demo_data import build_demo_prices_dataframe
 from logger_utils import get_logger
 from db_utils import init_database, batch_insert_prices
 
@@ -91,6 +92,10 @@ def fetch_stock_data(symbol: str) -> dict:
 
 def collect_all_prices() -> pd.DataFrame:
     """收集所有标的价格数据"""
+    if USE_DEMO_DATA:
+        logger.info("当前启用 demo 数据模式，直接返回预置的一周收盘价格")
+        return build_demo_prices_dataframe()
+
     all_data = []
 
     logger.info("=" * 50)

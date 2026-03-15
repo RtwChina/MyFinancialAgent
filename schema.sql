@@ -31,12 +31,19 @@ CREATE TABLE IF NOT EXISTS stock_news_raw (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     pub_date DATETIME,                 -- 新闻发布时间 (重要: 复盘时按此时间筛选)
     title TEXT,                        -- 标题
-    summary TEXT,                      -- 概述
     content TEXT,                      -- 正文
     url TEXT,                          -- 链接
     source TEXT,                       -- 来源: sina/cls_cn/jin10/yahoo_finance
-    type TEXT,                         -- 类型: 0=重大新闻, 1=标的相关新闻
+    type TEXT,                         -- 类型: macro/market/symbol
+    rule_passed INTEGER DEFAULT 0,     -- 是否通过规则初筛
+    rule_score REAL DEFAULT 0,         -- 规则打分
+    rule_reason TEXT,                  -- 规则保留原因
+    processing_status TEXT DEFAULT 'rule_screened', -- 状态: rule_screened/llm_processed/llm_discarded/reviewed
     ai_summary TEXT,                   -- AI总结 (LLM对单条新闻的总结)
+    market_impact TEXT,                -- 对市场影响概述
+    importance_stars INTEGER DEFAULT 0, -- 重要程度星级: 0-5
+    related_symbols TEXT,              -- 归属标的列表(JSON)
+    is_relevant_to_review INTEGER DEFAULT 0, -- 是否建议纳入复盘
     news_hash TEXT,                    -- 唯一标识 (用于去重)
     captured_at DATETIME,              -- 数据保存时间 (脚本采集时间)
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,  -- 记录创建时间
@@ -47,35 +54,28 @@ CREATE TABLE IF NOT EXISTS stock_news_raw (
 -- 表 C：复盘存档表
 -- ============================================================
 CREATE TABLE IF NOT EXISTS stock_archive (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    archive_date TEXT NOT NULL,        -- 复盘日期
-    review_status TEXT NOT NULL DEFAULT 'draft', -- 状态: draft/completed
-    hist_price_level TEXT,             -- 历史价位复盘
-    news_summary TEXT,                 -- 新闻总结
+    archive_date TEXT PRIMARY KEY,     -- 复盘日期
+    review_status TEXT NOT NULL DEFAULT 'draft', -- 状态: draft/reviewed/deleted
+    news_brief TEXT,                  -- 新闻汇总（可编辑）
+    selected_news_ids TEXT,           -- 复盘时勾选的重点新闻 ID 列表(JSON)
     market_sentiment TEXT,             -- 大盘流动性追踪
     sector_rotation TEXT,              -- 大宗商品与板块轮动
     asset_plan TEXT,                   -- 个股与资产操作计划
-    custom_notes TEXT,                 -- 自定义补充内容
     trading_summary TEXT,              -- 深度思考与交易总结
-    source_snapshot_json TEXT,         -- 页面回填的源数据快照
-    carry_forward_from_date TEXT,      -- 回填参考来源日期
     reviewed_at DATETIME,              -- 完成复盘时间
-    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-    UNIQUE(archive_date)
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
 );
 
 -- ============================================================
 -- 表 D：新闻分析结果表 (LLM 筛选的重大新闻)
 -- ============================================================
 CREATE TABLE IF NOT EXISTS news_analysis (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    analysis_date TEXT NOT NULL,       -- 分析日期 (YYYY-MM-DD)
+    analysis_date TEXT PRIMARY KEY,    -- 分析日期 (YYYY-MM-DD)
     global_news TEXT,                  -- 全球重大新闻 (LLM筛选)
     market_news TEXT,                  -- 股票市场重大新闻 (LLM筛选)
+    symbol_news TEXT,                  -- 标的相关新闻
     market_analysis TEXT,              -- 市场分析摘要
-    raw_summary TEXT,                  -- LLM原始输出
-    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
 );
 
 -- ============================================================
@@ -86,7 +86,9 @@ CREATE INDEX IF NOT EXISTS idx_stock_raw_symbol ON stock_raw(symbol);
 CREATE INDEX IF NOT EXISTS idx_stock_news_pub_date ON stock_news_raw(pub_date);
 CREATE INDEX IF NOT EXISTS idx_stock_news_source ON stock_news_raw(source);
 CREATE INDEX IF NOT EXISTS idx_stock_news_type ON stock_news_raw(type);
+CREATE INDEX IF NOT EXISTS idx_stock_news_rule_passed ON stock_news_raw(rule_passed);
+CREATE INDEX IF NOT EXISTS idx_stock_news_status ON stock_news_raw(processing_status);
+CREATE INDEX IF NOT EXISTS idx_stock_news_relevant ON stock_news_raw(is_relevant_to_review);
 CREATE INDEX IF NOT EXISTS idx_stock_archive_date ON stock_archive(archive_date);
-CREATE UNIQUE INDEX IF NOT EXISTS idx_stock_archive_unique_date ON stock_archive(archive_date);
 CREATE INDEX IF NOT EXISTS idx_stock_archive_status_date ON stock_archive(review_status, archive_date);
 CREATE INDEX IF NOT EXISTS idx_news_analysis_date ON news_analysis(analysis_date);

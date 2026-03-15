@@ -1,7 +1,12 @@
--- Cloudflare D1 初始化脚本
--- 与根目录 schema.sql 保持一致
+-- 远端 D1 全量重建脚本。
+-- 按当前精简 schema 删除旧表并重建，顺手清掉历史脏数据。
 
-CREATE TABLE IF NOT EXISTS stock_raw (
+DROP TABLE IF EXISTS news_analysis;
+DROP TABLE IF EXISTS stock_archive;
+DROP TABLE IF EXISTS stock_news_raw;
+DROP TABLE IF EXISTS stock_raw;
+
+CREATE TABLE stock_raw (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     k_date TEXT NOT NULL,
     stock_code TEXT,
@@ -15,7 +20,7 @@ CREATE TABLE IF NOT EXISTS stock_raw (
     UNIQUE(k_date, symbol)
 );
 
-CREATE TABLE IF NOT EXISTS stock_news_raw (
+CREATE TABLE stock_news_raw (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     pub_date DATETIME,
     title TEXT,
@@ -38,7 +43,7 @@ CREATE TABLE IF NOT EXISTS stock_news_raw (
     UNIQUE(news_hash)
 );
 
-CREATE TABLE IF NOT EXISTS stock_archive (
+CREATE TABLE stock_archive (
     archive_date TEXT PRIMARY KEY,
     review_status TEXT NOT NULL DEFAULT 'draft',
     news_brief TEXT,
@@ -51,7 +56,7 @@ CREATE TABLE IF NOT EXISTS stock_archive (
     updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
 );
 
-CREATE TABLE IF NOT EXISTS news_analysis (
+CREATE TABLE news_analysis (
     analysis_date TEXT PRIMARY KEY,
     global_news TEXT,
     market_news TEXT,
@@ -60,14 +65,14 @@ CREATE TABLE IF NOT EXISTS news_analysis (
     updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
 );
 
-CREATE INDEX IF NOT EXISTS idx_stock_raw_date ON stock_raw(k_date);
-CREATE INDEX IF NOT EXISTS idx_stock_raw_symbol ON stock_raw(symbol);
-CREATE INDEX IF NOT EXISTS idx_stock_news_pub_date ON stock_news_raw(pub_date);
-CREATE INDEX IF NOT EXISTS idx_stock_news_source ON stock_news_raw(source);
-CREATE INDEX IF NOT EXISTS idx_stock_news_type ON stock_news_raw(type);
-CREATE INDEX IF NOT EXISTS idx_stock_news_rule_passed ON stock_news_raw(rule_passed);
-CREATE INDEX IF NOT EXISTS idx_stock_news_status ON stock_news_raw(processing_status);
-CREATE INDEX IF NOT EXISTS idx_stock_news_relevant ON stock_news_raw(is_relevant_to_review);
-CREATE INDEX IF NOT EXISTS idx_stock_archive_date ON stock_archive(archive_date);
-CREATE INDEX IF NOT EXISTS idx_stock_archive_status_date ON stock_archive(review_status, archive_date);
-CREATE INDEX IF NOT EXISTS idx_news_analysis_date ON news_analysis(analysis_date);
+CREATE INDEX idx_stock_raw_date ON stock_raw(k_date);
+CREATE INDEX idx_stock_raw_symbol ON stock_raw(symbol);
+CREATE INDEX idx_stock_news_pub_date ON stock_news_raw(pub_date);
+CREATE INDEX idx_stock_news_source ON stock_news_raw(source);
+CREATE INDEX idx_stock_news_type ON stock_news_raw(type);
+CREATE INDEX idx_stock_news_rule_passed ON stock_news_raw(rule_passed);
+CREATE INDEX idx_stock_news_status ON stock_news_raw(processing_status);
+CREATE INDEX idx_stock_news_relevant ON stock_news_raw(is_relevant_to_review);
+CREATE INDEX idx_stock_archive_date ON stock_archive(archive_date);
+CREATE INDEX idx_stock_archive_status_date ON stock_archive(review_status, archive_date);
+CREATE INDEX idx_news_analysis_date ON news_analysis(analysis_date);

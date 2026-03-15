@@ -2,6 +2,7 @@
 数据库工具模块 - 支持 SQLite 本地开发和 Cloudflare D1
 """
 import os
+import json
 import hashlib
 import sqlite3
 from datetime import datetime
@@ -34,8 +35,6 @@ def init_database(db_path: str = None):
     conn = get_db_connection(db_path)
     cursor = conn.cursor()
 
-    _migrate_legacy_tables(conn)
-
     # 读取 schema.sql
     schema_path = os.path.join(os.path.dirname(__file__), 'schema.sql')
     with open(schema_path, 'r', encoding='utf-8') as f:
@@ -49,33 +48,13 @@ def init_database(db_path: str = None):
     logger.info(f"数据库初始化完成: {db_path or LOCAL_DB_PATH}")
 
 
-def _migrate_legacy_tables(conn: sqlite3.Connection):
-    """在老的本地 SQLite 上补齐新 schema 需要的列"""
-    cursor = conn.cursor()
-    cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='stock_archive'")
-    if not cursor.fetchone():
-        return
-
-    cursor.execute("PRAGMA table_info(stock_archive)")
-    existing_columns = {row[1] for row in cursor.fetchall()}
-    required_columns = {
-        "review_status": "TEXT NOT NULL DEFAULT 'draft'",
-        "custom_notes": "TEXT",
-        "source_snapshot_json": "TEXT",
-        "carry_forward_from_date": "TEXT",
-        "reviewed_at": "DATETIME",
-        "updated_at": "DATETIME DEFAULT CURRENT_TIMESTAMP",
-    }
-
-    for column_name, column_type in required_columns.items():
-        if column_name not in existing_columns:
-            cursor.execute(f"ALTER TABLE stock_archive ADD COLUMN {column_name} {column_type}")
-
-    cursor.execute(
-        "CREATE UNIQUE INDEX IF NOT EXISTS idx_stock_archive_unique_date ON stock_archive(archive_date)"
-    )
-
-    conn.commit()
+def rebuild_database(db_path: str = None):
+    """删除本地 SQLite 并按最新 schema 重建"""
+    target_path = db_path or LOCAL_DB_PATH
+    if os.path.exists(target_path):
+        os.remove(target_path)
+        logger.info("已删除旧数据库: %s", target_path)
+    init_database(target_path)
 
 
 def generate_news_hash(title: str, content: str, pub_date: str = None) -> str:
@@ -154,7 +133,7 @@ def get_price_by_date(k_date: str, db_path: str = None) -> List[Dict]:
 
 # ========== 新闻数据操作 ==========
 
-def insert_news_data(data: Dict[str, Any], db_path: str = None) -> bool:
+def upsert_news_data(data: Dict[str, Any], db_path: str = None) -> str:
     """
     插入新闻数据，使用 news_hash 去重
 
@@ -175,48 +154,92 @@ def insert_news_data(data: Dict[str, Any], db_path: str = None) -> bool:
         conn = get_db_connection(db_path)
         cursor = conn.cursor()
 
-        # 生成 hash
         news_hash = generate_news_hash(
             data.get('title'),
             data.get('content'),
             pub_date
         )
+        cursor.execute(
+            'SELECT id FROM stock_news_raw WHERE news_hash = ?',
+            (news_hash,)
+        )
+        existing = cursor.fetchone()
+        related_symbols = data.get('related_symbols')
+        if isinstance(related_symbols, (list, tuple)):
+            related_symbols = json.dumps(list(related_symbols), ensure_ascii=False)
 
         cursor.execute('''
-            INSERT OR IGNORE INTO stock_news_raw
-            (pub_date, title, summary, content, url, source, type, ai_summary, news_hash, captured_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            INSERT INTO stock_news_raw
+            (
+                pub_date, title, content, url, source, type,
+                rule_passed, rule_score, rule_reason, processing_status, ai_summary, market_impact,
+                importance_stars, related_symbols, is_relevant_to_review, news_hash, captured_at
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(news_hash) DO UPDATE SET
+                pub_date = excluded.pub_date,
+                title = excluded.title,
+                content = excluded.content,
+                url = excluded.url,
+                source = excluded.source,
+                type = excluded.type,
+                rule_passed = excluded.rule_passed,
+                rule_score = excluded.rule_score,
+                rule_reason = excluded.rule_reason,
+                processing_status = excluded.processing_status,
+                ai_summary = excluded.ai_summary,
+                market_impact = excluded.market_impact,
+                importance_stars = excluded.importance_stars,
+                related_symbols = excluded.related_symbols,
+                is_relevant_to_review = excluded.is_relevant_to_review,
+                captured_at = excluded.captured_at
         ''', (
             pub_date,
             data.get('title'),
-            data.get('summary'),
             data.get('content'),
             data.get('url'),
             data.get('source'),
-            data.get('type', '0'),  # 默认重大新闻
+            data.get('type', 'market'),
+            1 if data.get('rule_passed') else 0,
+            data.get('rule_score', 0),
+            data.get('rule_reason'),
+            data.get('processing_status', 'rule_screened'),
             data.get('ai_summary'),
+            data.get('market_impact'),
+            data.get('importance_stars', 0),
+            related_symbols,
+            1 if data.get('is_relevant_to_review', True) else 0,
             news_hash,
             datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
         ))
 
-        inserted = cursor.rowcount > 0
         conn.commit()
         conn.close()
-
-        return inserted
+        return "inserted" if not existing else "updated"
 
     except Exception as e:
         logger.error(f"插入新闻数据失败: {str(e)}")
-        return False
+        return "ignored"
+
+
+def insert_news_data(data: Dict[str, Any], db_path: str = None) -> bool:
+    """兼容旧调用，保留布尔返回"""
+    return upsert_news_data(data, db_path) == "inserted"
+
+
+def upsert_news_batch(news_list: List[Dict[str, Any]], db_path: str = None) -> Dict[str, int]:
+    """批量写入新闻数据，返回新增/更新统计"""
+    stats = {"inserted": 0, "updated": 0, "ignored": 0}
+    for news in news_list:
+        result = upsert_news_data(news, db_path)
+        stats[result] = stats.get(result, 0) + 1
+    return stats
 
 
 def batch_insert_news(news_list: List[Dict[str, Any]], db_path: str = None) -> int:
-    """批量插入新闻数据，返回成功插入的数量"""
-    inserted_count = 0
-    for news in news_list:
-        if insert_news_data(news, db_path):
-            inserted_count += 1
-    return inserted_count
+    """兼容旧调用，返回新增+更新数量"""
+    stats = upsert_news_batch(news_list, db_path)
+    return stats["inserted"] + stats["updated"]
 
 
 def get_news_by_date_range(start_time: datetime, end_time: datetime, db_path: str = None) -> List[Dict]:
@@ -250,37 +273,30 @@ def save_archive(data: Dict[str, Any], db_path: str = None) -> bool:
         cursor.execute('''
             INSERT INTO stock_archive
             (
-                archive_date, review_status, hist_price_level, news_summary,
-                market_sentiment, sector_rotation, asset_plan, custom_notes,
-                trading_summary, source_snapshot_json, carry_forward_from_date,
+                archive_date, review_status, news_brief, selected_news_ids, market_sentiment,
+                sector_rotation, asset_plan, trading_summary,
                 reviewed_at, updated_at
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(archive_date) DO UPDATE SET
                 review_status = excluded.review_status,
-                hist_price_level = excluded.hist_price_level,
-                news_summary = excluded.news_summary,
+                news_brief = excluded.news_brief,
+                selected_news_ids = excluded.selected_news_ids,
                 market_sentiment = excluded.market_sentiment,
                 sector_rotation = excluded.sector_rotation,
                 asset_plan = excluded.asset_plan,
-                custom_notes = excluded.custom_notes,
                 trading_summary = excluded.trading_summary,
-                source_snapshot_json = excluded.source_snapshot_json,
-                carry_forward_from_date = excluded.carry_forward_from_date,
                 reviewed_at = excluded.reviewed_at,
                 updated_at = excluded.updated_at
         ''', (
             data.get('archive_date'),
             data.get('review_status', 'draft'),
-            data.get('hist_price_level'),
-            data.get('news_summary'),
+            data.get('news_brief'),
+            data.get('selected_news_ids'),
             data.get('market_sentiment'),
             data.get('sector_rotation'),
             data.get('asset_plan'),
-            data.get('custom_notes'),
             data.get('trading_summary'),
-            data.get('source_snapshot_json'),
-            data.get('carry_forward_from_date'),
             data.get('reviewed_at'),
             data.get('updated_at', datetime.now().strftime('%Y-%m-%d %H:%M:%S')),
         ))
@@ -292,6 +308,80 @@ def save_archive(data: Dict[str, Any], db_path: str = None) -> bool:
 
     except Exception as e:
         logger.error(f"保存复盘记录失败: {str(e)}")
+        return False
+
+
+def initialize_archive_record(archive_date: str, db_path: str = None) -> bool:
+    """初始化复盘记录。
+
+    只保留日期和 initialized 状态；如果该日期已经 reviewed，则不覆盖。
+    """
+    try:
+        conn = get_db_connection(db_path)
+        cursor = conn.cursor()
+        now = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+
+        cursor.execute(
+            'SELECT review_status FROM stock_archive WHERE archive_date = ?',
+            (archive_date,),
+        )
+        row = cursor.fetchone()
+        existing_status = row['review_status'] if row else None
+        if existing_status == 'reviewed':
+            conn.close()
+            return True
+
+        cursor.execute('''
+            INSERT INTO stock_archive
+            (
+                archive_date, review_status, news_brief, selected_news_ids, market_sentiment,
+                sector_rotation, asset_plan, trading_summary, reviewed_at, updated_at
+            )
+            VALUES (?, 'initialized', '', '[]', '', '', '', '', NULL, ?)
+            ON CONFLICT(archive_date) DO UPDATE SET
+                review_status = CASE
+                    WHEN stock_archive.review_status = 'reviewed' THEN stock_archive.review_status
+                    ELSE 'initialized'
+                END,
+                news_brief = CASE
+                    WHEN stock_archive.review_status = 'reviewed' THEN stock_archive.news_brief
+                    ELSE ''
+                END,
+                selected_news_ids = CASE
+                    WHEN stock_archive.review_status = 'reviewed' THEN stock_archive.selected_news_ids
+                    ELSE '[]'
+                END,
+                market_sentiment = CASE
+                    WHEN stock_archive.review_status = 'reviewed' THEN stock_archive.market_sentiment
+                    ELSE ''
+                END,
+                sector_rotation = CASE
+                    WHEN stock_archive.review_status = 'reviewed' THEN stock_archive.sector_rotation
+                    ELSE ''
+                END,
+                asset_plan = CASE
+                    WHEN stock_archive.review_status = 'reviewed' THEN stock_archive.asset_plan
+                    ELSE ''
+                END,
+                trading_summary = CASE
+                    WHEN stock_archive.review_status = 'reviewed' THEN stock_archive.trading_summary
+                    ELSE ''
+                END,
+                reviewed_at = CASE
+                    WHEN stock_archive.review_status = 'reviewed' THEN stock_archive.reviewed_at
+                    ELSE NULL
+                END,
+                updated_at = excluded.updated_at
+        ''', (
+            archive_date,
+            now,
+        ))
+
+        conn.commit()
+        conn.close()
+        return True
+    except Exception as e:
+        logger.error(f"初始化复盘记录失败: {str(e)}")
         return False
 
 
@@ -319,29 +409,23 @@ def save_news_analysis(data: Dict[str, Any], db_path: str = None) -> bool:
         conn = get_db_connection(db_path)
         cursor = conn.cursor()
 
-        # 确保表存在
-        cursor.execute('''
-            CREATE TABLE IF NOT EXISTS news_analysis (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                analysis_date TEXT NOT NULL,
-                global_news TEXT,
-                market_news TEXT,
-                market_analysis TEXT,
-                raw_summary TEXT,
-                created_at DATETIME DEFAULT CURRENT_TIMESTAMP
-            )
-        ''')
-
         cursor.execute('''
             INSERT INTO news_analysis
-            (analysis_date, global_news, market_news, market_analysis, raw_summary)
-            VALUES (?, ?, ?, ?, ?)
+            (analysis_date, global_news, market_news, symbol_news, market_analysis, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?)
+            ON CONFLICT(analysis_date) DO UPDATE SET
+                global_news = excluded.global_news,
+                market_news = excluded.market_news,
+                symbol_news = excluded.symbol_news,
+                market_analysis = excluded.market_analysis,
+                updated_at = excluded.updated_at
         ''', (
             data.get('analysis_date'),
             data.get('global_news'),
             data.get('market_news'),
+            data.get('symbol_news'),
             data.get('market_analysis'),
-            data.get('raw_summary'),
+            datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
         ))
 
         conn.commit()
@@ -362,7 +446,12 @@ def get_news_analysis_by_date(analysis_date: str, db_path: str = None) -> Option
 
     try:
         cursor.execute(
-            'SELECT * FROM news_analysis WHERE analysis_date = ? ORDER BY id DESC LIMIT 1',
+            '''
+            SELECT *
+            FROM news_analysis
+            WHERE analysis_date = ?
+            LIMIT 1
+            ''',
             (analysis_date,)
         )
         row = cursor.fetchone()
