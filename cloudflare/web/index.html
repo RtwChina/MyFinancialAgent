@@ -9,156 +9,137 @@
   <body>
     <div class="shell">
       <header class="hero">
-        <div class="hero-copy-block">
-          <p class="eyebrow">Cloudflare Review Console</p>
-          <h1>股票复盘与新闻总览台</h1>
-          <p class="hero-copy">
-            用一块更清晰的浅色研究台，把新闻总览、标的归属和每日复盘串成同一套工作流。
-          </p>
-          <div class="hero-ribbon">
-            <span>News Explorer</span>
-            <span>Review Workspace</span>
-            <span>D1 Live Data</span>
-          </div>
-          <nav class="top-nav">
-            <button class="nav-chip active" data-view="news">News Explorer</button>
-            <button class="nav-chip" data-view="reviews">Review Workspace</button>
-          </nav>
-        </div>
-        <div class="hero-card">
-          <div class="hero-stat">
-            <span>当前模式</span>
-            <strong>私有研究工作台</strong>
-          </div>
-          <div class="hero-stat">
-            <span>数据源</span>
-            <strong>D1 + Workers</strong>
-          </div>
+        <div class="hero-surface">
+            <section class="hero-insight-card">
+            <div class="hero-insight-head">
+              <div class="hero-insight-meta">
+                <button id="dailyInsightToggle" type="button" class="hero-insight-label">每日一句</button>
+                <strong id="dailyInsightCategory">投资心态建设</strong>
+              </div>
+            </div>
+            <p id="dailyInsightSummary" class="hero-insight-summary">正在准备今天的内容...</p>
+          </section>
+          <section class="workspace-strip">
+            <nav class="top-nav">
+              <button class="nav-chip active" data-view="reviews">复盘工作台</button>
+              <button class="nav-chip" data-view="news">新闻检索</button>
+              <button class="nav-chip" data-view="symbols">标的管理</button>
+            </nav>
+            <div class="hero-env-inline">
+              <span>当前环境</span>
+              <strong id="heroEnvironmentText" class="hero-env-value">读取中...</strong>
+            </div>
+          </section>
         </div>
       </header>
 
       <main>
-        <section id="newsView" class="view active">
-          <div class="news-layout">
-            <section class="panel news-filter-panel">
-              <div class="panel-header">
-                <div>
-                  <h2>新闻检索台</h2>
-                  <p class="toolbar-caption">先搜关键词，再用横向条件缩小范围。</p>
-                </div>
+        <section id="newsView" class="view">
+          <section class="panel news-panel">
+            <div class="panel-header">
+              <div>
+                <h2>新闻检索台</h2>
+                <p class="toolbar-caption">先搜关键词，再用横向条件缩小范围。</p>
+              </div>
+              <div class="panel-header-meta">
+                <span id="newsSummary" class="muted">加载中...</span>
                 <button id="refreshNewsBtn" class="ghost">刷新</button>
               </div>
-              <form id="newsFiltersForm" class="news-toolbar">
-                <div class="news-toolbar-main">
-                  <label class="search-field">
-                    <span>关键词</span>
-                    <input type="search" name="keyword" placeholder="搜索标题、摘要、正文…" autocomplete="off" />
-                  </label>
-                  <div class="action-row toolbar-actions">
-                    <button type="submit">搜索新闻</button>
-                    <button type="button" id="resetNewsFiltersBtn" class="ghost">清空</button>
-                  </div>
-                </div>
-                <div class="news-toolbar-secondary">
-                  <label>
-                    <span>开始日期</span>
-                    <input type="date" name="dateFrom" />
-                  </label>
-                  <label>
-                    <span>结束日期</span>
-                    <input type="date" name="dateTo" />
-                  </label>
-                  <label>
-                    <span>来源</span>
-                    <select name="source">
-                      <option value="">全部来源</option>
-                      <option value="sina">新浪</option>
-                      <option value="cls_cn">财联社</option>
-                      <option value="jin10">金十</option>
-                      <option value="yahoo_finance">Yahoo Finance</option>
-                    </select>
-                  </label>
-                  <label>
-                    <span>类型</span>
-                    <select name="type">
-                      <option value="major" selected>重大事件</option>
-                      <option value="">全部类型</option>
-                      <option value="macro">宏观</option>
-                      <option value="symbol">标的</option>
-                    </select>
-                  </label>
-                  <label>
-                    <span>标的</span>
-                    <select name="symbol">
-                      <option value="">全部标的</option>
-                      <option value="MU">MU</option>
-                      <option value="LITE">LITE</option>
-                      <option value="MSFT">MSFT</option>
-                      <option value="GOOGL">GOOGL</option>
-                      <option value="^VIX">^VIX</option>
-                      <option value="^HSI">^HSI</option>
-                      <option value="^GSPC">^GSPC</option>
-                      <option value="000001.SS">000001.SS</option>
-                      <option value="DX-Y.NYB">DX-Y.NYB</option>
-                      <option value="GC=F">GC=F</option>
-                    </select>
-                  </label>
-                  <fieldset class="star-filter-group">
-                    <legend>星级</legend>
-                    <label class="star-check"><input type="checkbox" name="stars" value="3" checked /> 3星</label>
-                    <label class="star-check"><input type="checkbox" name="stars" value="4" checked /> 4星</label>
-                    <label class="star-check"><input type="checkbox" name="stars" value="5" checked /> 5星</label>
-                    <label class="star-check"><input type="checkbox" name="stars" value="2" /> 2星</label>
-                    <label class="star-check"><input type="checkbox" name="stars" value="1" /> 1星</label>
-                  </fieldset>
-                </div>
-              </form>
-            </section>
-
-            <div id="newsContent" class="news-content">
-              <section class="panel news-list-panel">
-                <div class="panel-header">
-                  <h2>新闻列表</h2>
-                  <span id="newsSummary" class="muted">加载中...</span>
-                </div>
-                <div class="news-table-wrap">
-                  <table class="news-table">
-                    <thead>
-                      <tr>
-                        <th>发布时间</th>
-                        <th>AI 摘要</th>
-                        <th>正文</th>
-                        <th>标签</th>
-                        <th>操作</th>
-                      </tr>
-                    </thead>
-                    <tbody id="newsList"></tbody>
-                  </table>
-                </div>
-              </section>
             </div>
-          </div>
+            <form id="newsFiltersForm" class="news-toolbar">
+              <div class="news-toolbar-main">
+                <label class="search-field">
+                  <span>关键词</span>
+                  <input type="search" name="keyword" placeholder="搜索标题、摘要、正文…" autocomplete="off" />
+                </label>
+                <div class="action-row toolbar-actions">
+                  <button type="submit">搜索新闻</button>
+                  <button type="button" id="resetNewsFiltersBtn" class="ghost">清空</button>
+                </div>
+              </div>
+              <div class="news-toolbar-secondary">
+                <label>
+                  <span>开始日期</span>
+                  <input type="date" name="dateFrom" />
+                </label>
+                <label>
+                  <span>结束日期</span>
+                  <input type="date" name="dateTo" />
+                </label>
+                <label>
+                  <span>来源</span>
+                  <select name="source">
+                    <option value="">全部来源</option>
+                    <option value="sina">新浪</option>
+                    <option value="cls_cn">财联社</option>
+                    <option value="jin10">金十</option>
+                    <option value="yahoo_finance">Yahoo Finance</option>
+                  </select>
+                </label>
+                <label>
+                  <span>类型</span>
+                  <select name="type">
+                    <option value="" selected>全部类型</option>
+                    <option value="index">大盘</option>
+                    <option value="sector">板块</option>
+                    <option value="stock">个股</option>
+                  </select>
+                </label>
+                <label>
+                  <span>标的</span>
+                  <select name="symbol">
+                    <option value="">全部标的</option>
+                    <option value="MU">MU</option>
+                    <option value="LITE">LITE</option>
+                    <option value="MSFT">MSFT</option>
+                    <option value="GOOGL">GOOGL</option>
+                    <option value="^VIX">^VIX</option>
+                    <option value="^HSI">^HSI</option>
+                    <option value="^GSPC">^GSPC</option>
+                    <option value="000001.SS">000001.SS</option>
+                    <option value="DX-Y.NYB">DX-Y.NYB</option>
+                    <option value="GC=F">GC=F</option>
+                  </select>
+                </label>
+                <label>
+                  <span>星级</span>
+                  <select name="starsMin">
+                    <option value="3" selected>3星及以上</option>
+                    <option value="5">仅 5星</option>
+                    <option value="4">4星及以上</option>
+                    <option value="2">2星及以上</option>
+                    <option value="">全部星级</option>
+                  </select>
+                </label>
+              </div>
+            </form>
+            <div id="newsContent" class="news-content">
+              <div class="news-table-wrap">
+                <table class="news-table">
+                  <thead>
+                    <tr>
+                      <th>发布时间</th>
+                      <th id="newsAiHeader">AI 摘要</th>
+                      <th>正文</th>
+                      <th>标签</th>
+                      <th>操作</th>
+                    </tr>
+                  </thead>
+                  <tbody id="newsList"></tbody>
+                </table>
+              </div>
+            </div>
+          </section>
         </section>
 
-        <section id="reviewsView" class="view">
+        <section id="reviewsView" class="view active">
           <div class="review-layout">
-            <section class="panel wide">
-              <div class="panel-header">
-                <div>
-                  <h2>待复盘日期</h2>
-                  <p id="pendingState" class="muted">加载中...</p>
-                </div>
-                <button id="refreshPendingBtn" class="ghost">刷新</button>
-              </div>
-              <div id="pendingRibbon" class="pending-ribbon"></div>
-            </section>
-
             <section class="panel wide">
               <div class="panel-header">
                 <h2>全量复盘列表</h2>
                 <button id="refreshReviewsBtn" class="ghost">刷新</button>
               </div>
-              <form id="filtersForm" class="filters">
+              <form id="filtersForm" class="filters review-filters">
                 <label>
                   状态
                   <select name="status">
@@ -176,15 +157,13 @@
                   结束日期
                   <input type="date" name="to" />
                 </label>
-                <button type="submit">查询</button>
+                <button type="submit" class="secondary compact-button">查询</button>
               </form>
               <div class="review-table-wrap">
                 <table class="review-table">
                   <thead>
                     <tr>
                       <th>复盘日</th>
-                      <th>北京时间周期</th>
-                      <th>新闻汇总</th>
                       <th>大盘盘点</th>
                       <th>板块轮动</th>
                       <th>操作计划</th>
@@ -197,6 +176,52 @@
               </div>
             </section>
           </div>
+        </section>
+        <section id="symbolsView" class="view">
+          <section class="panel symbols-panel">
+            <div class="panel-header">
+              <div>
+                <h2>标的管理</h2>
+                <p class="toolbar-caption">智能输入股票名称或代码，AI 自动识别 Yahoo 代码、显示名称和类型。</p>
+              </div>
+              <div class="panel-header-meta">
+                <button id="refreshSymbolsBtn" class="ghost">刷新</button>
+              </div>
+            </div>
+            <div class="symbols-add-bar">
+              <label class="search-field symbols-input-field">
+                <span>添加标的</span>
+                <input type="text" id="symbolResolveInput" placeholder="输入名称或代码，如：英伟达、NVDA、半导体ETF…" autocomplete="off" />
+              </label>
+              <div class="action-row">
+                <button id="symbolResolveBtn" type="button">智能解析</button>
+                <button id="symbolManualAddBtn" type="button" class="ghost">手动添加</button>
+              </div>
+            </div>
+            <div id="symbolResolvePreview" class="symbol-resolve-preview hidden"></div>
+            <div id="symbolsContent" class="symbols-content">
+              <div class="symbols-table-wrap">
+                <table class="symbols-table">
+                  <thead>
+                    <tr>
+                      <th class="symbol-col-drag"></th>
+                      <th>显示名称</th>
+                      <th>代码</th>
+                      <th>类型</th>
+                      <th>新闻匹配别名</th>
+                      <th></th>
+                    </tr>
+                  </thead>
+                  <tbody class="symbols-section-head"><tr><td colspan="6" class="symbols-section-label type-index">大盘 / 指数</td></tr></tbody>
+                  <tbody id="symbolsIndexList"></tbody>
+                  <tbody class="symbols-section-head"><tr><td colspan="6" class="symbols-section-label type-sector">板块 / ETF</td></tr></tbody>
+                  <tbody id="symbolsSectorList"></tbody>
+                  <tbody class="symbols-section-head"><tr><td colspan="6" class="symbols-section-label type-stock">个股</td></tr></tbody>
+                  <tbody id="symbolsStockList"></tbody>
+                </table>
+              </div>
+            </div>
+          </section>
         </section>
       </main>
     </div>
@@ -224,8 +249,8 @@
               <p id="newsDetailImpact"></p>
             </div>
           </div>
-          <div id="newsDetailOriginalBlock" class="detail-note">
-            <span>原始标题</span>
+          <div id="newsDetailOriginalBlock" class="detail-block detail-original-block">
+            <strong>原始标题</strong>
             <p id="newsDetailSummary"></p>
           </div>
           <div class="detail-block detail-content-block">
@@ -242,33 +267,34 @@
     <aside id="reviewDrawer" class="review-modal hidden">
       <div class="review-modal-backdrop" id="closeDrawerBackdrop"></div>
       <div class="review-modal-panel">
-        <div class="panel-header">
-          <div>
-            <h2 id="editorTitle">当日复盘</h2>
-            <p id="drawerSubtitle" class="muted">按步骤完成当天复盘。收盘任务会先初始化记录，后续可继续填写并标记已复盘。</p>
-          </div>
-          <div class="action-row">
-            <div id="reviewActionGroup" class="action-row">
-              <button id="saveDraftBtn">保存</button>
-              <button id="initializeBtn" class="danger">重新初始化</button>
+        <div class="panel-header review-panel-header">
+          <section class="review-hero-strip review-hero-compact">
+            <div class="review-hero-top">
+              <div class="review-identity-compact">
+                <span id="editorTitle" class="eyebrow">当日复盘</span>
+                <strong id="archiveDateLabel">-</strong>
+              </div>
+              <div class="action-row review-header-actions">
+                <div id="reviewActionGroup" class="action-row">
+                  <button id="saveDraftBtn">保存</button>
+                  <button id="initializeBtn" class="ghost">编辑</button>
+                </div>
+                <button id="closeDrawerBtn" class="ghost">关闭</button>
+              </div>
             </div>
-            <button id="closeDrawerBtn" class="ghost">关闭</button>
-          </div>
+            <div class="review-hero-bottom">
+              <div class="review-summary-line">
+                <p id="drawerSubtitle" class="muted">按步骤完成当天复盘。收盘任务会先初始化记录，后续可继续填写并标记已复盘。</p>
+                <p id="carryForwardLabel" class="muted">-</p>
+              </div>
+              <div class="review-cycle-meta">
+                <div id="reviewStatusBadge" class="status-pill">编辑中</div>
+              </div>
+            </div>
+          </section>
         </div>
 
         <div id="editorContent" class="review-modal-body">
-          <section class="review-hero-strip">
-            <div class="review-identity">
-              <span class="eyebrow">Review Date</span>
-              <strong id="archiveDateLabel">-</strong>
-              <p id="carryForwardLabel" class="muted">-</p>
-            </div>
-            <div class="review-cycle-meta">
-              <div id="reviewStatusBadge" class="status-pill">编辑中</div>
-              <small id="newsWindowBox" class="muted">-</small>
-            </div>
-          </section>
-
           <section class="review-snapshot-card">
             <div class="snapshot-head">
               <h3>当日价格</h3>
@@ -281,20 +307,17 @@
           <div id="reviewStepHint" class="review-step-hint muted"></div>
 
           <form id="reviewForm" class="review-step-form">
-            <input type="hidden" name="selectedNewsIds" value="[]" />
-
             <section class="review-step-panel" data-step="news">
               <div class="step-card">
                 <div class="snapshot-head">
-                  <h3>新闻汇总</h3>
-                  <small class="muted">重点新闻列表可勾选，新闻汇总文本可以人工覆盖。</small>
+                  <h3>新闻总结与点评</h3>
+                  <small class="muted">重点新闻默认全部纳入复盘，你只需要查看 AI 总结并写下你自己的主线判断。</small>
                 </div>
                 <div id="analysisBox" class="analysis-panel"></div>
                 <div id="newsPicker" class="news-picker"></div>
-                <div id="reviewNewsDetailBox" class="review-news-detail hidden"></div>
                 <label class="review-field wide">
-                  新闻汇总
-                  <textarea name="newsBrief" rows="4" placeholder="把当天最重要的 2-4 条新闻压成一句主线判断，最好直接说明市场影响。"></textarea>
+                  新闻总结与点评
+                  <textarea name="reviewerNewsNotes" rows="4" placeholder="基于上面的 AI 日总结和重点新闻，写下你自己的主线判断、补充观点和交易点评。"></textarea>
                 </label>
               </div>
             </section>
@@ -333,6 +356,24 @@
             <button id="nextStepBtn" type="button">下一步</button>
           </div>
         </div>
+      </div>
+    </aside>
+
+    <aside id="dailyInsightModal" class="daily-insight-modal hidden">
+      <div id="dailyInsightBackdrop" class="daily-insight-backdrop"></div>
+      <div class="daily-insight-panel">
+        <div class="panel-header daily-insight-panel-header">
+          <div>
+            <h2>每日一句全文</h2>
+            <p id="dailyInsightModalCategory" class="muted">投资心态建设</p>
+          </div>
+          <button id="closeDailyInsightBtn" class="ghost">关闭</button>
+        </div>
+        <article class="daily-insight-body">
+          <h3 id="dailyInsightModalTitle"></h3>
+          <p id="dailyInsightModalQuote" class="daily-insight-quote"></p>
+          <div id="dailyInsightModalContent" class="daily-insight-content"></div>
+        </article>
       </div>
     </aside>
 

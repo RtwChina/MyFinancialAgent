@@ -1,0 +1,105 @@
+{
+  "k_date": "2026-03-10",
+  "items": [
+    {
+      "k_date": "2026-03-10",
+      "stock_code": "SSE",
+      "stock_name": "SSE Composite Index",
+      "symbol": "SSE",
+      "current_price": 3355.4391,
+      "change_percent": 0.4,
+      "volume": 1760017000,
+      "captured_at": "2026-03-10 18:00:00"
+    },
+    {
+      "k_date": "2026-03-10",
+      "stock_code": "DXY",
+      "stock_name": "Dollar Index",
+      "symbol": "DXY",
+      "current_price": 102.5851,
+      "change_percent": -0.3,
+      "volume": 0,
+      "captured_at": "2026-03-10 18:00:00"
+    },
+    {
+      "k_date": "2026-03-10",
+      "stock_code": "GOLD",
+      "stock_name": "Gold Futures",
+      "symbol": "GOLD",
+      "current_price": 2969.6396,
+      "change_percent": 0.6,
+      "volume": 179000,
+      "captured_at": "2026-03-10 18:00:00"
+    },
+    {
+      "k_date": "2026-03-10",
+      "stock_code": "GOOGL",
+      "stock_name": "Alphabet",
+      "symbol": "GOOGL",
+      "current_price": 190.2786,
+      "change_percent": 0.7,
+      "volume": 21817000,
+      "captured_at": "2026-03-10 18:00:00"
+    },
+    {
+      "k_date": "2026-03-10",
+      "stock_code": "LITE",
+      "stock_name": "Lumentum",
+      "symbol": "LITE",
+      "current_price": 57.9142,
+      "change_percent": -0.4,
+      "volume": 3227000,
+      "captured_at": "2026-03-10 18:00:00"
+    },
+    {
+      "k_date": "2026-03-10",
+      "stock_code": "MSFT",
+      "stock_name": "Microsoft",
+      "symbol": "MSFT",
+      "current_price": 423.2493,
+      "change_percent": 1.2,
+      "volume": 25417000,
+      "captured_at": "2026-03-10 18:00:00"
+    },
+    {
+      "k_date": "2026-03-10",
+      "stock_code": "MU",
+      "stock_name": "Micron Technology",
+      "symbol": "MU",
+      "current_price": 113.1626,
+      "change_percent": 2.4,
+      "volume": 38227000,
+      "captured_at": "2026-03-10 18:00:00"
+    },
+    {
+      "k_date": "2026-03-10",
+      "stock_code": "GSPC",
+      "stock_name": "S&P 500",
+      "symbol": "GSPC",
+      "current_price": 5930.7275,
+      "change_percent": 0.7,
+      "volume": 2850017000,
+      "captured_at": "2026-03-10 18:00:00"
+    },
+    {
+      "k_date": "2026-03-10",
+      "stock_code": "HSI",
+      "stock_name": "HANG SENG INDEX",
+      "symbol": "HSI",
+      "current_price": 24151.8066,
+      "change_percent": -0.3,
+      "volume": 0,
+      "captured_at": "2026-03-10 18:00:00"
+    },
+    {
+      "k_date": "2026-03-10",
+      "stock_code": "VIX",
+      "stock_name": "CBOE Volatility Index",
+      "symbol": "VIX",
+      "current_price": 19.659,
+      "change_percent": 0.8,
+      "volume": 0,
+      "captured_at": "2026-03-10 18:00:00"
+    }
+  ]
+}

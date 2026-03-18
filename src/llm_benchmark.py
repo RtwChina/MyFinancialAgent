@@ -32,90 +32,6 @@ from config import (
 )
 from llm_client import LLMClient
 
-
-SAMPLE_NEWS: List[Dict[str, Any]] = [
-    {
-        "news_hash": "sample-1",
-        "time": "2026-03-15 09:00:00",
-        "source": "sina",
-        "title": "美联储官员暗示降息路径调整",
-        "content": "美联储官员最新讲话引发美债收益率和标普500期货波动，市场重新评估流动性预期。",
-    },
-    {
-        "news_hash": "sample-2",
-        "time": "2026-03-15 09:05:00",
-        "source": "cls_cn",
-        "title": "伊朗相关局势升级推高油价",
-        "content": "中东局势升级导致原油运输担忧升温，能源价格和全球风险偏好同步受影响。",
-    },
-    {
-        "news_hash": "sample-3",
-        "time": "2026-03-15 09:10:00",
-        "source": "jin10",
-        "title": "微软发布新 AI 产品",
-        "content": "微软发布的新 AI 产品有望提振云计算和 AI 产业链情绪，带动科技股板块关注度。",
-    },
-    {
-        "news_hash": "sample-4",
-        "time": "2026-03-15 09:15:00",
-        "source": "yahoo_finance",
-        "title": "Micron 将公布财报与资本开支计划",
-        "content": "市场关注 Micron 财报和资本开支指引，认为其将影响半导体设备与存储板块预期。",
-    },
-    {
-        "news_hash": "sample-5",
-        "time": "2026-03-15 09:20:00",
-        "source": "sina",
-        "title": "美元指数走强压制黄金",
-        "content": "美元指数短线走强，黄金价格承压，投资者重新评估避险资产配置。",
-    },
-    {
-        "news_hash": "sample-6",
-        "time": "2026-03-15 09:25:00",
-        "source": "cls_cn",
-        "title": "分析师上调某消费股目标价",
-        "content": "券商分析师上调某消费股目标价，但缺乏新的基本面信息增量。",
-    },
-]
-
-
-SAMPLE_ENHANCED_NEWS: List[Dict[str, Any]] = [
-    {
-        "news_hash": "sample-1",
-        "pub_date": "2026-03-13 10:00:00",
-        "type": "macro",
-        "importance_level": "high",
-        "primary_symbol": None,
-        "related_symbols": [],
-        "title": "美联储官员暗示降息路径调整",
-        "ai_summary": "美联储讲话引发市场对年内降息节奏重新定价。",
-        "market_impact": "利率预期波动可能影响美债收益率和成长股估值。",
-    },
-    {
-        "news_hash": "sample-2",
-        "pub_date": "2026-03-13 11:00:00",
-        "type": "market",
-        "importance_level": "high",
-        "primary_symbol": "GC=F",
-        "related_symbols": ["GC=F", "DX-Y.NYB"],
-        "title": "美元指数走强压制黄金",
-        "ai_summary": "美元走强令黄金价格承压，避险资产配置再平衡。",
-        "market_impact": "贵金属和美元相关资产短线波动加大。",
-    },
-    {
-        "news_hash": "sample-3",
-        "pub_date": "2026-03-13 13:00:00",
-        "type": "symbol",
-        "importance_level": "medium",
-        "primary_symbol": "MU",
-        "related_symbols": ["MU"],
-        "title": "Micron 将公布财报与资本开支计划",
-        "ai_summary": "市场关注美光财报和资本开支指引对半导体板块的影响。",
-        "market_impact": "若指引超预期，可能带动存储和设备链预期修复。",
-    },
-]
-
-
 @dataclass
 class RunResult:
     suite: str
@@ -143,6 +59,15 @@ llm_client = LLMClient(
 )
 
 
+def load_items_from_file(path: str) -> List[Dict[str, Any]]:
+    payload = json.loads(Path(path).read_text(encoding="utf-8"))
+    if isinstance(payload, list):
+        return payload
+    if isinstance(payload, dict) and isinstance(payload.get("items"), list):
+        return payload["items"]
+    raise ValueError(f"Unsupported benchmark input format: {path}")
+
+
 def build_structured_prompt(items: List[Dict[str, Any]], long_content: bool = False) -> str:
     if long_content:
         expanded_items = []
@@ -162,7 +87,7 @@ def build_structured_prompt(items: List[Dict[str, Any]], long_content: bool = Fa
         '      "type": "macro|market|symbol",\n'
         '      "ai_summary": "一句中文摘要",\n'
         '      "market_impact": "一句中文说明",\n'
-        '      "importance_level": "high|medium|low",\n'
+        '      "importance_stars": 3,\n'
         '      "primary_symbol": "MU 或 null",\n'
         '      "related_symbols": ["MU"]\n'
         "    }\n"
@@ -175,14 +100,19 @@ def build_structured_prompt(items: List[Dict[str, Any]], long_content: bool = Fa
 def build_daily_summary_prompt(items: List[Dict[str, Any]]) -> str:
     return (
         "请只输出 JSON。"
-        '字段必须包含 "global_news"、"market_news"、"symbol_news"、"market_analysis"。'
-        "其中前三个字段可以是字符串或字符串数组，market_analysis 必须是一段中文总结。\n\n"
+        '字段必须包含 "daily_major_events"、"sector_impact_map"、"linkage_logic_chain"。'
+        "这三个字段都可以是字符串或字符串数组，且必须适合直接展示给用户阅读。\n\n"
         f"{json.dumps({'analysis_date': '2026-03-13', 'items': items}, ensure_ascii=False)}"
     )
 
 
-def build_messages(batch_size: int, prompt_variant: str) -> List[Dict[str, str]]:
-    items = SAMPLE_NEWS[:batch_size]
+def build_messages(
+    batch_size: int,
+    prompt_variant: str,
+    structured_items: List[Dict[str, Any]],
+    summary_items: List[Dict[str, Any]],
+) -> List[Dict[str, str]]:
+    items = structured_items[:batch_size]
     if prompt_variant == "tiny_ok":
         return [
             {"role": "system", "content": "你是助手。"},
@@ -194,7 +124,7 @@ def build_messages(batch_size: int, prompt_variant: str) -> List[Dict[str, str]]
                 "role": "system",
                 "content": "你是一位金融复盘分析师，请基于输入新闻生成 JSON，总结全球、市场和标的影响。",
             },
-            {"role": "user", "content": build_daily_summary_prompt(SAMPLE_ENHANCED_NEWS[:batch_size])},
+            {"role": "user", "content": build_daily_summary_prompt(summary_items[:batch_size])},
         ]
     if prompt_variant == "structured_long":
         return [
@@ -207,10 +137,17 @@ def build_messages(batch_size: int, prompt_variant: str) -> List[Dict[str, str]]
     ]
 
 
-def build_payload(model: str, batch_size: int, stream: bool, prompt_variant: str) -> Dict[str, Any]:
+def build_payload(
+    model: str,
+    batch_size: int,
+    stream: bool,
+    prompt_variant: str,
+    structured_items: List[Dict[str, Any]],
+    summary_items: List[Dict[str, Any]],
+) -> Dict[str, Any]:
     return {
         "model": model,
-        "messages": build_messages(batch_size, prompt_variant),
+        "messages": build_messages(batch_size, prompt_variant, structured_items, summary_items),
         "max_tokens": 256,
         "temperature": 0.2,
         "stream": stream,
@@ -223,8 +160,17 @@ def call_completion(
     stream: bool,
     timeout: int = 30,
     prompt_variant: str = "structured_short",
+    structured_items: Optional[List[Dict[str, Any]]] = None,
+    summary_items: Optional[List[Dict[str, Any]]] = None,
 ) -> RunResult:
-    payload = build_payload(model, batch_size, stream, prompt_variant)
+    payload = build_payload(
+        model,
+        batch_size,
+        stream,
+        prompt_variant,
+        structured_items or [],
+        summary_items or [],
+    )
     llm_result = llm_client.call_chat(
         payload["messages"],
         log_label=f"benchmark:{model}:{prompt_variant}:batch{batch_size}",
@@ -261,12 +207,23 @@ def run_concurrency_case(
     concurrency: int,
     timeout: int = 30,
     prompt_variant: str = "structured_short",
+    structured_items: Optional[List[Dict[str, Any]]] = None,
+    summary_items: Optional[List[Dict[str, Any]]] = None,
 ) -> Dict[str, Any]:
     started = time.time()
     results: List[RunResult] = []
     with ThreadPoolExecutor(max_workers=concurrency) as executor:
         futures = [
-            executor.submit(call_completion, model, batch_size, stream, timeout, prompt_variant)
+            executor.submit(
+                call_completion,
+                model,
+                batch_size,
+                stream,
+                timeout,
+                prompt_variant,
+                structured_items or [],
+                summary_items or [],
+            )
             for _ in range(concurrency)
         ]
         for future in as_completed(futures):
@@ -293,7 +250,12 @@ def run_concurrency_case(
     }
 
 
-def run_quick_suite(models: List[str], timeout: int = 20) -> Dict[str, Any]:
+def run_quick_suite(
+    models: List[str],
+    timeout: int = 20,
+    structured_items: Optional[List[Dict[str, Any]]] = None,
+    summary_items: Optional[List[Dict[str, Any]]] = None,
+) -> Dict[str, Any]:
     report: Dict[str, Any] = {
         "generated_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
         "base_url": LLM_BASE_URL,
@@ -309,6 +271,8 @@ def run_quick_suite(models: List[str], timeout: int = 20) -> Dict[str, Any]:
                 stream=False,
                 timeout=timeout,
                 prompt_variant=prompt_variant,
+                structured_items=structured_items,
+                summary_items=summary_items,
             )
             result.suite = "model_compare"
             report["cases"].append(asdict(result))
@@ -322,6 +286,8 @@ def run_quick_suite(models: List[str], timeout: int = 20) -> Dict[str, Any]:
             stream=False,
             timeout=timeout,
             prompt_variant=prompt_variant,
+            structured_items=structured_items,
+            summary_items=summary_items,
         )
         result.suite = "prompt_length"
         report["cases"].append(asdict(result))
@@ -333,6 +299,8 @@ def run_quick_suite(models: List[str], timeout: int = 20) -> Dict[str, Any]:
             stream=False,
             timeout=timeout,
             prompt_variant="structured_short",
+            structured_items=structured_items,
+            summary_items=summary_items,
         )
         result.suite = "batch_size"
         report["cases"].append(asdict(result))
@@ -344,6 +312,8 @@ def run_quick_suite(models: List[str], timeout: int = 20) -> Dict[str, Any]:
             stream=stream,
             timeout=timeout if not stream else max(timeout, 25),
             prompt_variant="structured_short",
+            structured_items=structured_items,
+            summary_items=summary_items,
         )
         result.suite = "stream_compare"
         report["cases"].append(asdict(result))
@@ -357,6 +327,8 @@ def run_quick_suite(models: List[str], timeout: int = 20) -> Dict[str, Any]:
                 concurrency=concurrency,
                 timeout=timeout,
                 prompt_variant="structured_short",
+                structured_items=structured_items,
+                summary_items=summary_items,
             )
         )
 
@@ -439,12 +411,29 @@ def parse_args() -> argparse.Namespace:
         help="Models to compare. First is treated as baseline.",
     )
     parser.add_argument("--timeout", type=int, default=20)
+    parser.add_argument(
+        "--structured-items-file",
+        required=True,
+        help="JSON file for structured prompt benchmark input. Accepts a list or {\"items\": [...]}",
+    )
+    parser.add_argument(
+        "--summary-items-file",
+        required=True,
+        help="JSON file for daily summary benchmark input. Accepts a list or {\"items\": [...]}",
+    )
     return parser.parse_args()
 
 
 def main() -> int:
     args = parse_args()
-    report = run_quick_suite(models=args.models, timeout=args.timeout)
+    structured_items = load_items_from_file(args.structured_items_file)
+    summary_items = load_items_from_file(args.summary_items_file)
+    report = run_quick_suite(
+        models=args.models,
+        timeout=args.timeout,
+        structured_items=structured_items,
+        summary_items=summary_items,
+    )
     saved = save_report(report)
     print(json.dumps({"saved": saved}, ensure_ascii=False, indent=2))
     return 0

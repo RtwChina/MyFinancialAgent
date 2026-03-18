@@ -160,7 +160,7 @@ def upsert_news_data(data: Dict[str, Any], db_path: str = None) -> str:
             pub_date
         )
         cursor.execute(
-            'SELECT id FROM stock_news_raw WHERE news_hash = ?',
+            'SELECT id FROM news_raw_data WHERE news_hash = ?',
             (news_hash,)
         )
         existing = cursor.fetchone()
@@ -169,13 +169,13 @@ def upsert_news_data(data: Dict[str, Any], db_path: str = None) -> str:
             related_symbols = json.dumps(list(related_symbols), ensure_ascii=False)
 
         cursor.execute('''
-            INSERT INTO stock_news_raw
+            INSERT INTO news_raw_data
             (
                 pub_date, title, content, url, source, type,
-                rule_passed, rule_score, rule_reason, processing_status, ai_summary, market_impact,
+                rule_passed, rule_reason, processing_status, ai_summary, market_impact,
                 importance_stars, related_symbols, is_relevant_to_review, news_hash, captured_at
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(news_hash) DO UPDATE SET
                 pub_date = excluded.pub_date,
                 title = excluded.title,
@@ -184,7 +184,6 @@ def upsert_news_data(data: Dict[str, Any], db_path: str = None) -> str:
                 source = excluded.source,
                 type = excluded.type,
                 rule_passed = excluded.rule_passed,
-                rule_score = excluded.rule_score,
                 rule_reason = excluded.rule_reason,
                 processing_status = excluded.processing_status,
                 ai_summary = excluded.ai_summary,
@@ -201,7 +200,6 @@ def upsert_news_data(data: Dict[str, Any], db_path: str = None) -> str:
             data.get('source'),
             data.get('type', 'market'),
             1 if data.get('rule_passed') else 0,
-            data.get('rule_score', 0),
             data.get('rule_reason'),
             data.get('processing_status', 'rule_screened'),
             data.get('ai_summary'),
@@ -248,7 +246,7 @@ def get_news_by_date_range(start_time: datetime, end_time: datetime, db_path: st
     cursor = conn.cursor()
 
     cursor.execute('''
-        SELECT * FROM stock_news_raw
+        SELECT * FROM news_raw_data
         WHERE pub_date >= ? AND pub_date <= ?
         ORDER BY pub_date DESC
     ''', (
@@ -271,17 +269,16 @@ def save_archive(data: Dict[str, Any], db_path: str = None) -> bool:
         cursor = conn.cursor()
 
         cursor.execute('''
-            INSERT INTO stock_archive
+            INSERT INTO daily_review_archive
             (
-                archive_date, review_status, news_brief, selected_news_ids, market_sentiment,
+                archive_date, review_status, reviewer_news_notes, market_sentiment,
                 sector_rotation, asset_plan, trading_summary,
                 reviewed_at, updated_at
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(archive_date) DO UPDATE SET
                 review_status = excluded.review_status,
-                news_brief = excluded.news_brief,
-                selected_news_ids = excluded.selected_news_ids,
+                reviewer_news_notes = excluded.reviewer_news_notes,
                 market_sentiment = excluded.market_sentiment,
                 sector_rotation = excluded.sector_rotation,
                 asset_plan = excluded.asset_plan,
@@ -291,8 +288,7 @@ def save_archive(data: Dict[str, Any], db_path: str = None) -> bool:
         ''', (
             data.get('archive_date'),
             data.get('review_status', 'draft'),
-            data.get('news_brief'),
-            data.get('selected_news_ids'),
+            data.get('reviewer_news_notes') or data.get('news_brief'),
             data.get('market_sentiment'),
             data.get('sector_rotation'),
             data.get('asset_plan'),
@@ -322,7 +318,7 @@ def initialize_archive_record(archive_date: str, db_path: str = None) -> bool:
         now = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
 
         cursor.execute(
-            'SELECT review_status FROM stock_archive WHERE archive_date = ?',
+            'SELECT review_status FROM daily_review_archive WHERE archive_date = ?',
             (archive_date,),
         )
         row = cursor.fetchone()
@@ -332,43 +328,39 @@ def initialize_archive_record(archive_date: str, db_path: str = None) -> bool:
             return True
 
         cursor.execute('''
-            INSERT INTO stock_archive
+            INSERT INTO daily_review_archive
             (
-                archive_date, review_status, news_brief, selected_news_ids, market_sentiment,
+                archive_date, review_status, reviewer_news_notes, market_sentiment,
                 sector_rotation, asset_plan, trading_summary, reviewed_at, updated_at
             )
-            VALUES (?, 'initialized', '', '[]', '', '', '', '', NULL, ?)
+            VALUES (?, 'initialized', '', '', '', '', '', NULL, ?)
             ON CONFLICT(archive_date) DO UPDATE SET
                 review_status = CASE
-                    WHEN stock_archive.review_status = 'reviewed' THEN stock_archive.review_status
+                    WHEN daily_review_archive.review_status = 'reviewed' THEN daily_review_archive.review_status
                     ELSE 'initialized'
                 END,
-                news_brief = CASE
-                    WHEN stock_archive.review_status = 'reviewed' THEN stock_archive.news_brief
+                reviewer_news_notes = CASE
+                    WHEN daily_review_archive.review_status = 'reviewed' THEN daily_review_archive.reviewer_news_notes
                     ELSE ''
                 END,
-                selected_news_ids = CASE
-                    WHEN stock_archive.review_status = 'reviewed' THEN stock_archive.selected_news_ids
-                    ELSE '[]'
-                END,
                 market_sentiment = CASE
-                    WHEN stock_archive.review_status = 'reviewed' THEN stock_archive.market_sentiment
+                    WHEN daily_review_archive.review_status = 'reviewed' THEN daily_review_archive.market_sentiment
                     ELSE ''
                 END,
                 sector_rotation = CASE
-                    WHEN stock_archive.review_status = 'reviewed' THEN stock_archive.sector_rotation
+                    WHEN daily_review_archive.review_status = 'reviewed' THEN daily_review_archive.sector_rotation
                     ELSE ''
                 END,
                 asset_plan = CASE
-                    WHEN stock_archive.review_status = 'reviewed' THEN stock_archive.asset_plan
+                    WHEN daily_review_archive.review_status = 'reviewed' THEN daily_review_archive.asset_plan
                     ELSE ''
                 END,
                 trading_summary = CASE
-                    WHEN stock_archive.review_status = 'reviewed' THEN stock_archive.trading_summary
+                    WHEN daily_review_archive.review_status = 'reviewed' THEN daily_review_archive.trading_summary
                     ELSE ''
                 END,
                 reviewed_at = CASE
-                    WHEN stock_archive.review_status = 'reviewed' THEN stock_archive.reviewed_at
+                    WHEN daily_review_archive.review_status = 'reviewed' THEN daily_review_archive.reviewed_at
                     ELSE NULL
                 END,
                 updated_at = excluded.updated_at
@@ -391,7 +383,7 @@ def get_archive_by_date(archive_date: str, db_path: str = None) -> Optional[Dict
     cursor = conn.cursor()
 
     cursor.execute(
-        'SELECT * FROM stock_archive WHERE archive_date = ?',
+        'SELECT * FROM daily_review_archive WHERE archive_date = ?',
         (archive_date,)
     )
 
@@ -403,28 +395,28 @@ def get_archive_by_date(archive_date: str, db_path: str = None) -> Optional[Dict
 
 # ========== 新闻分析结果操作 ==========
 
-def save_news_analysis(data: Dict[str, Any], db_path: str = None) -> bool:
+def save_daily_news_ai_analysis(data: Dict[str, Any], db_path: str = None) -> bool:
     """保存新闻分析结果（LLM 筛选的重大新闻）"""
     try:
         conn = get_db_connection(db_path)
         cursor = conn.cursor()
 
         cursor.execute('''
-            INSERT INTO news_analysis
-            (analysis_date, global_news, market_news, symbol_news, market_analysis, updated_at)
+            INSERT INTO daily_news_ai_analysis
+            (analysis_date, daily_major_events, sector_impact_map, linkage_logic_chain, source_news_ids, updated_at)
             VALUES (?, ?, ?, ?, ?, ?)
             ON CONFLICT(analysis_date) DO UPDATE SET
-                global_news = excluded.global_news,
-                market_news = excluded.market_news,
-                symbol_news = excluded.symbol_news,
-                market_analysis = excluded.market_analysis,
+                daily_major_events = excluded.daily_major_events,
+                sector_impact_map = excluded.sector_impact_map,
+                linkage_logic_chain = excluded.linkage_logic_chain,
+                source_news_ids = excluded.source_news_ids,
                 updated_at = excluded.updated_at
         ''', (
             data.get('analysis_date'),
-            data.get('global_news'),
-            data.get('market_news'),
-            data.get('symbol_news'),
-            data.get('market_analysis'),
+            data.get('daily_major_events'),
+            data.get('sector_impact_map'),
+            data.get('linkage_logic_chain'),
+            data.get('source_news_ids'),
             datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
         ))
 
@@ -439,7 +431,7 @@ def save_news_analysis(data: Dict[str, Any], db_path: str = None) -> bool:
         return False
 
 
-def get_news_analysis_by_date(analysis_date: str, db_path: str = None) -> Optional[Dict]:
+def get_daily_news_ai_analysis_by_date(analysis_date: str, db_path: str = None) -> Optional[Dict]:
     """查询指定日期的新闻分析结果"""
     conn = get_db_connection(db_path)
     cursor = conn.cursor()
@@ -448,7 +440,7 @@ def get_news_analysis_by_date(analysis_date: str, db_path: str = None) -> Option
         cursor.execute(
             '''
             SELECT *
-            FROM news_analysis
+            FROM daily_news_ai_analysis
             WHERE analysis_date = ?
             LIMIT 1
             ''',
@@ -460,3 +452,87 @@ def get_news_analysis_by_date(analysis_date: str, db_path: str = None) -> Option
     except:
         conn.close()
         return None
+
+
+# ========== 标的管理操作 ==========
+
+def get_tracked_symbols_local(db_path: str = None) -> List[Dict]:
+    """查询本地 tracked_symbols 表中所有活跃标的"""
+    try:
+        conn = get_db_connection(db_path)
+        cursor = conn.cursor()
+        cursor.execute(
+            "SELECT * FROM tracked_symbols WHERE is_active = 1 ORDER BY symbol_type, sort_order"
+        )
+        rows = cursor.fetchall()
+        conn.close()
+        result = []
+        for row in rows:
+            d = dict(row)
+            if isinstance(d.get("aliases"), str):
+                try:
+                    d["aliases"] = json.loads(d["aliases"])
+                except (json.JSONDecodeError, ValueError):
+                    d["aliases"] = [s.strip() for s in d["aliases"].split(",") if s.strip()]
+            result.append(d)
+        return result
+    except Exception as e:
+        logger.error("查询 tracked_symbols 失败: %s", e)
+        return []
+
+
+def upsert_tracked_symbol(data: Dict[str, Any], db_path: str = None) -> bool:
+    """插入或更新一条 tracked_symbols 记录"""
+    try:
+        conn = get_db_connection(db_path)
+        cursor = conn.cursor()
+        aliases = data.get("aliases", [])
+        if isinstance(aliases, list):
+            aliases = json.dumps(aliases, ensure_ascii=False)
+        cursor.execute(
+            """
+            INSERT INTO tracked_symbols
+                (symbol, yahoo_symbol, display_name, symbol_type, aliases, is_active, sort_order, created_at, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, datetime('now'), datetime('now'))
+            ON CONFLICT(symbol) DO UPDATE SET
+                yahoo_symbol = excluded.yahoo_symbol,
+                display_name = excluded.display_name,
+                symbol_type  = excluded.symbol_type,
+                aliases      = excluded.aliases,
+                is_active    = excluded.is_active,
+                sort_order   = excluded.sort_order,
+                updated_at   = datetime('now')
+            """,
+            (
+                data.get("symbol"),
+                data.get("yahoo_symbol") or data.get("symbol"),
+                data.get("display_name"),
+                data.get("symbol_type", "stock"),
+                aliases,
+                1 if data.get("is_active", True) else 0,
+                data.get("sort_order", 99),
+            ),
+        )
+        conn.commit()
+        conn.close()
+        return True
+    except Exception as e:
+        logger.error("写入 tracked_symbols 失败: %s", e)
+        return False
+
+
+def delete_tracked_symbol(symbol: str, db_path: str = None) -> bool:
+    """软删除标的（is_active=0）"""
+    try:
+        conn = get_db_connection(db_path)
+        cursor = conn.cursor()
+        cursor.execute(
+            "UPDATE tracked_symbols SET is_active = 0, updated_at = datetime('now') WHERE symbol = ?",
+            (symbol,),
+        )
+        conn.commit()
+        conn.close()
+        return True
+    except Exception as e:
+        logger.error("删除 tracked_symbols 失败: %s", e)
+        return False

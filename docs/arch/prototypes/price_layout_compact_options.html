@@ -1,0 +1,444 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Price Layout Compact Options</title>
+    <style>
+      :root {
+        --bg: #f4f6fb;
+        --panel: rgba(255, 255, 255, 0.88);
+        --line: rgba(15, 23, 42, 0.08);
+        --line-strong: rgba(15, 23, 42, 0.14);
+        --text: #0f172a;
+        --muted: #667085;
+        --success: #17804f;
+        --danger: #c73b2c;
+        --shadow: 0 18px 50px rgba(15, 23, 42, 0.08);
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      body {
+        margin: 0;
+        font-family: "SF Pro Display", "SF Pro Text", -apple-system, BlinkMacSystemFont, "PingFang SC", sans-serif;
+        color: var(--text);
+        background:
+          radial-gradient(circle at top left, rgba(255, 255, 255, 0.9), transparent 28%),
+          linear-gradient(180deg, #eef2f8, var(--bg));
+      }
+
+      .page {
+        width: min(1500px, calc(100vw - 40px));
+        margin: 0 auto;
+        padding: 24px 0 40px;
+      }
+
+      .intro {
+        margin-bottom: 16px;
+        padding: 18px 20px;
+        border: 1px solid var(--line);
+        border-radius: 24px;
+        background: var(--panel);
+        box-shadow: var(--shadow);
+      }
+
+      .intro h1 {
+        margin: 0 0 8px;
+        font-size: 28px;
+      }
+
+      .intro p {
+        margin: 0;
+        color: var(--muted);
+        line-height: 1.65;
+      }
+
+      .option {
+        margin-top: 18px;
+        padding: 18px;
+        border: 1px solid var(--line);
+        border-radius: 28px;
+        background: var(--panel);
+        box-shadow: var(--shadow);
+      }
+
+      .option-head {
+        display: flex;
+        justify-content: space-between;
+        gap: 12px;
+        align-items: flex-end;
+        margin-bottom: 14px;
+      }
+
+      .option-head h2 {
+        margin: 0 0 4px;
+        font-size: 24px;
+      }
+
+      .option-head p {
+        margin: 0;
+        color: var(--muted);
+      }
+
+      .badge {
+        padding: 6px 10px;
+        border-radius: 999px;
+        background: rgba(15, 23, 42, 0.06);
+        color: var(--muted);
+        font-size: 13px;
+        white-space: nowrap;
+      }
+
+      .section-title {
+        margin: 14px 0 8px;
+        color: #65728a;
+        font-size: 14px;
+        font-weight: 700;
+        letter-spacing: 0.01em;
+      }
+
+      .quote-grid {
+        display: grid;
+        gap: 10px;
+      }
+
+      .quote-item {
+        border: 1px solid var(--line);
+        border-radius: 18px;
+        background: rgba(255, 255, 255, 0.88);
+      }
+
+      .quote-item .up {
+        color: var(--success);
+      }
+
+      .quote-item .down {
+        color: var(--danger);
+      }
+
+      .opt-a .quote-grid {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+      }
+
+      .opt-a .quote-item {
+        display: grid;
+        grid-template-columns: 1.2fr 120px 90px;
+        align-items: center;
+        gap: 12px;
+        padding: 12px 16px;
+      }
+
+      .opt-a .name {
+        display: flex;
+        flex-direction: column;
+        gap: 2px;
+        min-width: 0;
+      }
+
+      .opt-a .symbol {
+        font-size: 14px;
+        color: var(--muted);
+      }
+
+      .opt-a .price {
+        font-size: 26px;
+        font-weight: 800;
+        text-align: right;
+      }
+
+      .opt-a .change {
+        font-size: 17px;
+        font-weight: 800;
+        text-align: right;
+      }
+
+      .opt-b .split {
+        display: grid;
+        grid-template-columns: 0.92fr 1.08fr;
+        gap: 16px;
+      }
+
+      .opt-b .group-box {
+        border: 1px solid var(--line);
+        border-radius: 22px;
+        padding: 12px;
+        background: rgba(255, 255, 255, 0.72);
+      }
+
+      .opt-b .group-box h3 {
+        margin: 0 0 10px;
+        font-size: 17px;
+      }
+
+      .opt-b .quote-item {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) auto auto;
+        gap: 10px;
+        padding: 10px 12px;
+      }
+
+      .opt-b .quote-item + .quote-item {
+        margin-top: 8px;
+      }
+
+      .opt-b .price {
+        font-size: 22px;
+        font-weight: 800;
+      }
+
+      .opt-b .change {
+        min-width: 76px;
+        text-align: right;
+        font-size: 16px;
+        font-weight: 800;
+      }
+
+      .opt-c .table-box {
+        overflow: hidden;
+        border: 1px solid var(--line);
+        border-radius: 22px;
+        background: rgba(255, 255, 255, 0.78);
+      }
+
+      .opt-c table {
+        width: 100%;
+        border-collapse: collapse;
+      }
+
+      .opt-c th,
+      .opt-c td {
+        padding: 10px 14px;
+        border-bottom: 1px solid var(--line);
+        text-align: left;
+      }
+
+      .opt-c th {
+        color: var(--muted);
+        font-size: 13px;
+        font-weight: 700;
+      }
+
+      .opt-c tr:last-child td {
+        border-bottom: 0;
+      }
+
+      .opt-c .section-row td {
+        padding-top: 14px;
+        padding-bottom: 8px;
+        background: rgba(15, 23, 42, 0.03);
+        color: #5f6d85;
+        font-size: 13px;
+        font-weight: 700;
+      }
+
+      .opt-c .name-cell strong {
+        display: block;
+        margin-bottom: 2px;
+        font-size: 16px;
+      }
+
+      .opt-c .name-cell span {
+        color: var(--muted);
+        font-size: 13px;
+      }
+
+      .summary {
+        margin-top: 16px;
+        padding: 14px 16px;
+        border-radius: 18px;
+        background: rgba(15, 23, 42, 0.04);
+        color: #506078;
+        line-height: 1.65;
+      }
+
+      .summary strong {
+        color: #1d2b45;
+      }
+
+      @media (max-width: 1100px) {
+        .opt-a .quote-grid,
+        .opt-b .split {
+          grid-template-columns: 1fr;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <div class="page">
+      <section class="intro">
+        <h1>当日价格紧凑版式草案</h1>
+        <p>目标是把当前偏卡片墙的空间占用压下来，同时尽量保留“大盘 vs 个股”分组感。下面 3 个方案都基于同一组 mock 数据，重点比较密度、扫读效率和视觉秩序。</p>
+      </section>
+
+      <section class="option opt-a">
+        <div class="option-head">
+          <div>
+            <h2>方案 A：紧凑横排行</h2>
+            <p>保留卡片感，但每个卡片压成一行，最接近你现有设计，改造成本最低。</p>
+          </div>
+          <span class="badge">推荐先试</span>
+        </div>
+        <div class="section-title">大盘分析</div>
+        <div class="quote-grid">
+          <article class="quote-item">
+            <div class="name"><strong>标普500</strong><span class="symbol">GSPC</span></div>
+            <div class="price">6699.38</div>
+            <div class="change up">+1.01%</div>
+          </article>
+          <article class="quote-item">
+            <div class="name"><strong>恐慌指数</strong><span class="symbol">VIX</span></div>
+            <div class="price">23.51</div>
+            <div class="change down">-13.53%</div>
+          </article>
+          <article class="quote-item">
+            <div class="name"><strong>黄金</strong><span class="symbol">GOLD</span></div>
+            <div class="price">5034.70</div>
+            <div class="change down">-0.35%</div>
+          </article>
+        </div>
+        <div class="section-title">个股深度研究</div>
+        <div class="quote-grid">
+          <article class="quote-item">
+            <div class="name"><strong>美光</strong><span class="symbol">MU</span></div>
+            <div class="price">441.80</div>
+            <div class="change up">+3.68%</div>
+          </article>
+          <article class="quote-item">
+            <div class="name"><strong>Lumentum</strong><span class="symbol">LITE</span></div>
+            <div class="price">624.84</div>
+            <div class="change up">+0.38%</div>
+          </article>
+          <article class="quote-item">
+            <div class="name"><strong>微软</strong><span class="symbol">MSFT</span></div>
+            <div class="price">399.95</div>
+            <div class="change up">+1.11%</div>
+          </article>
+          <article class="quote-item">
+            <div class="name"><strong>谷歌</strong><span class="symbol">GOOGL</span></div>
+            <div class="price">305.56</div>
+            <div class="change up">+1.09%</div>
+          </article>
+        </div>
+        <div class="summary"><strong>特点：</strong>空间比当前小很多，视觉还是“卡片型”，不容易突兀。缺点是信息密度还不是最高。</div>
+      </section>
+
+      <section class="option opt-b">
+        <div class="option-head">
+          <div>
+            <h2>方案 B：分组清单</h2>
+            <p>左边放大盘，右边放个股，整体更像“研究台账”，明显比卡片墙更省面积。</p>
+          </div>
+          <span class="badge">密度平衡型</span>
+        </div>
+        <div class="split">
+          <section class="group-box">
+            <h3>大盘分析</h3>
+            <article class="quote-item">
+              <div class="name"><strong>标普500</strong><span class="symbol"> · GSPC</span></div>
+              <div class="price">6699.38</div>
+              <div class="change up">+1.01%</div>
+            </article>
+            <article class="quote-item">
+              <div class="name"><strong>恐慌指数</strong><span class="symbol"> · VIX</span></div>
+              <div class="price">23.51</div>
+              <div class="change down">-13.53%</div>
+            </article>
+            <article class="quote-item">
+              <div class="name"><strong>黄金</strong><span class="symbol"> · GOLD</span></div>
+              <div class="price">5034.70</div>
+              <div class="change down">-0.35%</div>
+            </article>
+          </section>
+          <section class="group-box">
+            <h3>个股深度研究</h3>
+            <article class="quote-item">
+              <div class="name"><strong>美光</strong><span class="symbol"> · MU</span></div>
+              <div class="price">441.80</div>
+              <div class="change up">+3.68%</div>
+            </article>
+            <article class="quote-item">
+              <div class="name"><strong>Lumentum</strong><span class="symbol"> · LITE</span></div>
+              <div class="price">624.84</div>
+              <div class="change up">+0.38%</div>
+            </article>
+            <article class="quote-item">
+              <div class="name"><strong>微软</strong><span class="symbol"> · MSFT</span></div>
+              <div class="price">399.95</div>
+              <div class="change up">+1.11%</div>
+            </article>
+            <article class="quote-item">
+              <div class="name"><strong>谷歌</strong><span class="symbol"> · GOOGL</span></div>
+              <div class="price">305.56</div>
+              <div class="change up">+1.09%</div>
+            </article>
+          </section>
+        </div>
+        <div class="summary"><strong>特点：</strong>我觉得最像“复盘工具”的结构，分组很清楚，空间占用也明显下降。缺点是没有现在那种大卡片的展示感。</div>
+      </section>
+
+      <section class="option opt-c">
+        <div class="option-head">
+          <div>
+            <h2>方案 C：超轻量行情表</h2>
+            <p>直接把价格区做成小型行情表，最省空间，适合你后面如果还要把分析区往上收。</p>
+          </div>
+          <span class="badge">最省空间</span>
+        </div>
+        <div class="table-box">
+          <table>
+            <thead>
+              <tr>
+                <th>标的</th>
+                <th>最新价</th>
+                <th>涨跌幅</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr class="section-row"><td colspan="3">大盘分析</td></tr>
+              <tr>
+                <td class="name-cell"><strong>标普500</strong><span>GSPC</span></td>
+                <td>6699.38</td>
+                <td class="up">+1.01%</td>
+              </tr>
+              <tr>
+                <td class="name-cell"><strong>恐慌指数</strong><span>VIX</span></td>
+                <td>23.51</td>
+                <td class="down">-13.53%</td>
+              </tr>
+              <tr>
+                <td class="name-cell"><strong>黄金</strong><span>GOLD</span></td>
+                <td>5034.70</td>
+                <td class="down">-0.35%</td>
+              </tr>
+              <tr class="section-row"><td colspan="3">个股深度研究</td></tr>
+              <tr>
+                <td class="name-cell"><strong>美光</strong><span>MU</span></td>
+                <td>441.80</td>
+                <td class="up">+3.68%</td>
+              </tr>
+              <tr>
+                <td class="name-cell"><strong>Lumentum</strong><span>LITE</span></td>
+                <td>624.84</td>
+                <td class="up">+0.38%</td>
+              </tr>
+              <tr>
+                <td class="name-cell"><strong>微软</strong><span>MSFT</span></td>
+                <td>399.95</td>
+                <td class="up">+1.11%</td>
+              </tr>
+              <tr>
+                <td class="name-cell"><strong>谷歌</strong><span>GOOGL</span></td>
+                <td>305.56</td>
+                <td class="up">+1.09%</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+        <div class="summary"><strong>特点：</strong>空间利用率最高，最适合“价格只是辅助参考”的定位。缺点是视觉上会更像后台表格，少一点仪式感。</div>
+      </section>
+    </div>
+  </body>
+</html>

@@ -1,14 +1,21 @@
 const state = {
-  activeView: "news",
+  activeView: "reviews",
   activeDate: null,
   activeBootstrap: null,
   newsFilters: null,
   reviewStep: "news",
-  selectedNewsIds: new Set(),
+  reviewStatus: "initialized",
+  editMode: false,
+  dailyInsight: null,
+  homepageInsightSections: [],
+  symbolsLoaded: false,
+  symbolResolveResult: null,
 };
 
+const APP_TOKEN_STORAGE_KEY = "myFinancialAgentApiToken";
+
 const REVIEW_STEPS = [
-  { key: "news", label: "新闻汇总", field: "newsBrief", optional: false, hint: "先圈出重点新闻，再把当天主线压成一句能指导交易的判断。" },
+  { key: "news", label: "新闻总结", field: "reviewerNewsNotes", optional: false, hint: "先看 AI 日总结和重点新闻，再写下你自己的主线判断与点评。" },
   { key: "market", label: "大盘盘点", field: "marketSentiment", optional: false, hint: "只写真正影响大盘的变量，比如美元、利率、VIX 和风险偏好。" },
   { key: "rotation", label: "板块轮动", field: "sectorRotation", optional: false, hint: "把大宗商品和板块强弱写清楚，说明谁领涨、谁承压、资金往哪边走。" },
   { key: "plan", label: "操作计划", field: "assetPlan", optional: false, hint: "针对核心标的和仓位，给出明确计划、触发条件和风险线。" },
@@ -16,9 +23,12 @@ const REVIEW_STEPS = [
 ];
 
 const NEWS_TYPE_LABELS = {
-  macro: "宏观",
-  market: "宏观",
-  symbol: "标的",
+  index: "大盘",
+  sector: "板块",
+  stock: "个股",
+  macro: "大盘",
+  market: "板块",
+  symbol: "个股",
 };
 
 const REVIEW_STATUS_LABELS = {
@@ -28,14 +38,93 @@ const REVIEW_STATUS_LABELS = {
   missing: "待开始",
 };
 
+const SYMBOL_DISPLAY_LABELS = {
+  MU: "美光", LITE: "Lumentum", MSFT: "微软", GOOGL: "谷歌",
+  GSPC: "标普500", NDX: "纳斯达克100", DJI: "道琼斯",
+  VIX: "恐慌指数", HSI: "恒生指数", SSE: "上证指数",
+  DXY: "美元指数", GOLD: "黄金", CL: "原油",
+  XLK: "科技板块", SOXX: "半导体板块", XLE: "能源板块",
+  XLF: "金融板块", XLY: "可选消费",
+  // 向后兼容旧 Yahoo 代码
+  "^VIX": "恐慌指数", "^HSI": "恒生指数", "^GSPC": "标普500",
+  "000001.SS": "上证指数", "DX-Y.NYB": "美元指数", "GC=F": "黄金",
+};
+
+const DEFAULT_HOMEPAGE_INSIGHT_SECTIONS = [
+  {
+    id: "mindset",
+    category: "投资心态建设",
+    sectionTitle: "投资心态建设 9 步法",
+    items: [
+      { titleLine: "投资心态建设9步法之第1步", coreQuote: "制定投资计划：核心是屏蔽杂音。在进入市场前，必须明确自己的定位：是做风险投资、技术面、趋势追踪、反弹抄底、套利、定投，还是长期持有？", body: [] },
+      { titleLine: "投资心态建设9步法之第2步", coreQuote: "确定理念和方法：对于初级投资者，不需要追求“完美”的方法，而应选择一个使用方便、有效概率较大的方法。", body: ["低胜率：赌博心态、人云亦云。", "可行方法：技术分析、基本面分析、随机漫步（指数化投资）。"] },
+      { titleLine: "投资心态建设9步法之第3步", coreQuote: "保持自信：一旦选择了逻辑自洽的方法，必须在心理上完全信任它，否则在市场波动时容易动摇。", body: [] },
+      { titleLine: "投资心态建设9步法之第4步", coreQuote: "克服恐惧与贪婪：耐心等待高胜率机会，记住市场上的钱赚不完，但本金一旦亏完就彻底出局。", body: ["耐心：等待高胜率的机会出现。", "认知：市场上的钱是赚不完的，但本金一旦亏完就彻底出局了。"] },
+      { titleLine: "投资心态建设9步法之第5步", coreQuote: "心理预演：在实际下单前，先在脑海中模拟各种可能的走势及应对措施，做到“心中有数”。", body: [] },
+      { titleLine: "投资心态建设9步法之第6步", coreQuote: "果断行动：当预设的信号出现时，必须立即执行，严禁犹豫不决导致错失良机或陷入被动。", body: [] },
+      { titleLine: "投资心态建设9步法之第7步", coreQuote: "头寸管理与动态修正：实时观察市场变化，并根据实际情况对交易计划进行小幅修正，确保方向始终对自己有利。", body: ["实时观察市场变化。", "根据实际情况对交易计划进行小幅修正，确保方向始终对自己有利。"] },
+      { titleLine: "投资心态建设9步法之第8步", coreQuote: "严格自律（止盈止损）：绝不轻易放大止损线，真正毁灭性的亏损通常来自一两次不肯止损的大额亏损。", body: ["底线思维：绝不轻易放大止损线。", "风险警示：毁灭性的亏损通常不是来自多次小额亏损，而是源于一两次不肯止损的大额亏损。"] },
+      { titleLine: "投资心态建设9步法之第9步", coreQuote: "总结与复盘：交易结束后，无论盈亏都要总结经验，为下一次交易做准备。拒绝内耗，不要活在懊恼与后悔中。", body: [] }
+    ]
+  },
+  {
+    id: "truths",
+    category: "投资真理",
+    sectionTitle: "8 个投资真理",
+    items: [
+      { titleLine: "8个投资真理之一", coreQuote: "情绪控制：急性子、易冲动者不适合投资。", body: [] },
+      { titleLine: "8个投资真理之二", coreQuote: "观望原则：对市场有疑问时，坚决不交易。", body: [] },
+      { titleLine: "8个投资真理之三", coreQuote: "客观交易：不靠想象和主观愿望投资。", body: [] },
+      { titleLine: "8个投资真理之四", coreQuote: "独立思考：独立判断，不跟随他人意见。", body: [] },
+      { titleLine: "8个投资真理之五", coreQuote: "频率控制：严禁过度频繁交易。", body: [] },
+      { titleLine: "8个投资真理之六", coreQuote: "学会取舍：不试图抓住每一个机会。", body: [] },
+      { titleLine: "8个投资真理之七", coreQuote: "复盘记录：分析不足，记录错误。", body: [] },
+      { titleLine: "8个投资真理之八", coreQuote: "专注研究：远离无效社交，屏蔽杂音。", body: [] }
+    ]
+  }
+];
+
+const AI_BADGE_ICON = `
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+    <defs>
+      <linearGradient id="geminiSparkGradient" x1="3" y1="3" x2="21" y2="21" gradientUnits="userSpaceOnUse">
+        <stop offset="0%" stop-color="#4285F4" />
+        <stop offset="32%" stop-color="#8E63FF" />
+        <stop offset="58%" stop-color="#EA4335" />
+        <stop offset="78%" stop-color="#FBBC05" />
+        <stop offset="100%" stop-color="#34A853" />
+      </linearGradient>
+      <linearGradient id="geminiSparkGradientSoft" x1="16" y1="2" x2="22" y2="8" gradientUnits="userSpaceOnUse">
+        <stop offset="0%" stop-color="#8AB4F8" />
+        <stop offset="100%" stop-color="#C58AF9" />
+      </linearGradient>
+    </defs>
+    <path fill="url(#geminiSparkGradient)" d="M12 2.4c.37 0 .69.24.8.59l1.31 4.22a3.2 3.2 0 0 0 2.1 2.1l4.22 1.31a.84.84 0 0 1 0 1.6l-4.22 1.31a3.2 3.2 0 0 0-2.1 2.1l-1.31 4.22a.84.84 0 0 1-1.6 0l-1.31-4.22a3.2 3.2 0 0 0-2.1-2.1l-4.22-1.31a.84.84 0 0 1 0-1.6l4.22-1.31a3.2 3.2 0 0 0 2.1-2.1l1.31-4.22c.11-.35.43-.59.8-.59Z"/>
+    <path fill="url(#geminiSparkGradientSoft)" d="M18.4 3.2c.18 0 .34.12.39.29l.42 1.36c.13.43.47.77.9.9l1.36.42c.39.12.39.67 0 .79l-1.36.42c-.43.13-.77.47-.9.9l-.42 1.36a.41.41 0 0 1-.79 0l-.42-1.36a1.38 1.38 0 0 0-.9-.9l-1.36-.42a.41.41 0 0 1 0-.79l1.36-.42c.43-.13.77-.47.9-.9l.42-1.36c.05-.17.21-.29.4-.29Z"/>
+  </svg>
+`;
+
 const newsView = document.querySelector("#newsView");
 const reviewsView = document.querySelector("#reviewsView");
+const symbolsView = document.querySelector("#symbolsView");
 const navButtons = document.querySelectorAll(".nav-chip");
+const heroEnvironmentText = document.querySelector("#heroEnvironmentText");
+const dailyInsightCategory = document.querySelector("#dailyInsightCategory");
+const dailyInsightSummary = document.querySelector("#dailyInsightSummary");
+const dailyInsightToggle = document.querySelector("#dailyInsightToggle");
+const dailyInsightModal = document.querySelector("#dailyInsightModal");
+const dailyInsightBackdrop = document.querySelector("#dailyInsightBackdrop");
+const dailyInsightModalCategory = document.querySelector("#dailyInsightModalCategory");
+const dailyInsightModalTitle = document.querySelector("#dailyInsightModalTitle");
+const dailyInsightModalQuote = document.querySelector("#dailyInsightModalQuote");
+const dailyInsightModalContent = document.querySelector("#dailyInsightModalContent");
+const closeDailyInsightBtn = document.querySelector("#closeDailyInsightBtn");
 
 const newsFiltersForm = document.querySelector("#newsFiltersForm");
 const newsContent = document.querySelector("#newsContent");
 const newsList = document.querySelector("#newsList");
 const newsSummary = document.querySelector("#newsSummary");
+const newsAiHeader = document.querySelector("#newsAiHeader");
 const newsDetailModal = document.querySelector("#newsDetailModal");
 const newsDetailBackdrop = document.querySelector("#newsDetailBackdrop");
 const newsDetailCard = document.querySelector("#newsDetailCard");
@@ -50,8 +139,6 @@ const newsDetailContent = document.querySelector("#newsDetailContent");
 const newsDetailLink = document.querySelector("#newsDetailLink");
 const closeNewsDetailBtn = document.querySelector("#closeNewsDetailBtn");
 
-const pendingRibbon = document.querySelector("#pendingRibbon");
-const pendingState = document.querySelector("#pendingState");
 const reviewsList = document.querySelector("#reviewsList");
 
 const reviewDrawer = document.querySelector("#reviewDrawer");
@@ -61,10 +148,8 @@ const reviewStatusBadge = document.querySelector("#reviewStatusBadge");
 const carryForwardLabel = document.querySelector("#carryForwardLabel");
 const drawerSubtitle = document.querySelector("#drawerSubtitle");
 const pricesBox = document.querySelector("#pricesBox");
-const newsWindowBox = document.querySelector("#newsWindowBox");
 const analysisBox = document.querySelector("#analysisBox");
 const newsPicker = document.querySelector("#newsPicker");
-const reviewNewsDetailBox = document.querySelector("#reviewNewsDetailBox");
 const reviewStepNav = document.querySelector("#reviewStepNav");
 const reviewStepHint = document.querySelector("#reviewStepHint");
 const saveDraftBtn = document.querySelector("#saveDraftBtn");
@@ -72,6 +157,7 @@ const initializeBtn = document.querySelector("#initializeBtn");
 const reviewActionGroup = document.querySelector("#reviewActionGroup");
 const prevStepBtn = document.querySelector("#prevStepBtn");
 const nextStepBtn = document.querySelector("#nextStepBtn");
+const reviewModalFooter = document.querySelector(".review-modal-footer");
 
 navButtons.forEach((button) => {
   button.addEventListener("click", () => switchView(button.dataset.view));
@@ -87,7 +173,6 @@ newsFiltersForm.addEventListener("submit", (event) => {
   loadNewsList(new FormData(newsFiltersForm));
 });
 
-document.querySelector("#refreshPendingBtn").addEventListener("click", () => loadPendingReviews());
 document.querySelector("#refreshReviewsBtn").addEventListener("click", () => loadReviews());
 document.querySelector("#filtersForm").addEventListener("submit", (event) => {
   event.preventDefault();
@@ -101,17 +186,25 @@ saveDraftBtn.addEventListener("click", async () => {
 
 initializeBtn.addEventListener("click", async () => {
   if (!state.activeDate) return;
+  if (state.reviewStatus === "reviewed") {
+    state.editMode = !state.editMode;
+    applyEditMode(state.editMode);
+    return;
+  }
   if (!window.confirm(`确认要把 ${state.activeDate} 重新初始化吗？这会清空当前复盘内容。`)) return;
   if (!window.confirm("请再次确认：初始化后将清空新闻汇总、操作计划和复盘结论。")) return;
-  await fetchJson(`/api/reviews/${state.activeDate}/initialize`, { method: "POST" });
+  await fetchJson(`/api/reviews/${state.activeDate}/initialize`, {
+    method: "POST",
+    auth: true,
+    authReason: "重新初始化复盘",
+  });
   setReviewStatus("initialized");
   setReviewMode("initialized");
   if (state.activeBootstrap?.draft) {
     state.activeBootstrap.draft = {
       ...state.activeBootstrap.draft,
       review_status: "initialized",
-      news_brief: "",
-      selected_news_ids: "[]",
+      reviewer_news_notes: "",
       market_sentiment: "",
       sector_rotation: "",
       asset_plan: "",
@@ -119,16 +212,14 @@ initializeBtn.addEventListener("click", async () => {
     };
   }
   applyFormValues({
-    selectedNewsIds: JSON.stringify([...new Set((state.activeBootstrap?.news || []).map((item) => String(item.id || item.pub_date)))]),
-    newsBrief: buildDefaultNewsBrief(state.activeBootstrap?.analysis, state.activeBootstrap?.news),
+    reviewerNewsNotes: buildDefaultNewsBrief(state.activeBootstrap?.analysis, state.activeBootstrap?.news),
     marketSentiment: "",
     sectorRotation: "",
     assetPlan: "",
     tradingSummary: "",
   });
-  state.selectedNewsIds = new Set((state.activeBootstrap?.news || []).map((item) => String(item.id || item.pub_date)));
   renderNewsPicker(state.activeBootstrap?.news || []);
-  await Promise.all([loadPendingReviews(), loadReviews()]);
+  await loadReviews();
 });
 
 prevStepBtn.addEventListener("click", () => moveReviewStep(-1));
@@ -140,16 +231,33 @@ closeNewsDetailBtn.addEventListener("click", closeNewsDetail);
 newsDetailBackdrop.addEventListener("click", closeNewsDetail);
 document.querySelector("#closeDrawerBtn").addEventListener("click", closeDrawer);
 document.querySelector("#closeDrawerBackdrop").addEventListener("click", closeDrawer);
+closeDailyInsightBtn.addEventListener("click", closeDailyInsightModal);
+dailyInsightBackdrop.addEventListener("click", closeDailyInsightModal);
+window.addEventListener("resize", scheduleDailyInsightSummaryLayout);
 document.addEventListener("keydown", (event) => {
   if (event.key === "Escape") {
     if (!newsDetailModal.classList.contains("hidden")) closeNewsDetail();
     if (!reviewDrawer.classList.contains("hidden")) closeDrawer();
+    if (!dailyInsightModal.classList.contains("hidden")) closeDailyInsightModal();
   }
 });
 
-switchView("news");
+dailyInsightToggle.addEventListener("click", () => {
+  openDailyInsightModal();
+});
+
+document.querySelector("#refreshSymbolsBtn")?.addEventListener("click", () => loadSymbols(true));
+document.querySelector("#symbolResolveBtn")?.addEventListener("click", resolveSymbolInput);
+document.querySelector("#symbolManualAddBtn")?.addEventListener("click", () => showSymbolForm());
+document.querySelector("#symbolResolveInput")?.addEventListener("keydown", (e) => {
+  if (e.key === "Enter") { e.preventDefault(); resolveSymbolInput(); }
+});
+
+switchView("reviews");
+loadHeroEnvironment();
+decorateAiHeaders();
+initializeHomepageInsights();
 loadNewsList();
-loadPendingReviews();
 loadReviews();
 
 function switchView(view) {
@@ -157,6 +265,148 @@ function switchView(view) {
   navButtons.forEach((button) => button.classList.toggle("active", button.dataset.view === view));
   newsView.classList.toggle("active", view === "news");
   reviewsView.classList.toggle("active", view === "reviews");
+  if (symbolsView) symbolsView.classList.toggle("active", view === "symbols");
+  if (view === "symbols" && !state.symbolsLoaded) loadSymbols();
+}
+
+async function loadHeroEnvironment() {
+  try {
+    const data = await fetchJson("/api/health");
+    heroEnvironmentText.dataset.env = data.env || "unknown";
+    heroEnvironmentText.textContent = formatEnvironmentLabel(data.env || "unknown");
+  } catch (error) {
+    heroEnvironmentText.dataset.env = "unknown";
+    heroEnvironmentText.textContent = "环境读取失败";
+  }
+}
+
+async function initializeHomepageInsights() {
+  state.homepageInsightSections = await loadHomepageInsightSections();
+  renderDailyInvestmentInsight();
+}
+
+async function loadHomepageInsightSections() {
+  try {
+    const response = await fetch("/content/homepage_content.json", { cache: "no-store" });
+    if (!response.ok) throw new Error("homepage content unavailable");
+    const data = await response.json();
+    const sections = Array.isArray(data?.insightSections) ? data.insightSections : [];
+    return sections.length ? sections : DEFAULT_HOMEPAGE_INSIGHT_SECTIONS;
+  } catch (error) {
+    return DEFAULT_HOMEPAGE_INSIGHT_SECTIONS;
+  }
+}
+
+function renderDailyInvestmentInsight() {
+  const insight = pickDailyInsight();
+  state.dailyInsight = insight;
+  dailyInsightCategory.textContent = insight.category;
+  dailyInsightSummary.textContent = insight.coreQuote;
+  dailyInsightSummary.title = insight.coreQuote;
+  scheduleDailyInsightSummaryLayout();
+}
+
+let dailyInsightLayoutFrame = 0;
+
+function scheduleDailyInsightSummaryLayout() {
+  if (dailyInsightLayoutFrame) {
+    window.cancelAnimationFrame(dailyInsightLayoutFrame);
+  }
+  dailyInsightLayoutFrame = window.requestAnimationFrame(() => {
+    dailyInsightLayoutFrame = 0;
+    adaptDailyInsightSummaryLayout();
+  });
+}
+
+function adaptDailyInsightSummaryLayout() {
+  if (!dailyInsightSummary) return;
+  dailyInsightSummary.classList.remove("is-wrap");
+
+  const parent = dailyInsightSummary.parentElement;
+  if (!parent) return;
+
+  if (dailyInsightSummary.scrollWidth <= dailyInsightSummary.clientWidth + 2) return;
+
+  const stillOverflowing =
+    dailyInsightSummary.scrollWidth > dailyInsightSummary.clientWidth + 2 ||
+    dailyInsightSummary.getBoundingClientRect().right > parent.getBoundingClientRect().right + 2;
+
+  if (!stillOverflowing) return;
+  dailyInsightSummary.classList.add("is-wrap");
+}
+
+function decorateAiHeaders() {
+  if (newsAiHeader) {
+    newsAiHeader.replaceChildren("AI 摘要", buildAiBadge());
+  }
+}
+
+function pickDailyInsight() {
+  const items = state.homepageInsightSections.flatMap((section) =>
+    (section.items || []).map((item) => ({
+      ...item,
+      category: section.category,
+      sectionId: section.id,
+      sectionTitle: section.sectionTitle,
+    }))
+  );
+  const source = items.length ? items : DEFAULT_HOMEPAGE_INSIGHT_SECTIONS.flatMap((section) =>
+    section.items.map((item) => ({
+      ...item,
+      category: section.category,
+      sectionId: section.id,
+      sectionTitle: section.sectionTitle,
+    }))
+  );
+  return source[Math.floor(Math.random() * source.length)];
+}
+
+function formatEnvironmentLabel(env) {
+  if (env === "prod") return "生产环境";
+  if (env === "test") return "测试环境";
+  return `未知环境${env ? ` · ${env}` : ""}`;
+}
+
+function openDailyInsightModal() {
+  const insight = state.dailyInsight || pickDailyInsight();
+  const section = state.homepageInsightSections.find((item) => item.id === insight.sectionId)
+    || DEFAULT_HOMEPAGE_INSIGHT_SECTIONS.find((item) => item.id === insight.sectionId)
+    || DEFAULT_HOMEPAGE_INSIGHT_SECTIONS[0];
+  dailyInsightModalCategory.textContent = section.category;
+  dailyInsightModalTitle.textContent = section.sectionTitle;
+  dailyInsightModalQuote.innerHTML = "";
+  dailyInsightModalContent.innerHTML = "";
+
+  (section.items || []).forEach((item) => {
+    const block = document.createElement("article");
+    block.className = "daily-insight-entry";
+
+    const title = document.createElement("h4");
+    title.textContent = item.titleLine;
+
+    const quote = document.createElement("p");
+    quote.className = "daily-insight-entry-quote";
+    quote.innerHTML = `<strong>${escapeHtml(item.coreQuote)}</strong>`;
+
+    block.append(title, quote);
+
+    if (item.body?.length) {
+      const list = document.createElement("ul");
+      item.body.forEach((line) => {
+        const li = document.createElement("li");
+        li.textContent = line;
+        list.appendChild(li);
+      });
+      block.appendChild(list);
+    }
+
+    dailyInsightModalContent.appendChild(block);
+  });
+  dailyInsightModal.classList.remove("hidden");
+}
+
+function closeDailyInsightModal() {
+  dailyInsightModal.classList.add("hidden");
 }
 
 async function loadNewsList(formData = null) {
@@ -164,14 +414,21 @@ async function loadNewsList(formData = null) {
   const params = new URLSearchParams();
   const sourceData = formData || getDefaultNewsFilters();
   for (const [key, value] of sourceData.entries()) {
-    if (value) params.append(key, value);
+    if (key === "starsMin") {
+      const min = Number(value);
+      if (min >= 1 && min <= 5) {
+        for (let s = min; s <= 5; s++) params.append("stars", s);
+      }
+    } else if (value) {
+      params.append(key, value);
+    }
   }
   state.newsFilters = params;
 
   const query = params.toString() ? `?${params.toString()}` : "";
   try {
     const data = await fetchJson(`/api/news${query}`);
-    newsSummary.textContent = `当前结果 ${data.total} 条 · 默认仅看 3 星及以上`;
+    newsSummary.textContent = `当前结果 ${data.total} 条`;
     newsList.innerHTML = "";
     if (!data.items.length) {
       newsList.innerHTML = `<tr><td colspan="5" class="table-empty">没有查到匹配新闻</td></tr>`;
@@ -188,10 +445,14 @@ async function loadNewsList(formData = null) {
 
 async function loadNewsDetail(id) {
   const data = await fetchJson(`/api/news/${id}`);
-  const item = data.item;
+  openNewsDetailFromItem(data.item);
+}
+
+function openNewsDetailFromItem(item) {
   newsDetailCard.classList.remove("hidden");
   newsDetailModal.classList.remove("hidden");
-  newsDetailMeta.textContent = `${item.pub_date || "未知时间"} · ${item.source || "未知来源"} · ${formatNewsType(item.type)}`;
+  newsDetailMeta.textContent = "";
+  newsDetailMeta.classList.add("hidden");
   newsDetailTitle.textContent = item.ai_summary || item.title || "无标题";
   newsDetailAi.textContent = item.ai_summary || "暂无 AI 摘要";
   newsDetailSummary.textContent = item.title || "暂无原始标题";
@@ -203,40 +464,31 @@ async function loadNewsDetail(id) {
   newsDetailLink.classList.toggle("disabled", !item.url);
   newsDetailTags.innerHTML = "";
 
+  const aiHeading = newsDetailCard.querySelector(".detail-featured strong");
+  if (aiHeading) {
+    aiHeading.replaceChildren("AI 摘要", buildAiBadge());
+  }
+  const impactHeading = newsDetailCard.querySelector(".accent-block strong");
+  if (impactHeading) {
+    impactHeading.replaceChildren("市场影响", buildAiBadge());
+  }
+
   const tags = [
-    formatNewsType(item.type),
-    formatStarLabel(item.importance_stars),
-    ...(item.related_symbols || []).map((symbol) => symbol),
+    buildChip(item.pub_date || "未知时间", "detail-meta-chip"),
+    ...(item.source ? [buildChip(item.source, "detail-meta-chip")] : []),
+    buildChip(formatStarLabel(item.importance_stars), starChipVariant(item.importance_stars)),
+    buildChip(formatNewsType(item.type)),
+    ...(item.related_symbols || []).map((symbol) => buildChip(symbol)),
   ].filter(Boolean);
-  tags.forEach((tag) => newsDetailTags.appendChild(buildChip(tag)));
+  tags.forEach((tag) => newsDetailTags.appendChild(tag));
 }
 
 function closeNewsDetail() {
   newsDetailModal.classList.add("hidden");
 }
 
-async function loadPendingReviews() {
-  pendingState.textContent = "加载中...";
-  pendingRibbon.innerHTML = "";
-  try {
-    const data = await fetchJson("/api/reviews/pending");
-    pendingState.textContent = data.items.length
-      ? `最近美股收盘日：${data.latestClosedDate}`
-      : "当前没有待复盘日期";
-
-    if (!data.items.length) {
-      pendingRibbon.innerHTML = `<article class="empty-pending-card">最近已收盘交易日都已处理完，当前没有待复盘日期。</article>`;
-      return;
-    }
-
-    data.items.forEach((item) => pendingRibbon.appendChild(buildPendingCard(item)));
-  } catch (error) {
-    pendingState.textContent = `加载失败: ${error.message}`;
-  }
-}
-
 async function loadReviews(formData = null) {
-  reviewsList.innerHTML = `<tr><td colspan="8" class="table-empty">加载中...</td></tr>`;
+  reviewsList.innerHTML = `<tr><td colspan="7" class="table-empty">加载中...</td></tr>`;
   const params = new URLSearchParams();
   if (formData) {
     for (const [key, value] of formData.entries()) {
@@ -249,12 +501,12 @@ async function loadReviews(formData = null) {
     const data = await fetchJson(`/api/reviews${query}`);
     reviewsList.innerHTML = "";
     if (!data.items.length) {
-      reviewsList.innerHTML = `<tr><td colspan="8" class="table-empty">还没有复盘记录</td></tr>`;
+      reviewsList.innerHTML = `<tr><td colspan="7" class="table-empty">还没有复盘记录</td></tr>`;
       return;
     }
     data.items.forEach((item) => reviewsList.appendChild(buildReviewRow(item)));
   } catch (error) {
-    reviewsList.innerHTML = `<tr><td colspan="8" class="table-empty">查询失败: ${error.message}</td></tr>`;
+    reviewsList.innerHTML = `<tr><td colspan="7" class="table-empty">查询失败: ${error.message}</td></tr>`;
   }
 }
 
@@ -262,27 +514,26 @@ async function openReviewDrawer(archiveDate) {
   const data = await fetchJson(`/api/reviews/${archiveDate}/bootstrap`);
   state.activeDate = archiveDate;
   state.activeBootstrap = data;
-  state.selectedNewsIds = new Set(parseStoredIds(data.draft?.selected_news_ids));
 
   const cycle = buildReviewCycle(archiveDate);
   archiveDateLabel.textContent = `${archiveDate} · 美股交易日`;
-  drawerSubtitle.textContent = `${cycle.beijingLabel} · 新闻窗口 ${data.newsWindow.start} → ${data.newsWindow.end}`;
+  drawerSubtitle.textContent = `${cycle.beijingLabel} · 新闻窗口（北京时间） ${formatNewsWindowBoundaryBeijing(data.newsWindow.start)} → ${formatNewsWindowBoundaryBeijing(data.newsWindow.end)}`;
   carryForwardLabel.textContent = data.carryForward?.archive_date
     ? `参考上一已复盘日 ${data.carryForward.archive_date}`
     : "无上一复盘日参考";
 
   const reviewStatus = data.draft?.review_status || "initialized";
+  state.editMode = reviewStatus !== "reviewed";
   setReviewStatus(reviewStatus);
   setReviewMode(reviewStatus);
 
-  renderPrices(data.prices);
-  newsWindowBox.textContent = `${cycle.nyLabel} · ${cycle.beijingLabel}`;
-  renderAnalysis(getEffectiveAnalysis(data.analysis, data.news), data.news);
+  const effectiveAnalysis = getEffectiveAnalysis(data.analysis, data.news);
+  renderPrices(data.pricesByType || data.prices);
+  renderAnalysis(effectiveAnalysis, data.news);
   renderNewsPicker(data.news);
 
   applyFormValues({
-    selectedNewsIds: JSON.stringify([...state.selectedNewsIds]),
-    newsBrief: data.draft?.news_brief || buildDefaultNewsBrief(data.analysis, data.news),
+    reviewerNewsNotes: data.draft?.reviewer_news_notes || data.draft?.news_brief || buildDefaultNewsBrief(data.analysis, data.news),
     marketSentiment: data.draft?.market_sentiment || data.carryForward?.market_sentiment || "",
     sectorRotation: data.draft?.sector_rotation || data.carryForward?.sector_rotation || "",
     assetPlan: data.draft?.asset_plan || data.carryForward?.asset_plan || "",
@@ -300,12 +551,13 @@ function closeDrawer() {
 async function saveReview() {
   const payload = Object.fromEntries(new FormData(reviewForm).entries());
   payload.reviewStatus = state.activeBootstrap?.draft?.review_status || "initialized";
-  payload.selectedNewsIds = JSON.parse(payload.selectedNewsIds || "[]");
 
   await fetchJson(`/api/reviews/${state.activeDate}`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(payload),
+    auth: true,
+    authReason: "保存复盘内容",
   });
 
   state.activeBootstrap = {
@@ -313,15 +565,18 @@ async function saveReview() {
     draft: {
       ...(state.activeBootstrap?.draft || {}),
       review_status: payload.reviewStatus,
-      news_brief: payload.newsBrief,
-      selected_news_ids: JSON.stringify(payload.selectedNewsIds),
+      reviewer_news_notes: payload.reviewerNewsNotes,
       market_sentiment: payload.marketSentiment,
       sector_rotation: payload.sectorRotation,
       asset_plan: payload.assetPlan,
       trading_summary: payload.tradingSummary,
     },
   };
-  await Promise.all([loadPendingReviews(), loadReviews()]);
+  if (state.reviewStatus === "reviewed" && state.editMode) {
+    state.editMode = false;
+    setReviewMode("reviewed");
+  }
+  await loadReviews();
 }
 
 function buildNewsRow(item) {
@@ -333,21 +588,47 @@ function buildNewsRow(item) {
 
   const summaryCell = document.createElement("td");
   summaryCell.className = "news-summary-cell";
-  summaryCell.innerHTML = `<strong>${escapeHtml(item.ai_summary || item.title || "无标题")}</strong><p>${escapeHtml(buildNewsImpactText(item))}</p>`;
+  const summaryTitle = document.createElement("strong");
+  summaryTitle.className = "news-ai-summary-title";
+  summaryTitle.textContent = item.ai_summary || item.title || "无标题";
+  const summaryText = document.createElement("p");
+  summaryText.textContent = buildNewsImpactText(item);
+  summaryCell.append(summaryTitle, summaryText);
 
   const impactCell = document.createElement("td");
   impactCell.className = "news-impact-cell";
-  impactCell.textContent = buildNewsBodyPreview(item);
+  impactCell.innerHTML = `<p>${escapeHtml(buildNewsBodyPreview(item))}</p>`;
 
   const tagsCell = document.createElement("td");
-  const chipRow = document.createElement("div");
-  chipRow.className = "chip-row compact";
-  chipRow.appendChild(buildChip(formatStarLabel(item.importance_stars), "highlight"));
-  chipRow.appendChild(buildChip(formatNewsType(item.type)));
-  (item.related_symbols || []).slice(0, 3).forEach((symbol) => chipRow.appendChild(buildChip(symbol)));
-  tagsCell.appendChild(chipRow);
+  tagsCell.className = "news-tags-cell";
+  const chips = [
+    buildChip(formatStarLabel(item.importance_stars), starChipVariant(item.importance_stars)),
+    buildChip(formatNewsType(item.type)),
+    ...(item.related_symbols || []).map((symbol) => buildChip(symbol)),
+  ];
+  const primaryRow = document.createElement("div");
+  primaryRow.className = "chip-row compact centered nowrap";
+  const maxVisibleChips = 3;
+  chips.slice(0, maxVisibleChips).forEach((chip) => primaryRow.appendChild(chip));
+  tagsCell.appendChild(primaryRow);
+
+  if (chips.length > maxVisibleChips) {
+    const overflowLabels = [
+      formatStarLabel(item.importance_stars),
+      formatNewsType(item.type),
+      ...(item.related_symbols || []),
+    ].slice(maxVisibleChips);
+    const overflowRow = document.createElement("div");
+    overflowRow.className = "chip-row compact centered overflow-row";
+    const overflowChip = buildChip("⌄", "ellipsis ellipsis-arrow");
+    overflowChip.dataset.tooltip = overflowLabels.join(" / ");
+    overflowChip.setAttribute("aria-label", `剩余标签：${overflowLabels.join("，")}`);
+    overflowRow.appendChild(overflowChip);
+    tagsCell.appendChild(overflowRow);
+  }
 
   const actionCell = document.createElement("td");
+  actionCell.className = "news-action-cell";
   const button = document.createElement("button");
   button.className = "ghost";
   button.textContent = "查看详情";
@@ -358,43 +639,23 @@ function buildNewsRow(item) {
   return row;
 }
 
-function buildPendingCard(item) {
-  const cycle = buildReviewCycle(item.archiveDate);
-  const card = document.createElement("article");
-  card.className = "pending-card";
-  card.appendChild(textBlock("复盘日", item.archiveDate));
-  card.appendChild(textBlock("北京时间", cycle.beijingLabel));
-  card.appendChild(textBlock("状态", formatReviewStatus(item.reviewStatus)));
-
-  const button = document.createElement("button");
-  button.textContent = item.reviewStatus === "draft" ? "继续复盘" : "开始复盘";
-  button.addEventListener("click", () => {
-    switchView("reviews");
-    openReviewDrawer(item.archiveDate);
-  });
-  card.appendChild(button);
-  return card;
-}
-
 function buildReviewRow(item) {
   const cycle = buildReviewCycle(item.archive_date);
   const row = document.createElement("tr");
   row.innerHTML = `
-    <td><strong>${item.archive_date}</strong><small>${cycle.nyLabel}</small></td>
-    <td>${cycle.beijingLabel}</td>
-    <td>${escapeHtml(truncateText(item.news_summary || "待补充", 80))}</td>
+    <td><strong>${item.archive_date}</strong><small>${formatReviewWindowLabel(cycle)}</small></td>
     <td>${escapeHtml(truncateText(item.market_sentiment || "待补充", 70))}</td>
     <td>${escapeHtml(truncateText(item.sector_rotation || "待补充", 70))}</td>
     <td>${escapeHtml(truncateText(item.asset_plan || "待补充", 70))}</td>
     <td></td>
     <td></td>
   `;
-  const statusCell = row.children[6];
+  const statusCell = row.children[4];
   statusCell.appendChild(buildChip(formatReviewStatus(item.review_status || "draft"), reviewStatusVariant(item.review_status)));
 
-  const actionCell = row.children[7];
+  const actionCell = row.children[5];
   const button = document.createElement("button");
-  button.className = "ghost";
+  button.className = "ghost compact-button";
   button.textContent = item.review_status === "reviewed" ? "查看" : item.review_status === "draft" ? "继续复盘" : "开始复盘";
   button.addEventListener("click", () => openReviewDrawer(item.archive_date));
   actionCell.appendChild(button);
@@ -406,6 +667,14 @@ function buildChip(label, variant = "") {
   chip.className = `tag ${variant}`.trim();
   chip.textContent = label;
   return chip;
+}
+
+function starChipVariant(stars = 0) {
+  const value = Math.max(0, Number(stars) || 0);
+  if (value >= 5) return "star-5";
+  if (value >= 4) return "star-4";
+  if (value >= 3) return "star-3";
+  return "star-low";
 }
 
 function textBlock(label, value) {
@@ -425,153 +694,232 @@ function applyFormValues(values) {
   }
 }
 
+function buildPriceCard(item) {
+  const card = document.createElement("article");
+  card.className = "price-card";
+  const name = document.createElement("div");
+  name.className = "price-card-name";
+  const title = document.createElement("strong");
+  title.textContent = formatPriceDisplayName(item);
+  const symbol = document.createElement("span");
+  symbol.className = "price-card-symbol";
+  symbol.textContent = item?.symbol || "-";
+  name.append(title, symbol);
+  const price = document.createElement("div");
+  price.className = "price-value";
+  price.textContent = formatPrice(item.current_price);
+  const change = document.createElement("div");
+  const raw = Number(item.change_percent ?? 0);
+  change.className = `price-change ${raw > 0 ? "up" : raw < 0 ? "down" : ""}`.trim();
+  change.textContent = `${raw > 0 ? "+" : ""}${Number.isFinite(raw) ? raw.toFixed(2) : "-"}%`;
+  card.append(name, price, change);
+  return card;
+}
+
+function buildPriceSummaryLine(items) {
+  return items
+    .slice(0, 4)
+    .map((item) => {
+      const label = item.display_name || item.stock_name || item.symbol;
+      const raw = Number(item.change_percent ?? 0);
+      const sign = raw > 0 ? "+" : "";
+      const pct = Number.isFinite(raw) ? `${sign}${raw.toFixed(1)}%` : "-";
+      return `${label} ${pct}`;
+    })
+    .join("  ·  ");
+}
+
 function renderPrices(prices) {
   pricesBox.innerHTML = "";
+  pricesBox.classList.remove("price-sections-compact");
+  delete pricesBox.dataset.sectionCount;
+
+  // Sectioned display: { index: [...], sector: [...], stock: [...] }
+  if (prices && !Array.isArray(prices) && typeof prices === "object") {
+    const sections = [
+      { key: "index",  label: "大盘分析",    storageKey: "priceSectionIndex" },
+      { key: "sector", label: "板块分析",    storageKey: "priceSectionSector" },
+      { key: "stock",  label: "个股深度研究", storageKey: "priceSectionStock" },
+    ];
+    let hasAny = false;
+    let visibleSections = 0;
+    sections.forEach(({ key, label, storageKey }) => {
+      const items = prices[key] || [];
+      if (!items.length) return;
+      hasAny = true;
+      visibleSections += 1;
+      pricesBox.classList.add("price-sections-compact");
+
+      const details = document.createElement("details");
+      details.className = "price-section";
+      const savedState = localStorage.getItem(storageKey);
+      details.open = savedState !== "closed";
+      details.addEventListener("toggle", () => {
+        localStorage.setItem(storageKey, details.open ? "open" : "closed");
+      });
+
+      const summary = document.createElement("summary");
+      summary.className = "price-section-head";
+      const titleSpan = document.createElement("span");
+      titleSpan.textContent = label;
+      const summaryLine = document.createElement("span");
+      summaryLine.className = "price-section-summary";
+      summaryLine.textContent = buildPriceSummaryLine(items);
+      summary.append(titleSpan, summaryLine);
+
+      const list = document.createElement("div");
+      list.className = "price-list";
+      items.forEach((item) => list.appendChild(buildPriceCard(item)));
+
+      const body = document.createElement("div");
+      body.className = "price-section-body";
+      body.appendChild(list);
+
+      details.append(summary, body);
+      pricesBox.appendChild(details);
+    });
+    if (visibleSections) {
+      pricesBox.dataset.sectionCount = String(visibleSections);
+    }
+    if (!hasAny) pricesBox.innerHTML = `<div class="empty-state">暂无价格数据</div>`;
+    return;
+  }
+
+  // Flat array fallback
   if (!prices?.length) {
     pricesBox.innerHTML = `<div class="empty-state">暂无价格数据</div>`;
     return;
   }
-  prices.forEach((item) => {
-    const card = document.createElement("article");
-    card.className = "price-card";
-    const symbol = document.createElement("strong");
-    symbol.textContent = item.stock_name ? `${item.symbol} · ${item.stock_name}` : item.symbol || "-";
-    const price = document.createElement("div");
-    price.className = "price-value";
-    price.textContent = formatPrice(item.current_price);
-    const change = document.createElement("div");
-    const raw = Number(item.change_percent ?? 0);
-    change.className = `price-change ${raw > 0 ? "up" : raw < 0 ? "down" : ""}`.trim();
-    change.textContent = `${raw > 0 ? "+" : ""}${Number.isFinite(raw) ? raw.toFixed(2) : "-"}%`;
-    card.append(symbol, price, change);
-    pricesBox.appendChild(card);
-  });
+  prices.forEach((item) => pricesBox.appendChild(buildPriceCard(item)));
 }
 
 function renderAnalysis(analysis, news) {
+  const effective = getEffectiveAnalysis(analysis, news);
   analysisBox.innerHTML = "";
+
   const summary = document.createElement("section");
   summary.className = "analysis-summary";
   const eyebrow = document.createElement("span");
   eyebrow.className = "eyebrow";
-  eyebrow.textContent = "AI Summary";
+  eyebrow.append("每日新闻总结", buildAiBadge());
   const paragraph = document.createElement("p");
-  paragraph.textContent = buildAiSummaryText(analysis, news);
+  paragraph.textContent = formatBulletStyleText(effective?.daily_major_events || "暂无");
   summary.append(eyebrow, paragraph);
   analysisBox.appendChild(summary);
 
-  const outline = document.createElement("section");
-  outline.className = "analysis-outline";
-  [
-    { title: "宏观主线", value: splitLines(analysis?.global_news)[0] || splitLines(analysis?.market_news)[0] || "暂无" },
-    { title: "标的主线", value: splitLines(analysis?.symbol_news)[0] || topNewsHeadline((news || []).filter((item) => normalizeNewsType(item.type) === "symbol")) || "暂无" },
-  ].forEach((item) => {
-    const card = document.createElement("article");
-    card.className = "analysis-outline-card";
-    const title = document.createElement("strong");
-    title.textContent = item.title;
-    const body = document.createElement("p");
-    body.textContent = item.value;
-    card.append(title, body);
-    outline.appendChild(card);
-  });
-  analysisBox.appendChild(outline);
+  const chain = String(effective?.linkage_logic_chain || "").trim();
+  const split = splitAnalysisByType(effective?.sector_impact_map);
+  const hasAiLines = split.index.length || split.sector.length || split.stock.length || split.untagged.length;
+
+  if (chain || hasAiLines) {
+    const outline = document.createElement("section");
+    outline.className = "analysis-outline";
+
+    if (hasAiLines) {
+      const card = document.createElement("article");
+      card.className = "analysis-outline-card";
+      const title = document.createElement("strong");
+      title.append("市场影响", buildAiBadge());
+      const allLines = [
+        ...split.index.map((l) => l),
+        ...split.sector.map((l) => l),
+        ...split.stock.map((l) => l),
+        ...split.untagged.map((l) => l),
+      ];
+      const body = document.createElement("p");
+      body.textContent = formatBulletStyleText(allLines.join("\n"));
+      card.append(title, body);
+      outline.appendChild(card);
+    }
+
+    if (chain) {
+      const card = document.createElement("article");
+      card.className = "analysis-outline-card";
+      const title = document.createElement("strong");
+      title.append("逻辑链", buildAiBadge());
+      const body = document.createElement("p");
+      body.textContent = formatBulletStyleText(chain);
+      card.append(title, body);
+      outline.appendChild(card);
+    }
+
+    analysisBox.appendChild(outline);
+  }
+}
+
+function buildAiBadge() {
+  const badge = document.createElement("span");
+  badge.className = "ai-badge";
+  badge.innerHTML = `${AI_BADGE_ICON}<span class="sr-only">AI生成</span>`;
+  return badge;
 }
 
 function renderNewsPicker(news) {
   newsPicker.innerHTML = "";
-  reviewNewsDetailBox.innerHTML = "";
-  reviewNewsDetailBox.classList.add("hidden");
   if (!(news || []).length) {
     newsPicker.innerHTML = `<div class="empty-state">当前没有可纳入复盘的重点新闻。</div>`;
-    updateSelectedNewsField();
     return;
   }
 
-  if (!state.selectedNewsIds.size) {
-    news.forEach((item) => state.selectedNewsIds.add(String(item.id || item.pub_date)));
-  }
-
   const sorted = sortNewsByStars(news);
-  const intro = document.createElement("div");
-  intro.className = "review-news-header";
-  intro.innerHTML = `<strong>需复盘的新闻列表</strong><small>默认按星级筛出重点新闻，你可以取消勾选不需要进入复盘的条目。</small>`;
-  newsPicker.appendChild(intro);
+  const collapseNewsSections = true;
 
-  const macroNews = sorted.filter((item) => normalizeNewsType(item.type) === "macro");
-  const symbolNews = sorted.filter((item) => normalizeNewsType(item.type) === "symbol");
+  const indexNews = sorted.filter((item) => normalizeNewsType(item.type) === "index");
+  const sectorNews = sorted.filter((item) => normalizeNewsType(item.type) === "sector");
+  const stockNews = sorted.filter((item) => normalizeNewsType(item.type) === "stock");
 
-  newsPicker.appendChild(buildReviewNewsSection("宏观新闻", macroNews, false));
+  const newsTypeSections = [
+    { key: "index",  label: "大盘新闻",  items: indexNews,  emptyText: "当前没有大盘新闻。",  groupBy: false },
+    { key: "sector", label: "板块新闻",  items: sectorNews, emptyText: "当前没有板块新闻。",  groupBy: false },
+    { key: "stock",  label: "个股新闻",  items: stockNews,  emptyText: "当前没有个股新闻。",  groupBy: true  },
+  ];
 
-  const symbolSection = document.createElement("section");
-  symbolSection.className = "review-news-section";
-  const symbolHead = document.createElement("div");
-  symbolHead.className = "review-news-section-head";
-  symbolHead.innerHTML = `<h4>标的新闻</h4><small>按标的分组，默认折叠。</small>`;
-  symbolSection.appendChild(symbolHead);
+  newsTypeSections.forEach(({ label, items, emptyText, groupBy }) => {
+    const section = document.createElement(collapseNewsSections ? "details" : "section");
+    section.className = "review-news-section review-news-overview";
+    if (collapseNewsSections) section.open = false;
+    const head = document.createElement(collapseNewsSections ? "summary" : "div");
+    head.className = "review-news-section-head";
+    head.innerHTML = `<h4>${label}</h4><small>${items.length} 条</small>`;
 
-  if (!symbolNews.length) {
-    const empty = document.createElement("div");
-    empty.className = "empty-state";
-    empty.textContent = "当前没有标的新闻。";
-    symbolSection.appendChild(empty);
-  } else {
-    Object.entries(groupSymbolNews(symbolNews)).forEach(([symbol, items]) => {
-      const details = document.createElement("details");
-      details.className = "symbol-group";
-      const summary = document.createElement("summary");
-      summary.innerHTML = `<span>${escapeHtml(symbol)}</span><small>${items.length} 条 · 最高 ${formatStarLabel(items[0]?.importance_stars || 0)}</small>`;
-      details.appendChild(summary);
+    section.appendChild(head);
 
-      const body = document.createElement("div");
-      body.className = "review-news-group-body";
-      items.forEach((item) => body.appendChild(buildReviewNewsItem(item)));
-      details.appendChild(body);
-      symbolSection.appendChild(details);
-    });
-  }
-  newsPicker.appendChild(symbolSection);
-  updateSelectedNewsField();
+    if (!items.length) {
+      const empty = document.createElement("div");
+      empty.className = "empty-state";
+      empty.textContent = emptyText;
+      section.appendChild(empty);
+    } else if (groupBy) {
+      Object.entries(groupSymbolNews(items)).forEach(([symbol, group]) => {
+        section.appendChild(buildReviewNewsGroup(symbol, group, collapseNewsSections));
+      });
+    } else {
+      section.appendChild(buildReviewNewsGroup(label, items, collapseNewsSections));
+    }
+    newsPicker.appendChild(section);
+  });
 }
 
-function buildReviewNewsSection(title, items, collapsible = false) {
-  const section = document.createElement(collapsible ? "details" : "section");
-  section.className = "review-news-section";
-  if (collapsible) section.open = false;
+function buildReviewNewsGroup(title, items, expanded = false) {
+  const container = document.createElement(expanded ? "article" : "details");
+  container.className = "symbol-group";
+  if (!expanded) container.open = false;
 
-  const head = document.createElement(collapsible ? "summary" : "div");
-  head.className = "review-news-section-head";
-  head.innerHTML = `<h4>${escapeHtml(title)}</h4><small>${items.length ? `${items.length} 条，按星级从高到低排序` : "当前没有可展示的新闻"}</small>`;
-  section.appendChild(head);
-
-  if (!items.length) {
-    const empty = document.createElement("div");
-    empty.className = "empty-state";
-    empty.textContent = "当前没有可纳入复盘的新闻。";
-    section.appendChild(empty);
-    return section;
-  }
+  const head = document.createElement(expanded ? "div" : "summary");
+  head.className = "symbol-group-head";
+  head.innerHTML = `<span>${escapeHtml(title)}</span><small>${items.length} 条 · 最高 ${formatStarLabel(items[0]?.importance_stars || 0)}</small>`;
+  container.appendChild(head);
 
   const body = document.createElement("div");
   body.className = "review-news-group-body";
   items.forEach((item) => body.appendChild(buildReviewNewsItem(item)));
-  section.appendChild(body);
-  return section;
+  container.appendChild(body);
+  return container;
 }
 
 function buildReviewNewsItem(item) {
-  const key = String(item.id || item.pub_date);
   const article = document.createElement("article");
   article.className = "review-news-item";
-
-  const checkbox = document.createElement("input");
-  checkbox.type = "checkbox";
-  checkbox.checked = state.selectedNewsIds.has(key);
-  checkbox.addEventListener("change", () => {
-    if (checkbox.checked) state.selectedNewsIds.add(key);
-    else state.selectedNewsIds.delete(key);
-    updateSelectedNewsField();
-  });
 
   const body = document.createElement("div");
   body.className = "review-news-item-body";
@@ -595,65 +943,24 @@ function buildReviewNewsItem(item) {
   button.type = "button";
   button.className = "ghost";
   button.textContent = "查看新闻";
-  button.addEventListener("click", () => renderReviewNewsDetail(item));
+  button.addEventListener("click", () => openNewsDetailFromItem(item));
   foot.append(time, button);
 
   body.append(title, meta, impact, foot);
-  article.append(checkbox, body);
+  article.append(body);
   return article;
 }
 
-function renderReviewNewsDetail(item) {
-  reviewNewsDetailBox.innerHTML = "";
-  reviewNewsDetailBox.classList.remove("hidden");
-
-  const header = document.createElement("div");
-  header.className = "review-news-detail-head";
-  const title = document.createElement("strong");
-  title.textContent = item.ai_summary || item.title || "未命名新闻";
-  const close = document.createElement("button");
-  close.type = "button";
-  close.className = "ghost";
-  close.textContent = "收起详情";
-  close.addEventListener("click", () => {
-    reviewNewsDetailBox.classList.add("hidden");
-    reviewNewsDetailBox.innerHTML = "";
-  });
-  header.append(title, close);
-
-  const meta = document.createElement("p");
-  meta.className = "muted";
-  meta.textContent = `${item.pub_date || "未知时间"} · ${item.source || "未知来源"} · ${formatNewsType(item.type)}`;
-
-  const tags = document.createElement("div");
-  tags.className = "chip-row compact";
-  tags.appendChild(buildChip(formatStarLabel(item.importance_stars), "highlight"));
-  (item.related_symbols || []).forEach((symbol) => tags.appendChild(buildChip(symbol)));
-
-  const summary = buildReviewNewsDetailBlock("AI 摘要", item.ai_summary || "暂无 AI 摘要");
-  const origin = buildReviewNewsDetailBlock("原始标题", item.title || "暂无原始标题");
-  const impact = buildReviewNewsDetailBlock("市场影响", item.market_impact || item.rule_reason || "暂无市场影响说明");
-  const content = buildReviewNewsDetailBlock("正文", item.content || "暂无正文");
-
-  reviewNewsDetailBox.append(header, meta, tags, summary, origin, impact, content);
-  reviewNewsDetailBox.scrollIntoView({ behavior: "smooth", block: "nearest" });
+function showReviewNewsFallback(item) {
+  openNewsDetailFromItem(item);
 }
 
-function buildReviewNewsDetailBlock(label, value) {
-  const block = document.createElement("div");
-  block.className = "detail-block";
-  const title = document.createElement("strong");
-  title.textContent = label;
-  const text = document.createElement("p");
-  text.textContent = value;
-  block.append(title, text);
-  return block;
-}
-
-function setReviewStep(stepKey) {
-  state.reviewStep = stepKey;
+function setReviewStep(stepKey = null) {
+  if (stepKey) state.reviewStep = stepKey;
   reviewStepNav.innerHTML = "";
   const maxReachableIndex = getMaxReachableStepIndex();
+  const reviewedMode = state.reviewStatus === "reviewed" && !state.editMode;
+  reviewStepNav.classList.toggle("reviewed-mode", reviewedMode);
 
   REVIEW_STEPS.forEach((step, index) => {
     const button = document.createElement("button");
@@ -663,20 +970,29 @@ function setReviewStep(stepKey) {
     const isLocked = index > maxReachableIndex;
     button.className = `step-chip ${isActive ? "active" : ""} ${isCompleted ? "completed" : ""}`.trim();
     button.textContent = `${index + 1}. ${step.label}`;
-    button.disabled = isLocked;
-    if (!isLocked) button.addEventListener("click", () => setReviewStep(step.key));
+    button.disabled = reviewedMode ? false : isLocked;
+    if (!button.disabled) {
+      button.addEventListener("click", () => {
+        setReviewStep(step.key);
+        if (reviewedMode) scrollToReviewStep(step.key);
+      });
+    }
     reviewStepNav.appendChild(button);
   });
 
   document.querySelectorAll(".review-step-panel").forEach((panel) => {
-    panel.classList.toggle("hidden", panel.dataset.step !== stepKey);
+    const shouldShow = reviewedMode || panel.dataset.step === state.reviewStep;
+    panel.classList.toggle("hidden", !shouldShow);
+    panel.classList.toggle("review-step-panel-active", panel.dataset.step === state.reviewStep);
   });
 
-  const index = REVIEW_STEPS.findIndex((step) => step.key === stepKey);
-  reviewStepHint.textContent = REVIEW_STEPS[index]?.hint || "";
-  prevStepBtn.disabled = index <= 0;
-  nextStepBtn.textContent = index === REVIEW_STEPS.length - 1 ? "完成复盘" : "下一步";
-  nextStepBtn.disabled = false;
+  const index = REVIEW_STEPS.findIndex((step) => step.key === state.reviewStep);
+  reviewStepHint.textContent = reviewedMode
+    ? "点击上方标记可直接跳到对应模块。"
+    : REVIEW_STEPS[index]?.hint || "";
+  prevStepBtn.disabled = reviewedMode || index <= 0;
+  nextStepBtn.textContent = reviewedMode ? "已复盘" : index === REVIEW_STEPS.length - 1 ? "完成复盘" : "下一步";
+  nextStepBtn.disabled = reviewedMode;
 }
 
 function moveReviewStep(delta) {
@@ -693,11 +1009,16 @@ async function handleNextStep() {
 
   if (currentIndex === REVIEW_STEPS.length - 1) {
     await saveReview();
-    await fetchJson(`/api/reviews/${state.activeDate}/complete`, { method: "POST" });
+    await fetchJson(`/api/reviews/${state.activeDate}/complete`, {
+      method: "POST",
+      auth: true,
+      authReason: "完成复盘",
+    });
     setReviewStatus("reviewed");
     setReviewMode("reviewed");
     if (state.activeBootstrap?.draft) state.activeBootstrap.draft.review_status = "reviewed";
-    await Promise.all([loadPendingReviews(), loadReviews()]);
+    await loadReviews();
+    closeDrawer();
     return;
   }
 
@@ -707,8 +1028,8 @@ async function handleNextStep() {
 function getStepValue(step) {
   if (!step) return "";
   if (step.key === "news") {
-    const summary = String(reviewForm.elements.namedItem("newsBrief")?.value || "").trim();
-    return summary && state.selectedNewsIds.size > 0 ? summary : "";
+    const summary = String(reviewForm.elements.namedItem("reviewerNewsNotes")?.value || "").trim();
+    return summary;
   }
   return String(reviewForm.elements.namedItem(step.field)?.value || "").trim();
 }
@@ -735,11 +1056,7 @@ function getMaxReachableStepIndex() {
 function validateStep(step, showAlert = true) {
   if (!step) return false;
   if (step.key === "news") {
-    const summary = String(reviewForm.elements.namedItem("newsBrief")?.value || "").trim();
-    if (!state.selectedNewsIds.size) {
-      if (showAlert) window.alert("先在新闻汇总里至少勾选一条重点新闻。");
-      return false;
-    }
+    const summary = String(reviewForm.elements.namedItem("reviewerNewsNotes")?.value || "").trim();
     if (!summary) {
       if (showAlert) window.alert("先把新闻汇总写出来，再进入下一步。");
       return false;
@@ -758,13 +1075,20 @@ function validateStep(step, showAlert = true) {
 }
 
 function setReviewStatus(status) {
+  state.reviewStatus = status;
   reviewStatusBadge.textContent = formatReviewStatus(status);
   reviewStatusBadge.className = `status-pill ${reviewStatusVariant(status)}`.trim();
 }
 
+function applyEditMode(editable) {
+  state.editMode = editable;
+  setReviewMode(state.reviewStatus);
+}
+
 function setReviewMode(status) {
-  const readOnly = status === "reviewed";
+  const readOnly = status === "reviewed" && !state.editMode;
   reviewActionGroup.classList.toggle("hidden", false);
+  reviewModalFooter.classList.toggle("hidden", readOnly);
   prevStepBtn.disabled = readOnly || REVIEW_STEPS.findIndex((step) => step.key === state.reviewStep) <= 0;
   nextStepBtn.disabled = readOnly ? true : false;
   Array.from(reviewForm.elements).forEach((field) => {
@@ -772,42 +1096,51 @@ function setReviewMode(status) {
     if ("disabled" in field && field.type !== "hidden") field.disabled = readOnly && field.type === "checkbox";
   });
   saveDraftBtn.disabled = readOnly;
-  initializeBtn.textContent = status === "initialized" ? "已初始化" : "重新初始化";
-  initializeBtn.disabled = status === "initialized" || status === "reviewed";
+  if (status === "reviewed") {
+    initializeBtn.textContent = state.editMode ? "编辑中" : "编辑";
+    initializeBtn.disabled = state.editMode;
+  } else {
+    initializeBtn.textContent = status === "initialized" ? "已初始化" : "重新初始化";
+    initializeBtn.disabled = status === "initialized";
+  }
   nextStepBtn.textContent = status === "reviewed"
     ? "已复盘"
     : REVIEW_STEPS.findIndex((step) => step.key === state.reviewStep) === REVIEW_STEPS.length - 1
       ? "完成复盘"
       : "下一步";
+  setReviewStep(state.reviewStep);
+}
+
+function scrollToReviewStep(stepKey) {
+  const panel = document.querySelector(`.review-step-panel[data-step="${stepKey}"]`);
+  if (!panel) return;
+  panel.scrollIntoView({ behavior: "smooth", block: "start" });
 }
 
 function getDefaultNewsFilters() {
-  const data = new FormData(newsFiltersForm);
-  if (!data.get("type")) data.set("type", "major");
-  return data;
+  return new FormData(newsFiltersForm);
 }
 
 function getEffectiveAnalysis(analysis, news) {
   const sections = analysis || {};
-  const hasContent = [sections.global_news, sections.market_news, sections.symbol_news, sections.market_analysis]
+  const hasContent = [sections.daily_major_events, sections.sector_impact_map, sections.linkage_logic_chain]
     .some((value) => String(value || "").trim() && !isGarbageAnalysisSummary(value));
   if (hasContent) return sections;
 
-  const pick = (type) => (news || [])
-    .filter((item) => item.type === type)
+  const pick = (predicate) => (news || [])
+    .filter(predicate)
     .slice(0, 4)
     .map((item) => item.ai_summary || item.title || item.content || "")
     .filter(Boolean)
     .join("\n");
   return {
-    global_news: pick("macro"),
-    market_news: pick("market"),
-    symbol_news: pick("symbol"),
-    market_analysis: (news || [])
+    daily_major_events: pick(() => true),
+    sector_impact_map: (news || [])
       .slice(0, 3)
       .map((item) => item.market_impact || item.ai_summary || item.title || "")
       .filter(Boolean)
-      .join("；") || "暂无新闻分析，请先运行新闻采集。",
+      .join("\n") || "暂无新闻分析，请先运行新闻采集。",
+    linkage_logic_chain: pick((item) => item.type === "symbol" || item.type === "stock") || pick(() => true),
   };
 }
 
@@ -817,18 +1150,28 @@ function buildDefaultNewsBrief(analysis, news) {
 
 function buildAiSummaryText(analysis, news) {
   const effective = getEffectiveAnalysis(analysis, news);
-  const candidate = String(effective.market_analysis || "").trim();
-  if (candidate && !isGarbageAnalysisSummary(candidate)) return candidate;
+  const candidate = String(effective.daily_major_events || "").trim();
+  if (candidate && !isGarbageAnalysisSummary(candidate)) return formatBulletStyleText(candidate);
 
   const parts = [];
-  const macroLine = splitLines(effective.global_news)[0] || splitLines(effective.market_news)[0];
-  const symbolLine = splitLines(effective.symbol_news)[0];
+  const macroLine = splitLines(effective.daily_major_events)[0] || splitLines(effective.sector_impact_map)[0];
+  const symbolLine = splitLines(effective.sector_impact_map)[0] || splitLines(effective.linkage_logic_chain)[0];
   const impactLine = topNewsImpact(news);
 
   if (macroLine) parts.push(`宏观主线：${macroLine}`);
   if (symbolLine) parts.push(`标的主线：${symbolLine}`);
   if (impactLine) parts.push(`市场影响：${impactLine}`);
-  return parts.join(" ") || "暂无新闻分析，请先运行新闻采集。";
+  return formatBulletStyleText(parts.join("\n")) || "暂无新闻分析，请先运行新闻采集。";
+}
+
+function formatBulletStyleText(value) {
+  const text = String(value || "").trim();
+  if (!text) return "";
+  const items = splitLines(text)
+    .map((item) => item.trim())
+    .filter(Boolean)
+    .map((item) => (/^[•·▪◦\-]\s*/.test(item) ? item : `• ${item}`));
+  return items.join("\n");
 }
 
 function isGarbageAnalysisSummary(value) {
@@ -850,7 +1193,31 @@ function sortNewsByStars(news) {
 }
 
 function normalizeNewsType(type) {
-  return type === "symbol" ? "symbol" : "macro";
+  if (type === "stock" || type === "symbol") return "stock";
+  if (type === "sector" || type === "market") return "sector";
+  return "index";
+}
+
+function splitAnalysisByType(text) {
+  const lines = String(text || "").split("\n").map((s) => s.trim()).filter(Boolean);
+  const result = { index: [], sector: [], stock: [], untagged: [] };
+  for (const line of lines) {
+    if (/^\[(大盘|index)\]/i.test(line)) {
+      result.index.push(line.replace(/^\[(大盘|index)\]\s*/i, ""));
+    } else if (/^\[(板块|sector)\]/i.test(line)) {
+      result.sector.push(line.replace(/^\[(板块|sector)\]\s*/i, ""));
+    } else if (/^\[(个股|stock)\]/i.test(line)) {
+      result.stock.push(line.replace(/^\[(个股|stock)\]\s*/i, ""));
+    } else {
+      result.untagged.push(line);
+    }
+  }
+  // If nothing is tagged, fall back: put all lines in index
+  if (!result.index.length && !result.sector.length && !result.stock.length) {
+    result.index = result.untagged;
+    result.untagged = [];
+  }
+  return result;
 }
 
 function groupSymbolNews(news) {
@@ -885,6 +1252,10 @@ function buildReviewCycle(archiveDate) {
     nyLabel: `美股交易日 ${archiveDate}`,
     beijingLabel: `北京时间 ${formatBeijingMoment(open)} - ${formatBeijingMoment(close)}`,
   };
+}
+
+function formatReviewWindowLabel(cycle) {
+  return `BJT ${cycle.beijingLabel.replace(/^北京时间\s*/, "")}`;
 }
 
 function resolveNyTimeToBeijing(dateString, targetTime) {
@@ -926,20 +1297,50 @@ function formatBeijingMoment(date) {
   }).replace(",", "");
 }
 
-function updateSelectedNewsField() {
-  const field = reviewForm.elements.namedItem("selectedNewsIds");
-  if (field) field.value = JSON.stringify([...state.selectedNewsIds]);
+function formatNewsWindowBoundaryBeijing(value) {
+  const text = String(value || "").trim();
+  const match = text.match(/^(\d{4}-\d{2}-\d{2})[ T](\d{2}):(\d{2})/);
+  if (!match) return text;
+  const [, dateString, hour, minute] = match;
+  const beijingDate = resolveNyTimeToBeijing(dateString, `${hour}:${minute}`);
+  return beijingDate.toLocaleString("zh-CN", {
+    timeZone: "Asia/Shanghai",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+    hour12: false,
+  }).replace(",", "");
 }
 
-function parseStoredIds(value) {
-  if (Array.isArray(value)) return value.map(String);
-  if (typeof value !== "string" || !value) return [];
-  try {
-    const parsed = JSON.parse(value);
-    return Array.isArray(parsed) ? parsed.map(String) : [];
-  } catch {
-    return [];
-  }
+function formatPriceDisplayLabel(item) {
+  const symbol = String(item?.symbol || "").trim();
+  const preferredName = formatPriceDisplayName(item);
+  return symbol ? `${preferredName} · ${symbol}` : preferredName;
+}
+
+function formatPriceDisplayName(item) {
+  const symbol = String(item?.symbol || "").trim();
+  return SYMBOL_DISPLAY_LABELS[symbol]
+    || String(item?.display_name || "").trim()
+    || normalizeChineseSecurityName(item?.stock_name)
+    || String(item?.stock_name || "").trim()
+    || symbol
+    || "-";
+}
+
+function normalizeChineseSecurityName(name) {
+  const text = String(name || "").trim();
+  if (!text) return "";
+  if (text === "SSE Composite") return "上证指数";
+  if (text === "Hang Seng") return "恒生指数";
+  if (text === "S&P 500") return "标普500";
+  if (text === "Volatility Index") return "恐慌指数";
+  if (text === "Dollar Index") return "美元指数";
+  if (text === "Gold") return "黄金";
+  return text;
 }
 
 function splitLines(value) {
@@ -1004,7 +1405,7 @@ function reviewStatusVariant(status) {
 
 function formatStarLabel(stars = 0) {
   const value = Math.max(0, Number(stars) || 0);
-  return value ? `${"★".repeat(value)} ${value}星` : "0星观察";
+  return value ? "★".repeat(value) : "观察";
 }
 
 function formatPrice(value) {
@@ -1020,8 +1421,440 @@ function escapeHtml(value) {
 }
 
 async function fetchJson(url, options = {}) {
-  const response = await fetch(url, options);
-  const data = await response.json();
-  if (!response.ok) throw new Error(data.error || "请求失败");
-  return data;
+  const { auth = false, authReason = "当前操作", ...fetchOptions } = options;
+
+  async function sendRequest(forcePrompt = false) {
+    const requestOptions = {
+      ...fetchOptions,
+      headers: new Headers(fetchOptions.headers || {}),
+    };
+
+    if (auth) {
+      const token = getAppToken({ reason: authReason, forcePrompt });
+      requestOptions.headers.set("Authorization", `Bearer ${token}`);
+    }
+
+    const response = await fetch(url, requestOptions);
+    const data = await response.json().catch(() => ({}));
+
+    if (auth && response.status === 401) {
+      clearStoredAppToken();
+      if (!forcePrompt) return sendRequest(true);
+      throw new Error(data.error || "令牌无效或未授权");
+    }
+    if (!response.ok) throw new Error(data.error || "请求失败");
+    return data;
+  }
+
+  return sendRequest(false);
+}
+
+function getStoredAppToken() {
+  try {
+    return localStorage.getItem(APP_TOKEN_STORAGE_KEY)?.trim() || "";
+  } catch {
+    return "";
+  }
+}
+
+function setStoredAppToken(token) {
+  try {
+    localStorage.setItem(APP_TOKEN_STORAGE_KEY, token);
+  } catch {
+    // ignore storage failures
+  }
+}
+
+function clearStoredAppToken() {
+  try {
+    localStorage.removeItem(APP_TOKEN_STORAGE_KEY);
+  } catch {
+    // ignore storage failures
+  }
+}
+
+function getAppToken({ reason = "当前操作", forcePrompt = false } = {}) {
+  const existing = !forcePrompt ? getStoredAppToken() : "";
+  if (existing) return existing;
+
+  const entered = window.prompt(
+    forcePrompt
+      ? `${reason}鉴权失败，请重新输入写入令牌。`
+      : `${reason}需要写入令牌。请输入 Worker 配置的 INGEST_API_TOKEN（或 APP_API_TOKEN）。`,
+    "",
+  );
+  const normalized = String(entered || "").trim();
+  if (!normalized) throw new Error("未提供写入令牌");
+  setStoredAppToken(normalized);
+  return normalized;
+}
+
+// ========== Symbol Manager ==========
+
+async function loadSymbols(forceRefresh = false) {
+  const indexList = document.querySelector("#symbolsIndexList");
+  const sectorList = document.querySelector("#symbolsSectorList");
+  const stockList = document.querySelector("#symbolsStockList");
+  if (!indexList) return;
+
+  [indexList, sectorList, stockList].forEach((el) => {
+    el.innerHTML = `<tr><td colspan="6" class="empty-state">加载中...</td></tr>`;
+  });
+
+  try {
+    const data = await fetchJson("/api/symbols?active=0");
+    const items = data.items || [];
+    state.symbolsLoaded = true;
+
+    const byType = { index: [], sector: [], stock: [] };
+    items.forEach((item) => {
+      const t = item.symbol_type || "stock";
+      if (byType[t]) byType[t].push(item);
+    });
+
+    const render = (tbody, typeItems) => {
+      tbody.innerHTML = "";
+      if (!typeItems.length) {
+        tbody.innerHTML = `<tr><td colspan="6" class="empty-state">暂无标的</td></tr>`;
+        return;
+      }
+      typeItems.forEach((item) => tbody.appendChild(buildSymbolRow(item)));
+    };
+    render(indexList, byType.index);
+    render(sectorList, byType.sector);
+    render(stockList, byType.stock);
+    [indexList, sectorList, stockList].forEach((g) => {
+      if (g.querySelector(".symbol-row")) initSymbolDragDrop(g);
+    });
+  } catch (error) {
+    [indexList, sectorList, stockList].forEach((el) => {
+      el.innerHTML = `<tr><td colspan="6" class="empty-state">加载失败: ${escapeHtml(error.message)}</td></tr>`;
+    });
+  }
+}
+
+function buildSymbolRow(item) {
+  const row = document.createElement("tr");
+  row.className = `symbol-row ${item.is_active ? "" : "symbol-row-inactive"}`.trim();
+  row.draggable = true;
+  row.dataset.id = String(item.id);
+  row.dataset.symbol = item.symbol;
+
+  const aliases = Array.isArray(item.aliases) ? item.aliases : [];
+  const typeClass = { index: "type-index", sector: "type-sector", stock: "type-stock" }[item.symbol_type] || "type-stock";
+  const typeLabel = { index: "大盘", sector: "板块", stock: "个股" }[item.symbol_type] || item.symbol_type;
+  const yahooIsDiff = item.yahoo_symbol && item.yahoo_symbol !== item.symbol;
+  const activeLabel = item.is_active ? "显示中" : "已隐藏";
+  const activeClass = item.is_active ? "status-active" : "status-hidden";
+  const toggleLabel = item.is_active ? "隐藏" : "显示";
+
+  row.innerHTML = `
+    <td class="symbol-col-drag"><span class="symbol-drag-handle" title="拖拽排序">⠿</span></td>
+    <td class="symbol-col-name">
+      <div class="symbol-name-stack">
+        <strong>${escapeHtml(item.display_name || item.symbol)}</strong>
+        <span class="symbol-visibility-badge ${activeClass}">${activeLabel}</span>
+      </div>
+    </td>
+    <td class="symbol-col-codes">
+      <code class="sym-code">${escapeHtml(item.symbol)}</code>
+      ${yahooIsDiff ? `<span class="sym-arrow">→</span><code class="sym-code sym-code-yahoo">${escapeHtml(item.yahoo_symbol)}</code>` : ""}
+    </td>
+    <td class="symbol-col-type">
+      <span class="symbol-type-badge ${typeClass}">${typeLabel}</span>
+    </td>
+    <td class="symbol-col-aliases">
+      ${aliases.map((a) => `<span class="alias-chip">${escapeHtml(a)}</span>`).join("")}
+    </td>
+    <td class="symbol-col-actions">
+      <button class="symbol-edit-btn" data-action="edit" data-id="${escapeHtml(String(item.id))}">编辑</button>
+      <button class="symbol-toggle-btn ${activeClass}" data-action="toggle" data-id="${escapeHtml(String(item.id))}" data-symbol="${escapeHtml(item.symbol)}" data-active="${item.is_active ? "1" : "0"}">${toggleLabel}</button>
+    </td>
+  `;
+
+  row.querySelector("[data-action='edit']").addEventListener("click", () => {
+    showSymbolForm({ ...item });
+  });
+  row.querySelector("[data-action='toggle']").addEventListener("click", async (e) => {
+    const { id, symbol, active } = e.currentTarget.dataset;
+    const isActive = active === "1";
+    const actionLabel = isActive ? "隐藏" : "显示";
+    const confirmMessage = isActive
+      ? `确认隐藏标的 ${symbol}？隐藏后将不再参与后续采集、打标与默认展示。`
+      : `确认显示标的 ${symbol}？显示后将重新参与后续采集、打标与默认展示。`;
+    if (!window.confirm(confirmMessage)) return;
+    try {
+      let updatedItem = null;
+      if (isActive) {
+        const result = await fetchJson(`/api/symbols/${id}`, {
+          method: "DELETE",
+          auth: true,
+          authReason: "隐藏标的",
+        });
+        updatedItem = result.item || null;
+      } else {
+        const result = await fetchJson(`/api/symbols/${id}`, {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ is_active: 1 }),
+          auth: true,
+          authReason: "显示标的",
+        });
+        updatedItem = result.item || null;
+      }
+      if (updatedItem) {
+        row.replaceWith(buildSymbolRow(updatedItem));
+      } else {
+        await loadSymbols();
+      }
+    } catch (err) {
+      window.alert(`${actionLabel}失败: ${err.message}`);
+    }
+  });
+  return row;
+}
+
+// 保留 buildSymbolCard 作为别名，兼容 initSymbolDragDrop 里的 .symbol-card 选择器
+function buildSymbolCard(item) { return buildSymbolRow(item); }
+
+// 为同一个 <tbody> 内的行绑定拖拽排序
+function initSymbolDragDrop(tbody) {
+  let dragSrc = null;
+
+  tbody.addEventListener("dragstart", (e) => {
+    const row = e.target.closest(".symbol-row");
+    if (!row) return;
+    dragSrc = row;
+    row.classList.add("dragging");
+    e.dataTransfer.effectAllowed = "move";
+  });
+
+  tbody.addEventListener("dragend", () => {
+    tbody.querySelectorAll(".symbol-row").forEach((r) => r.classList.remove("dragging", "drag-over"));
+    dragSrc = null;
+  });
+
+  tbody.addEventListener("dragover", (e) => {
+    e.preventDefault();
+    e.dataTransfer.dropEffect = "move";
+    const target = e.target.closest(".symbol-row");
+    if (!target || target === dragSrc) return;
+    tbody.querySelectorAll(".symbol-row").forEach((r) => r.classList.remove("drag-over"));
+    target.classList.add("drag-over");
+  });
+
+  tbody.addEventListener("dragleave", (e) => {
+    const row = e.target.closest(".symbol-row");
+    if (row) row.classList.remove("drag-over");
+  });
+
+  tbody.addEventListener("drop", async (e) => {
+    e.preventDefault();
+    const target = e.target.closest(".symbol-row");
+    if (!target || !dragSrc || target === dragSrc) return;
+    target.classList.remove("drag-over");
+
+    const rows = [...tbody.querySelectorAll(".symbol-row")];
+    const fromIdx = rows.indexOf(dragSrc);
+    const toIdx = rows.indexOf(target);
+    if (fromIdx < toIdx) {
+      tbody.insertBefore(dragSrc, target.nextSibling);
+    } else {
+      tbody.insertBefore(dragSrc, target);
+    }
+
+    const updated = [...tbody.querySelectorAll(".symbol-row")];
+    const patches = updated.map((r, i) => ({ id: Number(r.dataset.id), sort_order: i + 1 }));
+    try {
+      await Promise.all(patches.map(({ id, sort_order }) =>
+        fetchJson(`/api/symbols/${id}`, {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ sort_order }),
+          auth: true,
+          authReason: "保存标的排序",
+        })
+      ));
+    } catch {
+      // 持久化失败不影响 UI
+    }
+  });
+}
+
+function showSymbolForm(prefill = {}) {
+  const preview = document.querySelector("#symbolResolvePreview");
+  const isEdit = Boolean(prefill.id);
+  const aliasStr = Array.isArray(prefill.aliases)
+    ? prefill.aliases.join(", ")
+    : String(prefill.aliases || "");
+
+  preview.classList.remove("hidden");
+  preview.innerHTML = `
+    <div class="symbol-resolve-card">
+      <form id="symbolManualForm" class="symbol-manual-form" autocomplete="off">
+        <div class="symbol-manual-grid">
+          <label>
+            <small>系统代码</small>
+            <input type="text" name="symbol" value="${escapeHtml(prefill.symbol || "")}" placeholder="如 MU、GSPC、SOXX" ${isEdit ? "readonly" : ""} required />
+          </label>
+          <label>
+            <small>Yahoo 代码</small>
+            <input type="text" name="yahoo_symbol" value="${escapeHtml(prefill.yahoo_symbol || "")}" placeholder="如 MU、^GSPC、GC=F" />
+          </label>
+          <label>
+            <small>显示名称</small>
+            <input type="text" name="display_name" value="${escapeHtml(prefill.display_name || "")}" placeholder="如 美光科技、标普500" required />
+          </label>
+          <label>
+            <small>类型</small>
+            <select name="symbol_type">
+              <option value="index" ${prefill.symbol_type === "index" ? "selected" : ""}>大盘 / 指数</option>
+              <option value="sector" ${prefill.symbol_type === "sector" ? "selected" : ""}>板块 / ETF</option>
+              <option value="stock" ${(!prefill.symbol_type || prefill.symbol_type === "stock") ? "selected" : ""}>个股</option>
+            </select>
+          </label>
+          <label class="symbol-manual-aliases-label">
+            <small>别名（逗号分隔，用于新闻匹配）</small>
+            <input type="text" name="aliases" value="${escapeHtml(aliasStr)}" placeholder="如 Micron, Micron Technology, 美光" />
+          </label>
+        </div>
+        <div class="action-row">
+          <button type="submit">${isEdit ? "保存修改" : "添加标的"}</button>
+          <button type="button" id="symbolFormCancelBtn" class="ghost">取消</button>
+        </div>
+        ${prefill.id ? `<input type="hidden" name="id" value="${prefill.id}" />` : ""}
+      </form>
+    </div>
+  `;
+
+  preview.querySelector("#symbolFormCancelBtn").addEventListener("click", () => {
+    preview.classList.add("hidden");
+  });
+  preview.querySelector("#symbolManualForm").addEventListener("submit", async (e) => {
+    e.preventDefault();
+    await submitSymbolForm(new FormData(e.target));
+  });
+}
+
+async function submitSymbolForm(formData) {
+  const preview = document.querySelector("#symbolResolvePreview");
+  const submitBtn = preview.querySelector("button[type='submit']");
+  const id = formData.get("id");
+  const aliasRaw = String(formData.get("aliases") || "").trim();
+  const aliases = aliasRaw ? aliasRaw.split(",").map((s) => s.trim()).filter(Boolean) : [];
+
+  const payload = {
+    symbol: String(formData.get("symbol") || "").trim().toUpperCase(),
+    yahoo_symbol: String(formData.get("yahoo_symbol") || "").trim() || null,
+    display_name: String(formData.get("display_name") || "").trim(),
+    symbol_type: formData.get("symbol_type"),
+    aliases,
+  };
+
+  if (!payload.symbol || !payload.display_name) {
+    window.alert("系统代码和显示名称不能为空。");
+    return;
+  }
+
+  if (submitBtn) { submitBtn.disabled = true; submitBtn.textContent = "提交中..."; }
+  try {
+    if (id) {
+      await fetchJson(`/api/symbols/${id}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+        auth: true,
+        authReason: "更新标的",
+      });
+    } else {
+      await fetchJson("/api/symbols", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+        auth: true,
+        authReason: "新增标的",
+      });
+    }
+    preview.classList.add("hidden");
+    await loadSymbols();
+  } catch (err) {
+    window.alert(`操作失败: ${err.message}`);
+    if (submitBtn) { submitBtn.disabled = false; submitBtn.textContent = id ? "保存修改" : "添加标的"; }
+  }
+}
+
+async function resolveSymbolInput() {
+  const input = document.querySelector("#symbolResolveInput");
+  const preview = document.querySelector("#symbolResolvePreview");
+  const query = input?.value?.trim();
+  if (!query) { window.alert("请先输入标的名称或代码。"); return; }
+
+  const btn = document.querySelector("#symbolResolveBtn");
+  btn.disabled = true;
+  btn.textContent = "解析中...";
+  preview.classList.remove("hidden");
+  preview.innerHTML = `<div class="empty-state">AI 正在识别「${escapeHtml(query)}」...</div>`;
+
+  try {
+    const data = await fetchJson("/api/symbols/resolve", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ input: query }),
+      auth: true,
+      authReason: "智能解析标的",
+    });
+    const item = data.resolved;
+    state.symbolResolveResult = item;
+    preview.innerHTML = `
+      <div class="symbol-resolve-card">
+        <div class="symbol-resolve-info">
+          <div><small>系统代码</small><strong>${escapeHtml(item.symbol)}</strong></div>
+          <div><small>Yahoo 代码</small><strong>${escapeHtml(item.yahoo_symbol || "-")}</strong></div>
+          <div><small>显示名称</small><strong>${escapeHtml(item.display_name || "-")}</strong></div>
+          <div><small>类型</small><strong>${escapeHtml(symbolTypeLabel(item.symbol_type))}</strong></div>
+        </div>
+        <div class="action-row">
+          <button id="symbolConfirmBtn" type="button">确认添加</button>
+          <button id="symbolCancelResolveBtn" type="button" class="ghost">取消</button>
+        </div>
+      </div>
+    `;
+    preview.querySelector("#symbolConfirmBtn").addEventListener("click", confirmAddSymbol);
+    preview.querySelector("#symbolCancelResolveBtn").addEventListener("click", () => {
+      preview.classList.add("hidden");
+      state.symbolResolveResult = null;
+    });
+  } catch (err) {
+    preview.innerHTML = `<div class="empty-state">解析失败: ${escapeHtml(err.message)}</div>`;
+  } finally {
+    btn.disabled = false;
+    btn.textContent = "智能解析";
+  }
+}
+
+async function confirmAddSymbol() {
+  const item = state.symbolResolveResult;
+  if (!item) return;
+  const confirmBtn = document.querySelector("#symbolConfirmBtn");
+  if (confirmBtn) { confirmBtn.disabled = true; confirmBtn.textContent = "添加中..."; }
+  try {
+    await fetchJson("/api/symbols", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(item),
+      auth: true,
+      authReason: "确认添加标的",
+    });
+    document.querySelector("#symbolResolveInput").value = "";
+    document.querySelector("#symbolResolvePreview").classList.add("hidden");
+    state.symbolResolveResult = null;
+    await loadSymbols();
+  } catch (err) {
+    window.alert(`添加失败: ${err.message}`);
+    if (confirmBtn) { confirmBtn.disabled = false; confirmBtn.textContent = "确认添加"; }
+  }
+}
+
+function symbolTypeLabel(type) {
+  return { index: "大盘/指数", sector: "板块/ETF", stock: "个股" }[type] || type || "未知";
 }

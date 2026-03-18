@@ -19,28 +19,30 @@ import requests
 from config import (
     OUTPUT_DIR,
     LLM_API_KEY, LLM_BASE_URL, LLM_BATCH_MODEL_ID, LLM_MODEL_ID, LLM_RULES_MODEL_ID, LLM_SUMMARY_MODEL_ID,
-    ENABLE_REMOTE_WRITE, USE_DEMO_DATA,
+    ENABLE_REMOTE_WRITE,
 )
+from symbol_registry import build_aliases_lookup, get_symbol_type_map, get_tracked_symbols
 from cloudflare_ingest import (
     CloudflareIngestError,
     fetch_news as fetch_remote_news,
     initialize_review as initialize_remote_review,
     is_remote_write_configured,
     send_news,
-    send_news_analysis,
+    send_daily_news_ai_analysis,
 )
+from data_sources.news_router import fetch_all_news as fetch_source_news
 from logger_utils import get_logger
 from db_utils import (
     generate_news_hash,
-    get_news_analysis_by_date,
+    get_daily_news_ai_analysis_by_date,
     get_news_by_date_range,
     initialize_archive_record,
     init_database,
-    save_news_analysis,
+    save_daily_news_ai_analysis,
     upsert_news_batch,
 )
-from demo_data import build_demo_news_feed
 from llm_client import LLMClient
+from runtime.context import ExecutionContext, build_execution_context
 
 logger = get_logger("collect_news_v3")
 
@@ -52,14 +54,14 @@ HEADERS = {
 LLM_TIMEOUT = int(os.getenv("LLM_TIMEOUT", "120"))  # LLM 超时时间(秒)
 LLM_RULES_TIMEOUT = int(os.getenv("LLM_RULES_TIMEOUT", str(LLM_TIMEOUT)))
 LLM_BATCH_TIMEOUT = int(os.getenv("LLM_BATCH_TIMEOUT", str(LLM_TIMEOUT)))
-LLM_SUMMARY_TIMEOUT = int(os.getenv("LLM_SUMMARY_TIMEOUT", str(LLM_TIMEOUT)))
+LLM_SUMMARY_TIMEOUT = int(os.getenv("LLM_SUMMARY_TIMEOUT", str(max(LLM_TIMEOUT, 240))))
 LLM_MAX_RETRIES = int(os.getenv("LLM_MAX_RETRIES", "2"))  # 最大重试次数
 LLM_MAX_WORKERS = int(os.getenv("LLM_MAX_WORKERS", "2"))  # 并发数降低，避免超时
 LLM_BATCH_SIZE = max(1, int(os.getenv("LLM_BATCH_SIZE", "6")))
 LLM_CANDIDATE_LIMIT = max(1, int(os.getenv("LLM_CANDIDATE_LIMIT", "6")))
 LLM_RULES_SAMPLE_SIZE = max(8, int(os.getenv("LLM_RULES_SAMPLE_SIZE", "12")))
 SKIP_LLM = os.getenv("SKIP_LLM", "false").lower() == "true"  # 跳过 LLM 分析开关
-EFFECTIVE_SKIP_LLM = SKIP_LLM or USE_DEMO_DATA
+EFFECTIVE_SKIP_LLM = SKIP_LLM
 
 llm_client = LLMClient(
     api_key=LLM_API_KEY,
@@ -290,20 +292,19 @@ def fetch_yahoo_finance_news() -> list:
         return []
 
 
-TRACKED_SYMBOLS = [
-    {"symbol": "MU", "aliases": ["MU", "Micron", "Micron Technology", "美光"]},
-    {"symbol": "LITE", "aliases": ["LITE", "Lumentum", "Lumentum Holdings"]},
-    {"symbol": "MSFT", "aliases": ["MSFT", "Microsoft", "微软"]},
-    {"symbol": "GOOGL", "aliases": ["GOOGL", "Google", "Alphabet", "谷歌"]},
-    {"symbol": "^VIX", "aliases": ["VIX", "Volatility Index", "恐慌指数"]},
-    {"symbol": "^HSI", "aliases": ["HSI", "Hang Seng", "恒指", "恒生指数"]},
-    {"symbol": "^GSPC", "aliases": ["S&P 500", "SP500", "标普500", "标普"]},
-    {"symbol": "000001.SS", "aliases": ["SSE Composite", "上证指数", "沪指"]},
-    {"symbol": "DX-Y.NYB", "aliases": ["Dollar Index", "DXY", "美元指数"]},
-    {"symbol": "GC=F", "aliases": ["Gold", "黄金", "金价"]},
-]
-EQUITY_TRACKED_SYMBOLS = {"MU", "LITE", "MSFT", "GOOGL"}
-MARKET_REFERENCE_SYMBOLS = {"^VIX", "^HSI", "^GSPC", "000001.SS", "DX-Y.NYB", "GC=F"}
+# 标的信息从 symbol_registry 动态加载（消除硬编码）
+# 在模块级别缓存，避免每次新闻处理都重复查询
+def _load_symbol_sets():
+    tracked = get_tracked_symbols()
+    stock_set = {s["symbol"] for s in tracked if s["symbol_type"] == "stock"}
+    index_set = {s["symbol"] for s in tracked if s["symbol_type"] == "index"}
+    sector_set = {s["symbol"] for s in tracked if s["symbol_type"] == "sector"}
+    return stock_set, index_set, sector_set
+
+STOCK_TRACKED_SYMBOLS, INDEX_TRACKED_SYMBOLS, SECTOR_TRACKED_SYMBOLS = _load_symbol_sets()
+# 向后兼容别名（仅供本模块内部过渡使用）
+EQUITY_TRACKED_SYMBOLS = STOCK_TRACKED_SYMBOLS
+MARKET_REFERENCE_SYMBOLS = INDEX_TRACKED_SYMBOLS | SECTOR_TRACKED_SYMBOLS
 
 BASE_MACRO_KEYWORDS = [
     "美联储", "fed", "利率", "降息", "加息", "通胀", "cpi", "ppi", "非农", "就业",
@@ -349,23 +350,21 @@ def _normalize_text(value: str) -> str:
 
 def derive_related_symbols(text: str) -> List[str]:
     normalized = text.lower()
-    matched = []
-    for entry in TRACKED_SYMBOLS:
-        if any(alias.lower() in normalized for alias in entry["aliases"]):
-            matched.append(entry["symbol"])
-    return matched
+    lookup = build_aliases_lookup()
+    matched_symbols: List[str] = []
+    seen: set[str] = set()
+    for alias, records in lookup.items():
+        if alias in normalized:
+            for rec in records:
+                sym = rec["symbol"]
+                if sym not in seen:
+                    seen.add(sym)
+                    matched_symbols.append(sym)
+    return matched_symbols
 
 
 def _score_keyword_hits(text: str, keywords: List[str]) -> List[str]:
     return sorted({keyword for keyword in keywords if keyword.lower() in text})
-
-
-def _score_to_importance(score: float) -> str:
-    if score >= 6:
-        return "high"
-    if score >= 3:
-        return "medium"
-    return "low"
 
 
 def _score_to_stars(score: float) -> int:
@@ -519,7 +518,7 @@ def generate_dynamic_screening_profile(news_list: List[Dict[str, Any]], analysis
                 "focus_topics, include_rules, exclude_rules, score_threshold, reasoning_summary。\n"
                 "要求：keywords 用短词数组；focus_topics 每项含 label/keywords/weight(1-5)；"
                 "noise_keywords 优先覆盖与全球经济或股市无关的主题；"
-                "跟踪标的包括 MU/LITE/MSFT/GOOGL/VIX/HSI/GSPC/DXY/黄金；"
+                f"跟踪标的：个股={list(STOCK_TRACKED_SYMBOLS)}，板块={list(SECTOR_TRACKED_SYMBOLS)}，大盘={list(INDEX_TRACKED_SYMBOLS)}；"
                 "score_threshold 取 3.5-7.5；只输出 JSON。\n\n"
                 f"{json.dumps({'analysis_date': analysis_date, 'samples': sample_items}, ensure_ascii=False)}"
             ),
@@ -583,41 +582,49 @@ def apply_rule_filter(news: Dict[str, Any], profile: Dict[str, Any]) -> Dict[str
 
     threshold = float(profile.get("score_threshold", 4.5))
     keep = False
-    rule_type = "market"
+    rule_type = "index"
     reasons = []
 
-    equity_symbols = [symbol for symbol in related_symbols if symbol in EQUITY_TRACKED_SYMBOLS]
-    market_reference_symbols = [symbol for symbol in related_symbols if symbol in MARKET_REFERENCE_SYMBOLS]
+    type_map = get_symbol_type_map()
+    stock_symbols = [s for s in related_symbols if type_map.get(s) == "stock"]
+    sector_symbols = [s for s in related_symbols if type_map.get(s) == "sector"]
+    index_symbols = [s for s in related_symbols if type_map.get(s) == "index"]
 
-    if equity_symbols:
+    if stock_symbols:
         keep = True
-        rule_type = "symbol"
-        reasons.append(f"涉及跟踪标的 {', '.join(equity_symbols)}")
+        rule_type = "stock"
+        reasons.append(f"涉及跟踪个股 {', '.join(stock_symbols)}")
         if symbol_context_hits:
             reasons.append(f"标的事件命中 {', '.join(symbol_context_hits[:3])}")
-    elif market_reference_symbols and (len(macro_hits) >= 1 or len(market_hits) >= 1 or focus_hits):
+    elif sector_symbols and (len(macro_hits) >= 1 or len(market_hits) >= 1 or focus_hits):
         keep = True
-        rule_type = "macro" if len(macro_hits) >= len(market_hits) else "market"
-        reasons.append(f"涉及核心市场资产 {', '.join(market_reference_symbols[:3])}")
+        rule_type = "sector"
+        reasons.append(f"涉及板块标的 {', '.join(sector_symbols[:3])}")
+        if market_hits:
+            reasons.append(f"板块关键词命中 {', '.join(market_hits[:3])}")
+    elif index_symbols and (len(macro_hits) >= 1 or len(market_hits) >= 1 or focus_hits):
+        keep = True
+        rule_type = "index"
+        reasons.append(f"涉及大盘资产 {', '.join(index_symbols[:3])}")
         if macro_hits:
             reasons.append(f"宏观关键词命中 {', '.join(macro_hits[:3])}")
         if market_hits:
             reasons.append(f"市场关键词命中 {', '.join(market_hits[:3])}")
     elif focus_hits:
         keep = True
-        rule_type = "macro" if len(macro_hits) >= len(market_hits) else "market"
+        rule_type = "index" if len(macro_hits) >= len(market_hits) else "sector"
         reasons.append(f"动态主题命中 {'；'.join(focus_hits[:2])}")
     elif len(macro_hits) >= 2 or score >= threshold:
         keep = True
-        rule_type = "macro" if len(macro_hits) >= len(market_hits) else "market"
+        rule_type = "index" if len(macro_hits) >= len(market_hits) else "sector"
         if macro_hits:
             reasons.append(f"宏观关键词命中 {', '.join(macro_hits[:3])}")
         if market_hits:
             reasons.append(f"市场关键词命中 {', '.join(market_hits[:3])}")
     elif len(market_hits) >= 2 and not noise_hits:
         keep = True
-        rule_type = "market"
-        reasons.append(f"市场事件命中 {', '.join(market_hits[:3])}")
+        rule_type = "sector"
+        reasons.append(f"板块/市场事件命中 {', '.join(market_hits[:3])}")
 
     if noise_hits and not related_symbols and len(macro_hits) < 2:
         keep = False
@@ -637,12 +644,10 @@ def apply_rule_filter(news: Dict[str, Any], profile: Dict[str, Any]) -> Dict[str
         'source': news.get('source', ''),
         'type': rule_type,
         'rule_passed': 1,
-        'rule_score': round(score, 2),
         'rule_reason': '；'.join(reasons[:3]) or "规则保留",
         'processing_status': 'rule_screened',
         'ai_summary': '',
         'market_impact': '',
-        'importance_level': _score_to_importance(score),
         'importance_stars': _score_to_stars(score),
         'primary_symbol': related_symbols[0] if related_symbols else None,
         'related_symbols': related_symbols,
@@ -661,7 +666,7 @@ def filter_news_by_rules(news_list: List[Dict[str, Any]], profile: Dict[str, Any
         kept = apply_rule_filter(news, profile)
         if kept:
             filtered.append(kept)
-    filtered.sort(key=lambda item: (item.get('rule_score', 0), item.get('pub_date', '')), reverse=True)
+    filtered.sort(key=lambda item: (item.get('importance_stars', 0), item.get('pub_date', '')), reverse=True)
     if len(filtered) > LLM_CANDIDATE_LIMIT:
         logger.info("规则初筛命中过多，按分数仅保留前 %s 条进入 LLM / 正式新闻库", LLM_CANDIDATE_LIMIT)
         filtered = filtered[:LLM_CANDIDATE_LIMIT]
@@ -697,10 +702,9 @@ def _fallback_batch_result(news_batch: List[Dict[str, Any]], batch_id: str) -> D
         items.append({
             "news_hash": news["news_hash"],
             "keep": True,
-            "type": news.get("type", "market"),
+            "type": news.get("type", "index"),
             "ai_summary": news.get("summary") or news.get("title") or news.get("content", "")[:80],
             "market_impact": news.get("rule_reason", "可能影响市场情绪和相关标的。"),
-            "importance_level": news.get("importance_level", "medium"),
             "importance_stars": news.get("importance_stars", 2),
             "primary_symbol": news.get("primary_symbol"),
             "related_symbols": news.get("related_symbols", []),
@@ -747,10 +751,9 @@ def _call_batch_llm(news_batch: List[Dict[str, Any]], batch_id: str) -> Dict[str
                 "    {\n"
                 '      "news_hash": "原样返回",\n'
                 '      "keep": true,\n'
-                '      "type": "macro|market|symbol",\n'
+                '      "type": "index|sector|stock",\n'
                 '      "ai_summary": "一句中文摘要",\n'
                 '      "market_impact": "一句中文说明市场影响",\n'
-                '      "importance_level": "high|medium|low",\n'
                 '      "importance_stars": 0,\n'
                 '      "primary_symbol": "MU 或 null",\n'
                 '      "related_symbols": ["MU"]\n'
@@ -761,8 +764,17 @@ def _call_batch_llm(news_batch: List[Dict[str, Any]], batch_id: str) -> Dict[str
                 "1. 如果一条新闻信息价值不够高，可以返回 keep=false，importance_stars 必须给 0。\n"
                 "2. 保留新闻时，importance_stars 必须是 1-5 的整数，5 星代表极重要。\n"
                 "3. related_symbols 必须是数组。\n"
-                "4. symbol 新闻只在确实和跟踪标的或其产业链相关时使用。\n"
-                "5. 只返回 JSON。\n\n"
+                "4. type 取值规则：index=影响大盘/宏观/央行/大宗商品；sector=影响某板块/行业；stock=直接影响具体个股。\n"
+                "5. importance_stars 评分标准如下：\n"
+                "   - 5星：显著改变当日宏观主线、大盘方向、流动性预期、利率预期，或核心跟踪标的交易逻辑的重大事件。\n"
+                "   - 4星：对重点板块、核心市场资产或跟踪标的有明确且较强影响，值得重点复盘。\n"
+                "   - 3星：有明确市场信息增量，值得纳入复盘，但不是当天最核心主线。\n"
+                "   - 2星：影响较弱，仅作背景补充，不建议纳入复盘主视图。\n"
+                "   - 1星：弱相关、低信息增量，或只有轻微信号价值。\n"
+                "   - 0星：噪音、重复、无市场意义，或不应保留。\n"
+                "6. 若新闻仅是分析师评级、目标价、纯情绪点评、无新增事实的二手解读，通常不应高于 2 星。\n"
+                "7. 若新闻直接影响美联储路径、利率/通胀预期、地缘风险、核心指数，或核心跟踪标的的财报、指引、订单、监管、资本开支，通常应优先考虑 3-5 星。\n"
+                "8. 只返回 JSON。\n\n"
                 f"{json.dumps(batch_prompt, ensure_ascii=False)}"
             ),
         },
@@ -791,14 +803,16 @@ def _call_batch_llm(news_batch: List[Dict[str, Any]], batch_id: str) -> Dict[str
 
 
 def _normalize_type(value: str | None, fallback: str) -> str:
-    if value in {"macro", "market", "symbol"}:
+    # 新值
+    if value in {"index", "sector", "stock"}:
         return value
-    return fallback
-
-
-def _normalize_importance(value: str | None, fallback: str) -> str:
-    if value in {"high", "medium", "low"}:
-        return value
+    # 向后兼容旧值
+    if value == "macro":
+        return "index"
+    if value == "market":
+        return "sector"
+    if value == "symbol":
+        return "stock"
     return fallback
 
 
@@ -833,10 +847,9 @@ def _merge_batch_result(news_batch: List[Dict[str, Any]], llm_result: Dict[str, 
 
         related_symbols = _normalize_related_symbols(item_result.get("related_symbols"), news.get("related_symbols", []))
         merged = dict(news)
-        merged["type"] = _normalize_type(item_result.get("type"), news.get("type", "market"))
+        merged["type"] = _normalize_type(item_result.get("type"), news.get("type", "index"))
         merged["ai_summary"] = _normalize_text(item_result.get("ai_summary") or news.get("summary") or news.get("title"))
         merged["market_impact"] = _normalize_text(item_result.get("market_impact") or news.get("rule_reason"))
-        merged["importance_level"] = _normalize_importance(item_result.get("importance_level"), news.get("importance_level", "medium"))
         merged["importance_stars"] = _normalize_importance_stars(item_result.get("importance_stars"), news.get("importance_stars", 0))
         merged["primary_symbol"] = item_result.get("primary_symbol") or (related_symbols[0] if related_symbols else news.get("primary_symbol"))
         merged["related_symbols"] = related_symbols
@@ -851,10 +864,9 @@ def _merge_batch_result(news_batch: List[Dict[str, Any]], llm_result: Dict[str, 
         "analysis_date": analysis_date,
         "analysis_scope": "batch",
         "batch_no": batch_no,
-        "global_news": "\n".join(f"- {item['title'] or item['summary']}" for item in kept_items if item.get("type") == "macro"),
-        "market_news": "\n".join(f"- {item['title'] or item['summary']}" for item in kept_items if item.get("type") == "market"),
-        "symbol_news": "\n".join(f"- {item['title'] or item['summary']}" for item in kept_items if item.get("type") == "symbol"),
-        "market_analysis": f"保留 {len(kept_items)} 条 / 输入 {len(news_batch)} 条",
+        "daily_major_events": "\n".join(f"- {item['title'] or item['summary']}" for item in kept_items if item.get("type") in {"index", "sector", "macro", "market"}),
+        "sector_impact_map": f"保留 {len(kept_items)} 条 / 输入 {len(news_batch)} 条",
+        "linkage_logic_chain": "\n".join(f"- {item['title'] or item['summary']}" for item in kept_items if item.get("type") in {"stock", "symbol"}),
         "raw_summary": llm_result.get("raw_text", ""),
     }
     return processed_items, kept_items, batch_record
@@ -883,12 +895,9 @@ def enhance_news_with_llm(filtered_news: List[Dict[str, Any]], analysis_date: st
             enhanced.extend(kept_items)
             batch_records[batch_no] = batch_record
 
-    importance_rank = {"high": 3, "medium": 2, "low": 1}
     enhanced.sort(
         key=lambda item: (
             item.get("importance_stars", 0),
-            importance_rank.get(item.get("importance_level"), 1),
-            item.get("rule_score", 0),
             item.get("pub_date", ""),
         ),
         reverse=True,
@@ -899,10 +908,9 @@ def enhance_news_with_llm(filtered_news: List[Dict[str, Any]], analysis_date: st
 
 def _parse_summary_output(summary: str) -> Dict[str, str]:
     result = {
-        "global_news": "",
-        "market_news": "",
-        "symbol_news": "",
-        "market_analysis": "",
+        "daily_major_events": [],
+        "sector_impact_map": [],
+        "linkage_logic_chain": [],
     }
     try:
         parsed = _extract_json_payload(summary)
@@ -910,36 +918,38 @@ def _parse_summary_output(summary: str) -> Dict[str, str]:
             for key in result:
                 value = parsed.get(key)
                 if isinstance(value, list):
-                    result[key] = "\n".join(str(item) for item in value if item)
+                    result[key] = [str(item).strip() for item in value if str(item).strip()]
                 elif value:
-                    result[key] = str(value).strip()
+                    result[key] = [str(value).strip()]
             return result
     except Exception:
         pass
 
     patterns = {
-        "global_news": r"###\s*全球重大新闻\s*\n([\s\S]*?)(?=###\s*股票市场重大新闻|###\s*标的相关新闻|###\s*市场分析|$)",
-        "market_news": r"###\s*股票市场重大新闻\s*\n([\s\S]*?)(?=###\s*标的相关新闻|###\s*市场分析|$)",
-        "symbol_news": r"###\s*标的相关新闻\s*\n([\s\S]*?)(?=###\s*市场分析|$)",
-        "market_analysis": r"###\s*市场分析\s*\n([\s\S]*?)$",
+        "daily_major_events": r"###\s*今日大事概览\s*\n([\s\S]*?)(?=###\s*大盘与板块影响图谱|###\s*联动逻辑链|$)",
+        "sector_impact_map": r"###\s*大盘与板块影响图谱\s*\n([\s\S]*?)(?=###\s*联动逻辑链|$)",
+        "linkage_logic_chain": r"###\s*联动逻辑链\s*\n([\s\S]*?)$",
     }
     for key, pattern in patterns.items():
         match = re.search(pattern, summary or "")
         if match:
-            result[key] = match.group(1).strip()
+            lines = [
+                line.strip().lstrip("-").strip()
+                for line in match.group(1).splitlines()
+                if line.strip()
+            ]
+            result[key] = [line for line in lines if line]
     return result
 
 
-def _format_summary_markdown(parsed: Dict[str, str]) -> str:
+def _format_summary_markdown(parsed: Dict[str, List[str]]) -> str:
     return (
-        "### 全球重大新闻\n"
-        f"{parsed.get('global_news') or '- 暂无'}\n\n"
-        "### 股票市场重大新闻\n"
-        f"{parsed.get('market_news') or '- 暂无'}\n\n"
-        "### 标的相关新闻\n"
-        f"{parsed.get('symbol_news') or '- 暂无'}\n\n"
-        "### 市场分析\n"
-        f"{parsed.get('market_analysis') or '- 暂无'}"
+        "### 今日大事概览\n"
+        f"{chr(10).join(f'- {item}' for item in parsed.get('daily_major_events', []) if item) or '- 暂无'}\n\n"
+        "### 大盘与板块影响图谱\n"
+        f"{chr(10).join(f'- {item}' for item in parsed.get('sector_impact_map', []) if item) or '- 暂无'}\n\n"
+        "### 联动逻辑链\n"
+        f"{chr(10).join(f'- {item}' for item in parsed.get('linkage_logic_chain', []) if item) or '- 暂无'}"
     )
 
 
@@ -947,23 +957,66 @@ def _generate_rule_based_summary(news_list: List[Dict[str, Any]]) -> str:
     if not news_list:
         return ""
 
-    buckets = {"macro": [], "market": [], "symbol": []}
-    for news in news_list:
-        buckets.setdefault(news.get("type", "market"), []).append(news)
-
     parsed = {
-        "global_news": "\n".join(f"- {item['title'] or item['summary']}: {item['market_impact'] or item['rule_reason']}" for item in buckets["macro"][:5]),
-        "market_news": "\n".join(f"- {item['title'] or item['summary']}: {item['market_impact'] or item['rule_reason']}" for item in buckets["market"][:5]),
-        "symbol_news": "\n".join(f"- {item['title'] or item['summary']}: {item['market_impact'] or item['rule_reason']}" for item in buckets["symbol"][:5]),
-        "market_analysis": f"当前保留 {len(news_list)} 条有效新闻，其中宏观 {len(buckets['macro'])} 条、市场 {len(buckets['market'])} 条、标的 {len(buckets['symbol'])} 条。",
+        "daily_major_events": [
+            f"{item['title'] or item.get('summary') or '重要事件'}：{item.get('market_impact') or item.get('rule_reason') or '对市场情绪有直接影响。'}"
+            for item in news_list[:5]
+        ],
+        "sector_impact_map": [],
+        "linkage_logic_chain": [
+            f"{item['title'] or item.get('summary') or '事件'} -> {item.get('market_impact') or item.get('rule_reason') or '影响市场预期'}"
+            for item in news_list[:3]
+        ],
     }
+    seen_market_labels: set[str] = set()
+    for item in news_list:
+        symbols = item.get("related_symbols") or []
+        item_type = item.get("type", "index")
+        if symbols:
+            label = "/".join(symbols[:3])
+            if label not in seen_market_labels:
+                seen_market_labels.add(label)
+                prefix = "[个股]" if item_type == "stock" else "[板块]" if item_type == "sector" else "[大盘]"
+                parsed["sector_impact_map"].append(
+                    f"{prefix} {label}：偏多。原因是{item.get('market_impact') or item.get('rule_reason') or '相关事件改善了该方向的交易预期。'}"
+                )
+        elif item_type in {"index", "macro", "market"} and "美股大盘" not in seen_market_labels:
+            seen_market_labels.add("美股大盘")
+            parsed["sector_impact_map"].append(
+                "[大盘] 美股大盘：中性。原因是宏观与市场事件交织，短线方向仍取决于后续定价。"
+            )
     return _format_summary_markdown(parsed)
 
 
-def get_latest_closed_trading_day() -> str:
+def _build_daily_summary_payload(news_list: List[Dict[str, Any]], analysis_date: str) -> Dict[str, Any]:
+    items: List[Dict[str, Any]] = []
+    for index, item in enumerate(news_list, start=1):
+        items.append({
+            "rank": index,
+            "news_hash": item.get("news_hash"),
+            "pub_date": item.get("pub_date"),
+            "type": item.get("type"),
+            "importance_stars": item.get("importance_stars"),
+            "primary_symbol": item.get("primary_symbol"),
+            "related_symbols": item.get("related_symbols", []),
+            "title": item.get("title"),
+            "content": item.get("content") or "",
+            "ai_summary": item.get("ai_summary") or "",
+            "market_impact": item.get("market_impact") or "",
+            "source": item.get("source") or "",
+        })
+    return {
+        "analysis_date": analysis_date,
+        "item_count": len(items),
+        "items": items,
+    }
+
+
+def get_latest_closed_trading_day(context: ExecutionContext | None = None) -> str:
     """按 NYSE 日历计算最近一个已收盘交易日"""
+    context = context or build_execution_context()
     ny_tz = pytz.timezone('America/New_York')
-    now_ny = datetime.now(ny_tz)
+    now_ny = context.clock.now_in_tz('America/New_York')
     nyse = mcal.get_calendar('NYSE')
     schedule = nyse.schedule(start_date=now_ny.date() - pd.Timedelta(days=10), end_date=now_ny.date())
     closed_sessions = schedule[schedule['market_close'] <= now_ny]
@@ -975,10 +1028,33 @@ def get_latest_closed_trading_day() -> str:
     return latest_close.strftime('%Y-%m-%d')
 
 
-def get_active_review_trading_day() -> str:
-    """按 6 小时新闻节奏计算当前新闻应归属的复盘日"""
+def get_current_review_trading_day(context: ExecutionContext | None = None) -> str:
+    """返回当前应归属的复盘日。
+
+    - 若今天是 NYSE 交易日，则无论盘前/盘中/盘后都归属今天；
+    - 若今天不是交易日，则回退到最近一个已收盘交易日。
+    """
+    context = context or build_execution_context()
     ny_tz = pytz.timezone('America/New_York')
-    now_ny = datetime.now(ny_tz)
+    now_ny = context.clock.now_in_tz('America/New_York')
+    nyse = mcal.get_calendar('NYSE')
+    schedule = nyse.schedule(
+        start_date=now_ny.date() - pd.Timedelta(days=10),
+        end_date=now_ny.date() + pd.Timedelta(days=10),
+    )
+
+    trading_days = {session.date() for session in schedule.index}
+    if now_ny.date() in trading_days:
+        return now_ny.strftime('%Y-%m-%d')
+
+    return get_latest_closed_trading_day(context)
+
+
+def get_active_review_trading_day(context: ExecutionContext | None = None) -> str:
+    """按 6 小时新闻节奏计算当前新闻应归属的复盘日"""
+    context = context or build_execution_context()
+    ny_tz = pytz.timezone('America/New_York')
+    now_ny = context.clock.now_in_tz('America/New_York')
     nyse = mcal.get_calendar('NYSE')
     schedule = nyse.schedule(
         start_date=now_ny.date() - pd.Timedelta(days=10),
@@ -987,7 +1063,7 @@ def get_active_review_trading_day() -> str:
     upcoming_sessions = schedule[schedule['market_close'] >= now_ny]
 
     if upcoming_sessions.empty:
-        return get_latest_closed_trading_day()
+        return get_latest_closed_trading_day(context)
 
     review_date = upcoming_sessions.iloc[0].name
     return review_date.strftime('%Y-%m-%d')
@@ -1014,10 +1090,10 @@ def build_daily_summary_record(news_list: List[Dict[str, Any]], analysis_date: s
             "analysis_date": analysis_date,
             "analysis_scope": "daily_summary",
             "batch_no": 0,
-            "global_news": "",
-            "market_news": "",
-            "symbol_news": "",
-            "market_analysis": "",
+            "daily_major_events": "",
+            "sector_impact_map": "",
+            "linkage_logic_chain": "",
+            "source_news_ids": "[]",
             "raw_summary": "",
         }
 
@@ -1025,8 +1101,6 @@ def build_daily_summary_record(news_list: List[Dict[str, Any]], analysis_date: s
         news_list,
         key=lambda item: (
             item.get("importance_stars", 0),
-            {"high": 3, "medium": 2, "low": 1}.get(item.get("importance_level"), 1),
-            item.get("rule_score", 0),
             item.get("pub_date", ""),
         ),
         reverse=True,
@@ -1035,39 +1109,53 @@ def build_daily_summary_record(news_list: List[Dict[str, Any]], analysis_date: s
     if EFFECTIVE_SKIP_LLM:
         markdown = _generate_rule_based_summary(summary_news)
     else:
-        payload = {
-            "analysis_date": analysis_date,
-            "items": [
-                {
-                    "news_hash": item.get("news_hash"),
-                    "pub_date": item.get("pub_date"),
-                    "type": item.get("type"),
-                    "importance_level": item.get("importance_level"),
-                    "importance_stars": item.get("importance_stars"),
-                    "primary_symbol": item.get("primary_symbol"),
-                    "related_symbols": item.get("related_symbols", []),
-                    "title": item.get("title"),
-                    "ai_summary": item.get("ai_summary"),
-                    "market_impact": item.get("market_impact"),
-                }
-                for item in summary_news
-            ],
-        }
+        payload = _build_daily_summary_payload(summary_news, analysis_date)
         messages = [
             {
                 "role": "system",
                 "content": (
-                    "你是一位金融复盘分析师。"
-                    "请基于输入新闻生成一个 JSON 对象，字段包含 "
-                    "global_news, market_news, symbol_news, market_analysis。"
+                    "你是一位拥有20年实战经验的首席策略分析师与资深股票经纪人。"
+                    "你擅长从海量碎片化新闻中提取核心叙事，并推导底层逻辑对二级市场的传导机制。"
+                    "你会把输入新闻视为一个整体进行综合研判，而不是逐条复述。"
+                    "你必须只输出合法 JSON，不能输出任何 JSON 之外的解释。"
+                    "你必须基于输入新闻事实进行分析，不得编造输入中不存在的事实。"
+                    "如果多条新闻属于同一主题，必须合并表达，避免重复。"
                 ),
             },
             {
                 "role": "user",
                 "content": (
-                    "请只输出 JSON。"
-                    "global_news、market_news、symbol_news 可以是字符串或字符串数组。"
-                    "market_analysis 用中文概括最重要的市场影响。\n\n"
+                    "我会为你提供一组当日最重要的候选新闻。"
+                    "请将这些新闻视为一个整体进行综合研判，并返回一个唯一的、可直接存入数据库的 JSON 对象。\n\n"
+                    "分析维度如下：\n"
+                    "1. daily_major_events：从全部候选新闻中提炼出当天真正改变市场格局、风险偏好或交易主线的核心大事。"
+                    "必须做综合归纳，不允许只是复述新闻标题。每一条都应说明今天发生了什么，以及为什么它重要。\n"
+                    "2. sector_impact_map: 必须先判断这些事件对中美大盘整体的影响，再分析受到影响的板块和个股。"
+                    "每一条必须以 [大盘]、[板块] 或 [个股] 开头，再写标的名和方向。"
+                    "例如: [大盘] 美股大盘：偏空。原因是... / [板块] 半导体：偏多。原因是... / [个股] MU：中性。原因是...\n"
+                    "3. linkage_logic_chain：这是核心部分。"
+                    "请解释这些新闻如何通过一条条市场传导链影响资产价格。"
+                    "每条逻辑链都必须体现\"事件 -> 中间变量 -> 市场结果\"的链式关系，"
+                    "并体现流动性、利率与美债收益率、风险偏好、估值模型、盈利预期、政策预期、汇率、商品供需、通胀预期、产业链景气度等专业视角。\n\n"
+                    "约束如下：\n"
+                    "1. 严禁逐条列举新闻，必须是综合全部候选新闻后的整体产出。\n"
+                    "2. 所有输出必须为自然中文，适合直接展示给用户阅读。\n"
+                    "3. 不允许为了凑条数而重复表达、拆分同一逻辑或制造空泛结论。\n"
+                    "4. daily_major_events 根据新闻密度提炼最重要的大事，通常为 2-5 条；如果有效主线不足，可以更少，但不要凑数。\n"
+                    "5. sector_impact_map 必须优先覆盖中美大盘整体影响，再补充真正受到影响的重点板块。每条都必须明确方向，方向只能使用：偏多、偏空、中性。\n"
+                    "6. 如果某些板块影响不明显，可以不展开，不要凑数。\n"
+                    "7. linkage_logic_chain 根据当日主线输出最重要的逻辑链，通常为 2-5 条；宁可少而深，不要多而散。\n\n"
+                    "请基于下面按重要性倒排的 20 条候选新闻，输出一个 JSON 对象，格式必须为：\n"
+                    "{\n"
+                    '  "daily_major_events": ["..."],\n'
+                    '  "sector_impact_map": ["..."],\n'
+                    '  "linkage_logic_chain": ["..."]\n'
+                    "}\n\n"
+                    "要求：\n"
+                    "1. 只输出合法 JSON，不要输出 Markdown，不要输出代码块。\n"
+                    "2. daily_major_events、sector_impact_map、linkage_logic_chain 必须是字符串数组；没有内容时返回空数组。\n"
+                    "3. 判断时优先依据 title + content；ai_summary 和 market_impact 仅作为辅助。\n"
+                    "4. 不要输出空泛评论，必须落到具体事件、方向和影响。\n\n"
                     f"{json.dumps(payload, ensure_ascii=False)}"
                 ),
             },
@@ -1076,7 +1164,7 @@ def build_daily_summary_record(news_list: List[Dict[str, Any]], analysis_date: s
             messages,
             log_label=f"日期级综合分析 {analysis_date}",
             model=LLM_SUMMARY_MODEL_ID,
-            max_tokens=1000,
+            max_tokens=1400,
             timeout=LLM_SUMMARY_TIMEOUT,
         )
         markdown = llm_result.response_text if llm_result.success else _generate_rule_based_summary(summary_news)
@@ -1086,10 +1174,13 @@ def build_daily_summary_record(news_list: List[Dict[str, Any]], analysis_date: s
         "analysis_date": analysis_date,
         "analysis_scope": "daily_summary",
         "batch_no": 0,
-        "global_news": parsed["global_news"],
-        "market_news": parsed["market_news"],
-        "symbol_news": parsed["symbol_news"],
-        "market_analysis": parsed["market_analysis"],
+        "daily_major_events": "\n".join(parsed["daily_major_events"]),
+        "sector_impact_map": "\n".join(parsed["sector_impact_map"]),
+        "linkage_logic_chain": "\n".join(parsed["linkage_logic_chain"]),
+        "source_news_ids": json.dumps(
+            [int(item["id"]) for item in summary_news if item.get("id") is not None],
+            ensure_ascii=False,
+        ),
         "raw_summary": _format_summary_markdown(parsed),
     }
 
@@ -1103,7 +1194,6 @@ def _normalize_loaded_news_item(item: Dict[str, Any]) -> Dict[str, Any]:
         except json.JSONDecodeError:
             related_symbols = [symbol.strip() for symbol in related_symbols.split(",") if symbol.strip()]
     normalized["related_symbols"] = related_symbols if isinstance(related_symbols, list) else []
-    normalized["rule_score"] = float(normalized.get("rule_score") or 0)
     normalized["importance_stars"] = _normalize_importance_stars(normalized.get("importance_stars"), 0)
     normalized["is_relevant_to_review"] = int(normalized.get("is_relevant_to_review") or 0)
     raw_rule_passed = normalized.get("rule_passed")
@@ -1112,7 +1202,7 @@ def _normalize_loaded_news_item(item: Dict[str, Any]) -> Dict[str, Any]:
         or normalized.get("market_impact")
         or normalized.get("type") in {"macro", "market", "symbol"}
     )
-    if raw_rule_passed is None and normalized["is_relevant_to_review"] and has_structured_enrichment:
+    if raw_rule_passed is None and normalized["importance_stars"] >= 3 and has_structured_enrichment:
         normalized["rule_passed"] = 1
     else:
         normalized["rule_passed"] = int(raw_rule_passed or 0)
@@ -1152,19 +1242,22 @@ def load_news_for_summary(
 
     filtered = [
         item for item in deduped.values()
-        if item.get("is_relevant_to_review")
+        if item.get("importance_stars", 0) >= 3
         and item.get("rule_passed")
         and item.get("processing_status") in {"llm_processed", "reviewed"}
         and start_time <= item.get("pub_date", "") <= end_time
     ]
     if not filtered and fallback_news:
-        filtered = [
-            _normalize_loaded_news_item(item)
-            for item in fallback_news
-            if item.get("is_relevant_to_review")
-            and item.get("rule_passed")
-            and item.get("processing_status") in {"llm_processed", "reviewed"}
-        ]
+        fallback_filtered = []
+        for item in fallback_news:
+            normalized = _normalize_loaded_news_item(item)
+            if (
+                normalized.get("importance_stars", 0) >= 3
+                and normalized.get("rule_passed")
+                and normalized.get("processing_status") in {"llm_processed", "reviewed"}
+            ):
+                fallback_filtered.append(normalized)
+        filtered = fallback_filtered
         logger.info(
             "日期级 summary 窗口为空，回退使用当前批次有效新闻 %s 条 (analysis_date=%s)",
             len(filtered),
@@ -1174,8 +1267,24 @@ def load_news_for_summary(
     return sorted(filtered, key=lambda item: item.get("pub_date", ""), reverse=True)
 
 
-def collect_all_news() -> Dict[str, Any]:
+def _attach_remote_news_ids(items: List[Dict[str, Any]], result: Dict[str, Any] | None) -> None:
+    if not items or not result:
+        return
+    id_map = result.get("id_map") or {}
+    if not isinstance(id_map, dict):
+        return
+    for item in items:
+        news_hash = item.get("news_hash")
+        if news_hash in id_map:
+            try:
+                item["id"] = int(id_map[news_hash])
+            except (TypeError, ValueError):
+                continue
+
+
+def collect_all_news(context: ExecutionContext | None = None) -> Dict[str, Any]:
     """采集新闻 -> 动态规则初筛 -> 批量 LLM 结构化增强"""
+    context = context or build_execution_context()
     logger.info("=" * 60)
     logger.info("开始采集新闻 (v5.0 - 动态规则初筛 + 状态机 + 批量 LLM)")
     logger.info(
@@ -1191,32 +1300,12 @@ def collect_all_news() -> Dict[str, Any]:
     logger.info("=" * 60)
 
     all_news: List[Dict[str, Any]] = []
-    analysis_date = get_latest_closed_trading_day()
+    analysis_date = get_current_review_trading_day(context)
     logger.info("当前新闻分析目标日: %s", analysis_date)
 
     print("\n正在采集新闻...")
-    if USE_DEMO_DATA:
-        demo_news = build_demo_news_feed()
-        all_news.extend(demo_news)
-        logger.info("当前启用 demo 数据模式，直接加载 %s 条预置新闻", len(demo_news))
-        print(f"  ✓ demo: {len(demo_news)} 条")
-    else:
-        with ThreadPoolExecutor(max_workers=4) as executor:
-            futures = {
-                executor.submit(fetch_sina_finance): 'sina',
-                executor.submit(fetch_cls_cn): 'cls_cn',
-                executor.submit(fetch_jin10): 'jin10',
-                executor.submit(fetch_yahoo_finance_news): 'yahoo',
-            }
-            for future in as_completed(futures):
-                source = futures[future]
-                try:
-                    news = future.result()
-                    all_news.extend(news)
-                    print(f"  ✓ {source}: {len(news)} 条")
-                except Exception as exc:
-                    logger.error("%s 采集失败: %s", source, exc)
-                    print(f"  ✗ {source}: 失败")
+    all_news.extend(fetch_source_news(context))
+    print(f"  ✓ merged-sources: {len(all_news)} 条")
 
     unique_news = merge_and_deduplicate(all_news)
     logger.info("合并去重后: %s 条", len(unique_news))
@@ -1238,12 +1327,13 @@ def collect_all_news() -> Dict[str, Any]:
     }
 
 
-def export_to_excel(news_list: list, summary: str) -> str:
+def export_to_excel(news_list: list, summary: str, context: ExecutionContext | None = None) -> str:
     """导出到 Excel"""
+    context = context or build_execution_context()
     if not os.path.exists(OUTPUT_DIR):
         os.makedirs(OUTPUT_DIR)
 
-    filepath = f"{OUTPUT_DIR}/news_v3_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx"
+    filepath = f"{OUTPUT_DIR}/news_v3_{context.clock.now().strftime('%Y%m%d_%H%M%S')}.xlsx"
 
     with pd.ExcelWriter(filepath, engine='openpyxl') as writer:
         df_news = pd.DataFrame(news_list)
@@ -1256,20 +1346,25 @@ def export_to_excel(news_list: list, summary: str) -> str:
     return filepath
 
 
-def run_news_pipeline(collect_fresh_news: bool = True, persist_summary: bool = True) -> Dict[str, Any]:
+def run_news_pipeline(
+    collect_fresh_news: bool = True,
+    persist_summary: bool = True,
+    context: ExecutionContext | None = None,
+) -> Dict[str, Any]:
     """运行新闻流程。
 
     collect_fresh_news=False 适合小时任务之外的收盘汇总任务，只对现有库内新闻做日期级汇总。
-    persist_summary=False 适合小时任务，只入新闻库，不写 news_analysis。
+    persist_summary=False 适合小时任务，只入新闻库，不写 daily_news_ai_analysis。
     """
-    analysis_date = get_latest_closed_trading_day()
+    context = context or build_execution_context()
+    analysis_date = get_current_review_trading_day(context)
     batch_analysis_records: List[Dict[str, Any]] = []
     news_list: List[Dict[str, Any]] = []
     processed_news: List[Dict[str, Any]] = []
     screened_news: List[Dict[str, Any]] = []
 
     if collect_fresh_news:
-        collected = collect_all_news()
+        collected = collect_all_news(context)
         news_list = collected["final_news"]
         processed_news = collected["processed_news"]
         screened_news = collected["screened_news"]
@@ -1283,6 +1378,9 @@ def run_news_pipeline(collect_fresh_news: bool = True, persist_summary: bool = T
         if use_remote:
             screened_result = send_news(screened_news) if screened_news else {"inserted": 0, "updated": 0, "ignored": 0}
             processed_result = send_news(processed_news) if processed_news else {"inserted": 0, "updated": 0, "ignored": 0}
+            _attach_remote_news_ids(screened_news, screened_result)
+            _attach_remote_news_ids(processed_news, processed_result)
+            _attach_remote_news_ids(news_list, processed_result)
             inserted_count = screened_result.get('inserted', 0) + processed_result.get('inserted', 0)
             logger.info(
                 "Cloudflare D1 新闻写入完成: 初筛新增 %s / 更新 %s；LLM 阶段新增 %s / 更新 %s",
@@ -1318,14 +1416,14 @@ def run_news_pipeline(collect_fresh_news: bool = True, persist_summary: bool = T
     if persist_summary and window_news:
         daily_record = build_daily_summary_record(window_news, analysis_date)
         if use_remote:
-            send_news_analysis(daily_record)
+            send_daily_news_ai_analysis(daily_record)
         else:
-            save_news_analysis(daily_record)
+            save_daily_news_ai_analysis(daily_record)
             logger.info("日期级综合分析已更新: %s", analysis_date)
     elif persist_summary:
         logger.info("交易日 %s 的分析窗口内暂无有效新闻，跳过 daily_summary 覆盖", analysis_date)
         if not use_remote:
-            daily_record = get_news_analysis_by_date(analysis_date) or {}
+            daily_record = get_daily_news_ai_analysis_by_date(analysis_date) or {}
 
     if persist_summary:
         if use_remote:
@@ -1338,7 +1436,7 @@ def run_news_pipeline(collect_fresh_news: bool = True, persist_summary: bool = T
         news_list = window_news
     summary_text = daily_record.get("raw_summary") or _generate_rule_based_summary(news_list[:10])
 
-    filepath = export_to_excel(news_list, summary_text)
+    filepath = export_to_excel(news_list, summary_text, context)
     return {
         "filepath": filepath,
         "news_count": len(news_list),

@@ -1,0 +1,395 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Homepage Insight Style Preview</title>
+    <style>
+      :root {
+        --page-bg: #edf2f8;
+        --text: #1e2d44;
+        --muted: #68768d;
+        --line: rgba(30, 45, 68, 0.08);
+        --shadow: 0 24px 70px rgba(30, 45, 68, 0.12);
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      body {
+        margin: 0;
+        font-family: "SF Pro Display", "PingFang SC", -apple-system, BlinkMacSystemFont, sans-serif;
+        color: var(--text);
+        background:
+          radial-gradient(circle at top left, rgba(255, 255, 255, 0.92), transparent 26%),
+          linear-gradient(180deg, #f7f9fc, var(--page-bg));
+      }
+
+      .page {
+        width: min(1440px, calc(100vw - 40px));
+        margin: 0 auto;
+        padding: 32px 0 48px;
+      }
+
+      h1 {
+        margin: 0 0 8px;
+        font-size: clamp(2rem, 4vw, 3rem);
+        letter-spacing: -0.04em;
+      }
+
+      .intro {
+        margin: 0 0 28px;
+        color: var(--muted);
+        font-size: 1rem;
+      }
+
+      .grid {
+        display: grid;
+        gap: 24px;
+      }
+
+      .variant {
+        overflow: hidden;
+        border-radius: 34px;
+        border: 1px solid var(--line);
+        background: rgba(255, 255, 255, 0.7);
+        box-shadow: var(--shadow);
+        backdrop-filter: blur(14px);
+      }
+
+      .variant-head {
+        padding: 18px 22px;
+        color: rgba(255, 255, 255, 0.94);
+      }
+
+      .variant-name {
+        margin: 0;
+        font-size: 1.05rem;
+        font-weight: 700;
+        letter-spacing: 0.02em;
+      }
+
+      .variant-note {
+        margin: 4px 0 0;
+        font-size: 0.84rem;
+        opacity: 0.86;
+      }
+
+      .hero-preview {
+        min-height: 410px;
+        padding: 24px;
+        display: grid;
+        gap: 26px;
+        align-content: space-between;
+      }
+
+      .hero-top {
+        display: flex;
+        justify-content: flex-end;
+      }
+
+      .env {
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+        padding: 6px 10px;
+        border-radius: 999px;
+        font-size: 0.82rem;
+        color: inherit;
+        background: rgba(255, 255, 255, 0.28);
+        border: 1px solid rgba(255, 255, 255, 0.36);
+        backdrop-filter: blur(18px);
+      }
+
+      .env strong {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        padding: 4px 10px;
+        border-radius: 999px;
+        font-size: 0.78rem;
+        color: #23428f;
+        background: rgba(255, 255, 255, 0.95);
+      }
+
+      .insight-shell {
+        display: grid;
+        gap: 16px;
+        align-content: end;
+        max-width: 100%;
+      }
+
+      .label {
+        display: inline-flex;
+        align-items: center;
+        width: fit-content;
+        padding: 5px 12px;
+        border-radius: 999px;
+        font-size: 0.8rem;
+        font-weight: 700;
+        background: rgba(255, 255, 255, 0.28);
+        border: 1px solid rgba(255, 255, 255, 0.32);
+      }
+
+      .title {
+        margin: 0;
+        font-size: clamp(1.32rem, 2vw, 1.85rem);
+        line-height: 1.12;
+        letter-spacing: -0.03em;
+      }
+
+      .quote {
+        margin: 0;
+        width: fit-content;
+        max-width: none;
+        white-space: nowrap;
+        overflow-wrap: normal;
+        word-break: keep-all;
+        font-family: "Songti SC", "STSong", "Noto Serif SC", serif;
+        font-size: clamp(1.55rem, 2.5vw, 2.05rem);
+        line-height: 1.55;
+        text-indent: 2em;
+        letter-spacing: 0.01em;
+      }
+
+      .cta {
+        width: fit-content;
+        padding: 10px 16px;
+        border-radius: 999px;
+        font-size: 0.9rem;
+        border: 1px solid rgba(255, 255, 255, 0.36);
+        background: rgba(255, 255, 255, 0.24);
+        backdrop-filter: blur(18px);
+      }
+
+      .toolbar-bottom {
+        display: flex;
+        justify-content: flex-start;
+      }
+
+      .nav {
+        display: inline-flex;
+        gap: 10px;
+        padding: 10px;
+        border-radius: 999px;
+        background: rgba(255, 255, 255, 0.24);
+        border: 1px solid rgba(255, 255, 255, 0.32);
+        backdrop-filter: blur(18px);
+      }
+
+      .chip {
+        min-height: 40px;
+        padding: 8px 18px;
+        border-radius: 999px;
+        border: 1px solid rgba(255, 255, 255, 0.2);
+        background: rgba(255, 255, 255, 0.12);
+        color: inherit;
+        font-size: 0.94rem;
+      }
+
+      .chip.active {
+        color: #22365d;
+        background: rgba(255, 255, 255, 0.94);
+        border-color: rgba(255, 255, 255, 0.94);
+      }
+
+      .variant-a1,
+      .variant-a2,
+      .variant-a3,
+      .variant-a4 {
+        color: #3b4961;
+      }
+
+      .variant-a1 .variant-head {
+        background: linear-gradient(180deg, rgba(95, 119, 160, 0.92), rgba(95, 119, 160, 0.76));
+      }
+
+      .variant-a1 .hero-preview {
+        background:
+          radial-gradient(circle at 12% 20%, rgba(255, 255, 255, 0.76), transparent 24%),
+          radial-gradient(circle at 85% 18%, rgba(255, 226, 204, 0.58), transparent 20%),
+          linear-gradient(135deg, rgba(198, 217, 243, 0.9), rgba(232, 239, 250, 0.72) 40%, rgba(218, 229, 245, 0.84));
+      }
+
+      .variant-a2 .variant-head {
+        background: linear-gradient(180deg, rgba(94, 132, 124, 0.92), rgba(94, 132, 124, 0.76));
+      }
+
+      .variant-a2 .hero-preview {
+        background:
+          radial-gradient(circle at 20% 18%, rgba(255, 255, 255, 0.72), transparent 26%),
+          radial-gradient(circle at 76% 24%, rgba(255, 235, 214, 0.42), transparent 18%),
+          linear-gradient(135deg, rgba(205, 231, 224, 0.92), rgba(239, 245, 241, 0.76) 42%, rgba(218, 234, 228, 0.88));
+      }
+
+      .variant-a3 .variant-head {
+        background: linear-gradient(180deg, rgba(138, 116, 155, 0.92), rgba(138, 116, 155, 0.76));
+      }
+
+      .variant-a3 .hero-preview {
+        background:
+          radial-gradient(circle at 16% 22%, rgba(255, 255, 255, 0.8), transparent 24%),
+          radial-gradient(circle at 82% 18%, rgba(255, 221, 201, 0.44), transparent 18%),
+          linear-gradient(135deg, rgba(229, 220, 243, 0.92), rgba(246, 241, 250, 0.76) 40%, rgba(232, 224, 243, 0.88));
+      }
+
+      .variant-a4 .variant-head {
+        background: linear-gradient(180deg, rgba(164, 124, 101, 0.92), rgba(164, 124, 101, 0.76));
+      }
+
+      .variant-a4 .hero-preview {
+        background:
+          radial-gradient(circle at 16% 22%, rgba(255, 255, 255, 0.78), transparent 25%),
+          radial-gradient(circle at 84% 20%, rgba(255, 228, 201, 0.46), transparent 18%),
+          linear-gradient(135deg, rgba(241, 223, 214, 0.92), rgba(250, 242, 237, 0.78) 42%, rgba(244, 229, 220, 0.9));
+      }
+
+      .footer-tip {
+        margin-top: 18px;
+        color: var(--muted);
+        font-size: 0.92rem;
+      }
+
+      @media (max-width: 960px) {
+        .hero-preview {
+          min-height: 360px;
+        }
+
+        .quote {
+          white-space: normal;
+          width: auto;
+          font-size: 1.45rem;
+        }
+      }
+
+      @media (max-width: 640px) {
+        .page {
+          width: min(100vw - 24px, 100%);
+        }
+
+        .hero-preview {
+          padding: 20px;
+        }
+
+        .nav {
+          flex-wrap: wrap;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <div class="page">
+      <h1>首页「每日一句」风格预览</h1>
+      <p class="intro">这次只做纯色融合和玻璃感，不用图片。按钮都放下面，右上角只留环境，金句默认不换行。你看完直接选 `A1 / A2 / A3 / A4` 就行。</p>
+
+      <div class="grid">
+        <section class="variant variant-a1">
+          <div class="variant-head">
+            <div>
+              <p class="variant-name">A1 · 冷雾蓝</p>
+              <p class="variant-note">偏 iOS 玻璃卡片，冷静、克制，最像工作台首页。</p>
+            </div>
+          </div>
+          <div class="hero-preview">
+            <div class="hero-top">
+              <div class="env">当前环境 <strong>测试环境</strong></div>
+            </div>
+            <div class="insight-shell">
+              <span class="label">每日一句</span>
+              <h2 class="title">投资心态建设 9 步法</h2>
+              <p class="quote">观望原则：对市场有疑问时，坚决不交易。</p>
+              <div class="cta">查看全文</div>
+            </div>
+            <div class="toolbar-bottom">
+              <div class="nav">
+                <span class="chip active">复盘工作台</span>
+                <span class="chip">新闻检索</span>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <section class="variant variant-a2">
+          <div class="variant-head">
+            <div>
+              <p class="variant-name">A2 · 森雾青</p>
+              <p class="variant-note">更温一点，绿色调更柔和，耐看但不会太寡。</p>
+            </div>
+          </div>
+          <div class="hero-preview">
+            <div class="hero-top">
+              <div class="env">当前环境 <strong>测试环境</strong></div>
+            </div>
+            <div class="insight-shell">
+              <span class="label">每日一句</span>
+              <h2 class="title">8 个投资真理</h2>
+              <p class="quote">观望原则：对市场有疑问时，坚决不交易。</p>
+              <div class="cta">查看全文</div>
+            </div>
+            <div class="toolbar-bottom">
+              <div class="nav">
+                <span class="chip active">复盘工作台</span>
+                <span class="chip">新闻检索</span>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <section class="variant variant-a3">
+          <div class="variant-head">
+            <div>
+              <p class="variant-name">A3 · 雾紫灰</p>
+              <p class="variant-note">更安静一点，有点杂志扉页的气质。</p>
+            </div>
+          </div>
+          <div class="hero-preview">
+            <div class="hero-top">
+              <div class="env">当前环境 <strong>测试环境</strong></div>
+            </div>
+            <div class="insight-shell">
+              <span class="label">每日一句</span>
+              <h2 class="title">投资心态建设 9 步法</h2>
+              <p class="quote">观望原则：对市场有疑问时，坚决不交易。</p>
+              <div class="cta">查看全文</div>
+            </div>
+            <div class="toolbar-bottom">
+              <div class="nav">
+                <span class="chip active">复盘工作台</span>
+                <span class="chip">新闻检索</span>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <section class="variant variant-a4">
+          <div class="variant-head">
+            <div>
+              <p class="variant-name">A4 · 暖砂金</p>
+              <p class="variant-note">偏暖、偏柔，像早晨阳光打在玻璃上的感觉。</p>
+            </div>
+          </div>
+          <div class="hero-preview">
+            <div class="hero-top">
+              <div class="env">当前环境 <strong>测试环境</strong></div>
+            </div>
+            <div class="insight-shell">
+              <span class="label">每日一句</span>
+              <h2 class="title">8 个投资真理</h2>
+              <p class="quote">观望原则：对市场有疑问时，坚决不交易。</p>
+              <div class="cta">查看全文</div>
+            </div>
+            <div class="toolbar-bottom">
+              <div class="nav">
+                <span class="chip active">复盘工作台</span>
+                <span class="chip">新闻检索</span>
+              </div>
+            </div>
+          </div>
+        </section>
+      </div>
+
+      <p class="footer-tip">这是本地静态预览文件，不会影响测试环境。你选中一个后，我再把它正式接到首页。</p>
+    </div>
+  </body>
+</html>

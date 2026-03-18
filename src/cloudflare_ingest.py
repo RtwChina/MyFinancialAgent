@@ -3,6 +3,7 @@ Cloudflare Workers API 写入客户端
 """
 from __future__ import annotations
 
+import math
 import time
 from urllib.parse import urlencode
 from typing import Any, Dict, List, Optional
@@ -36,16 +37,27 @@ def _headers() -> Dict[str, str]:
     }
 
 
+def _sanitize_payload(value: Any) -> Any:
+    if isinstance(value, float):
+        return value if math.isfinite(value) else None
+    if isinstance(value, dict):
+        return {key: _sanitize_payload(item) for key, item in value.items()}
+    if isinstance(value, list):
+        return [_sanitize_payload(item) for item in value]
+    return value
+
+
 def _post(path: str, payload: Dict[str, Any]) -> Dict[str, Any]:
     if not is_remote_write_configured():
         raise CloudflareIngestError("未配置 INGEST_API_BASE_URL 或 INGEST_API_TOKEN")
 
     url = f"{INGEST_API_BASE_URL}{path}"
+    sanitized_payload = _sanitize_payload(payload)
     last_error: Optional[Exception] = None
 
     for attempt in range(1, DEFAULT_MAX_RETRIES + 1):
         try:
-            response = requests.post(url, headers=_headers(), json=payload, timeout=DEFAULT_TIMEOUT)
+            response = requests.post(url, headers=_headers(), json=sanitized_payload, timeout=DEFAULT_TIMEOUT)
             response.raise_for_status()
             return response.json()
         except requests.RequestException as exc:
@@ -83,6 +95,7 @@ def _send_in_batches(path: str, items: List[Dict[str, Any]], batch_size: int) ->
     inserted = 0
     updated = 0
     ignored = 0
+    id_map: Dict[str, int] = {}
 
     for start in range(0, len(items), batch_size):
         batch = items[start:start + batch_size]
@@ -90,12 +103,20 @@ def _send_in_batches(path: str, items: List[Dict[str, Any]], batch_size: int) ->
         inserted += result.get("inserted", 0)
         updated += result.get("updated", 0)
         ignored += result.get("ignored", 0)
+        batch_id_map = result.get("id_map") or {}
+        if isinstance(batch_id_map, dict):
+            for news_hash, news_id in batch_id_map.items():
+                try:
+                    id_map[str(news_hash)] = int(news_id)
+                except (TypeError, ValueError):
+                    continue
 
     return {
         "inserted": inserted,
         "updated": updated,
         "ignored": ignored,
         "total": len(items),
+        "id_map": id_map,
     }
 
 
@@ -117,7 +138,7 @@ def send_news(news_items: List[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
     return result
 
 
-def send_news_analysis(analysis: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+def send_daily_news_ai_analysis(analysis: Dict[str, Any]) -> Optional[Dict[str, Any]]:
     if not analysis:
         return None
 
@@ -146,4 +167,10 @@ def fetch_news(date_from: str, date_to: str, limit: int = 200) -> List[Dict[str,
             "limit": limit,
         },
     )
+    return result.get("items", [])
+
+
+def fetch_symbols() -> List[Dict[str, Any]]:
+    """从 Workers API 拉取全部活跃标的列表"""
+    result = _get("/api/symbols")
     return result.get("items", [])
