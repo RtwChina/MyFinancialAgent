@@ -39,13 +39,6 @@ jobs:
         run: |
           python main.py close-summary
 
-      - name: 上传数据库文件
-        uses: actions/upload-artifact@v4
-        with:
-          name: financial_data
-          path: output/financial_data.db
-          retention-days: 30
-
       - name: 上传日志
         uses: actions/upload-artifact@v4
         if: always()

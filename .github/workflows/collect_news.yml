@@ -25,13 +25,6 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
-      - name: 下载已有数据库
-        uses: actions/download-artifact@v4
-        continue-on-error: true
-        with:
-          name: financial_data
-          path: output/
-
       - name: 环境诊断
         env:
           LLM_API_KEY: ${{ secrets.LLM_API_KEY }}
@@ -65,13 +58,6 @@ jobs:
           PYTHONUNBUFFERED: "1"
         run: |
           python main.py
-
-      - name: 上传数据库文件
-        uses: actions/upload-artifact@v4
-        with:
-          name: financial_data
-          path: output/financial_data.db
-          retention-days: 30
 
       - name: 上传日志
         uses: actions/upload-artifact@v4
