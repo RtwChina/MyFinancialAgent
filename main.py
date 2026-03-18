@@ -103,11 +103,11 @@ def run_hourly_news_job(context: ExecutionContext | None = None):
 
 
 def run_close_summary_job(context: ExecutionContext | None = None):
-    """收盘后任务：存价格 + 汇总最近交易日到上一交易日之间的新闻"""
+    """收盘后任务：补采最新新闻 + 存价格 + 汇总"""
     context = context or build_execution_context()
     print("\n[Close] 正在执行收盘后汇总任务...")
     prices_file = run_price_collector(context)
-    news_file = run_news_collector(collect_fresh_news=False, persist_summary=True, context=context)
+    news_file = run_news_collector(collect_fresh_news=True, persist_summary=True, context=context)
     return {"prices": prices_file, "news": news_file}
 
 
