@@ -1,0 +1,438 @@
+{
+  "review_date": "2026-03-10",
+  "items": [
+    {
+      "pub_date": "2026-03-09 18:12:00",
+      "title": "美联储官员释放偏鹰信号，美元与长端利率同步走高 #20260310-00-00",
+      "content": "多位美联储官员强调通胀仍具韧性，市场下调短期降息预期，美元指数和10年期美债收益率联动上行。",
+      "url": "https://demo.local/sim/macro-20260310-00-00",
+      "source": "demo_slot_00",
+      "type": "index",
+      "related_symbols": [
+        "DXY",
+        "GSPC"
+      ],
+      "importance_stars": 4,
+      "rule_passed": 1,
+      "rule_reason": "宏观主线命中 DX-Y.NYB, ^GSPC",
+      "processing_status": "llm_processed",
+      "ai_summary": "美联储官员释放偏鹰信号，美元与长端利率同步走高",
+      "market_impact": "美元走强与贴现率上升压制成长资产风险偏好。",
+      "news_hash": "c16c2d90c8205a832a2e432275ee0961"
+    },
+    {
+      "pub_date": "2026-03-09 18:12:00",
+      "title": "美国零售销售低于预期，市场重新交易增长放缓 #20260310-00-02",
+      "content": "美国零售销售与可选消费数据略低于预期，利率预期回落，但市场对盈利周期的担忧上升。",
+      "url": "https://demo.local/sim/macro-20260310-00-02",
+      "source": "demo_slot_00",
+      "type": "index",
+      "related_symbols": [
+        "GSPC",
+        "DXY"
+      ],
+      "importance_stars": 4,
+      "rule_passed": 1,
+      "rule_reason": "宏观主线命中 ^GSPC, DX-Y.NYB",
+      "processing_status": "llm_processed",
+      "ai_summary": "美国零售销售低于预期，市场重新交易增长放缓",
+      "market_impact": "增长预期回落利好利率敏感资产，但压制顺周期板块。",
+      "news_hash": "8ef27125d1304984111b3411cc09d4bd"
+    },
+    {
+      "pub_date": "2026-03-09 18:33:00",
+      "title": "微软披露更多 AI Agent 场景，企业客户采用率继续爬升 #20260310-00-01",
+      "content": "微软在企业开发者大会上披露更多 AI Agent 应用场景，客户采用率和调用量保持增长。",
+      "url": "https://demo.local/sim/msft-20260310-00-01",
+      "source": "demo_slot_00",
+      "type": "stock",
+      "related_symbols": [
+        "MSFT"
+      ],
+      "importance_stars": 3,
+      "rule_passed": 1,
+      "rule_reason": "涉及跟踪标的 MSFT",
+      "processing_status": "llm_processed",
+      "ai_summary": "微软披露更多 AI Agent 场景，企业客户采用率继续爬升",
+      "market_impact": "企业级 AI 渗透率提升，有助于提高长期收入弹性。",
+      "news_hash": "8941b6d7bd5ee2df1d76470bf511782b"
+    },
+    {
+      "pub_date": "2026-03-09 20:05:00",
+      "title": "标普500逼近阶段高位，风险偏好延续修复 #20260310-01-00",
+      "content": "权重科技和金融板块同步走强，标普500 再度逼近阶段高位，市场对软着陆交易重新升温。",
+      "url": "https://demo.local/sim/market-20260310-01-00",
+      "source": "demo_slot_01",
+      "type": "sector",
+      "related_symbols": [
+        "GSPC",
+        "VIX"
+      ],
+      "importance_stars": 3,
+      "rule_passed": 1,
+      "rule_reason": "市场主线命中 ^GSPC, ^VIX",
+      "processing_status": "llm_processed",
+      "ai_summary": "标普500逼近阶段高位，风险偏好延续修复",
+      "market_impact": "指数走强通常伴随波动率回落，风险偏好改善。",
+      "news_hash": "775f660ef258b3e4e548f469f8b65470"
+    },
+    {
+      "pub_date": "2026-03-09 20:54:00",
+      "title": "Lumentum 管理层强调光通信需求持续，交付节奏超预期 #20260310-01-01",
+      "content": "管理层表示头部客户需求稳定提升，光通信产品交付节奏快于此前预期。",
+      "url": "https://demo.local/sim/lite-20260310-01-01",
+      "source": "demo_slot_01",
+      "type": "stock",
+      "related_symbols": [
+        "LITE"
+      ],
+      "importance_stars": 3,
+      "rule_passed": 1,
+      "rule_reason": "涉及跟踪标的 LITE",
+      "processing_status": "llm_processed",
+      "ai_summary": "Lumentum 管理层强调光通信需求持续，交付节奏超预期",
+      "market_impact": "需求确认改善市场对后续季度收入节奏的判断。",
+      "news_hash": "eea3eff46940c8bc521d171c66961daa"
+    },
+    {
+      "pub_date": "2026-03-09 22:12:00",
+      "title": "美国10年期国债收益率回落，科技成长板块估值压力缓解 #20260310-02-00",
+      "content": "长端利率回落后，高估值科技板块迎来估值修复，AI 和软件龙头盘前情绪改善。",
+      "url": "https://demo.local/sim/macro-20260310-02-00",
+      "source": "demo_slot_02",
+      "type": "index",
+      "related_symbols": [
+        "GSPC",
+        "MSFT",
+        "GOOGL"
+      ],
+      "importance_stars": 4,
+      "rule_passed": 1,
+      "rule_reason": "宏观主线命中 ^GSPC, MSFT",
+      "processing_status": "llm_processed",
+      "ai_summary": "美国10年期国债收益率回落，科技成长板块估值压力缓解",
+      "market_impact": "利率回落改善成长股估值框架，纳指风格可能重新占优。",
+      "news_hash": "29ada7781df99eb138393ced99e8bb4d"
+    },
+    {
+      "pub_date": "2026-03-10 00:33:00",
+      "title": "VIX 回落到阶段低位，短线情绪转向乐观 #20260310-03-00",
+      "content": "波动率指标连续回落，表明避险需求下降，风险偏好修复对 AI、半导体和可选消费形成支撑。",
+      "url": "https://demo.local/sim/market-20260310-03-00",
+      "source": "demo_slot_03",
+      "type": "sector",
+      "related_symbols": [
+        "VIX",
+        "GSPC"
+      ],
+      "importance_stars": 3,
+      "rule_passed": 1,
+      "rule_reason": "市场主线命中 ^VIX, ^GSPC",
+      "processing_status": "llm_processed",
+      "ai_summary": "VIX 回落到阶段低位，短线情绪转向乐观",
+      "market_impact": "风险偏好回暖有利于高 Beta 板块继续获得增量资金。",
+      "news_hash": "e1aface68d6d8aa65de918a5b8afa556"
+    },
+    {
+      "pub_date": "2026-03-10 02:18:00",
+      "title": "VIX 回落到阶段低位，短线情绪转向乐观 #20260310-04-01",
+      "content": "波动率指标连续回落，表明避险需求下降，风险偏好修复对 AI、半导体和可选消费形成支撑。",
+      "url": "https://demo.local/sim/market-20260310-04-01",
+      "source": "demo_slot_04",
+      "type": "sector",
+      "related_symbols": [
+        "VIX",
+        "GSPC"
+      ],
+      "importance_stars": 3,
+      "rule_passed": 1,
+      "rule_reason": "市场主线命中 ^VIX, ^GSPC",
+      "processing_status": "llm_processed",
+      "ai_summary": "VIX 回落到阶段低位，短线情绪转向乐观",
+      "market_impact": "风险偏好回暖有利于高 Beta 板块继续获得增量资金。",
+      "news_hash": "af68f8c9154111ec86c8998dad87839c"
+    },
+    {
+      "pub_date": "2026-03-10 02:26:00",
+      "title": "美国10年期国债收益率回落，科技成长板块估值压力缓解 #20260310-04-02",
+      "content": "长端利率回落后，高估值科技板块迎来估值修复，AI 和软件龙头盘前情绪改善。",
+      "url": "https://demo.local/sim/macro-20260310-04-02",
+      "source": "demo_slot_04",
+      "type": "index",
+      "related_symbols": [
+        "GSPC",
+        "MSFT",
+        "GOOGL"
+      ],
+      "importance_stars": 4,
+      "rule_passed": 1,
+      "rule_reason": "宏观主线命中 ^GSPC, MSFT",
+      "processing_status": "llm_processed",
+      "ai_summary": "美国10年期国债收益率回落，科技成长板块估值压力缓解",
+      "market_impact": "利率回落改善成长股估值框架，纳指风格可能重新占优。",
+      "news_hash": "29304cc8baced04a3f1c41852ed31584"
+    },
+    {
+      "pub_date": "2026-03-10 02:48:00",
+      "title": "微软披露更多 AI Agent 场景，企业客户采用率继续爬升 #20260310-04-00",
+      "content": "微软在企业开发者大会上披露更多 AI Agent 应用场景，客户采用率和调用量保持增长。",
+      "url": "https://demo.local/sim/msft-20260310-04-00",
+      "source": "demo_slot_04",
+      "type": "stock",
+      "related_symbols": [
+        "MSFT"
+      ],
+      "importance_stars": 3,
+      "rule_passed": 1,
+      "rule_reason": "涉及跟踪标的 MSFT",
+      "processing_status": "llm_processed",
+      "ai_summary": "微软披露更多 AI Agent 场景，企业客户采用率继续爬升",
+      "market_impact": "企业级 AI 渗透率提升，有助于提高长期收入弹性。",
+      "news_hash": "73f073214457eed56eb03f7adead7f72"
+    },
+    {
+      "pub_date": "2026-03-10 04:12:00",
+      "title": "VIX 回落到阶段低位，短线情绪转向乐观 #20260310-05-00",
+      "content": "波动率指标连续回落，表明避险需求下降，风险偏好修复对 AI、半导体和可选消费形成支撑。",
+      "url": "https://demo.local/sim/market-20260310-05-00",
+      "source": "demo_slot_05",
+      "type": "sector",
+      "related_symbols": [
+        "VIX",
+        "GSPC"
+      ],
+      "importance_stars": 3,
+      "rule_passed": 1,
+      "rule_reason": "市场主线命中 ^VIX, ^GSPC",
+      "processing_status": "llm_processed",
+      "ai_summary": "VIX 回落到阶段低位，短线情绪转向乐观",
+      "market_impact": "风险偏好回暖有利于高 Beta 板块继续获得增量资金。",
+      "news_hash": "a247101c44b87db10f0f941c2476baad"
+    },
+    {
+      "pub_date": "2026-03-10 04:48:00",
+      "title": "半导体指数走强，AI 基建链景气度预期继续上修 #20260310-05-01",
+      "content": "半导体与光模块板块联动上涨，AI 基建需求被市场再次计价，带动相关高弹性资产走强。",
+      "url": "https://demo.local/sim/market-20260310-05-01",
+      "source": "demo_slot_05",
+      "type": "sector",
+      "related_symbols": [
+        "MU",
+        "LITE",
+        "GSPC"
+      ],
+      "importance_stars": 5,
+      "rule_passed": 1,
+      "rule_reason": "市场主线命中 MU, LITE",
+      "processing_status": "llm_processed",
+      "ai_summary": "半导体指数走强，AI 基建链景气度预期继续上修",
+      "market_impact": "AI 资本开支相关链条继续获得相对收益。",
+      "news_hash": "3f43572ce73945e3d6e482c3e004df7a"
+    },
+    {
+      "pub_date": "2026-03-10 06:05:00",
+      "title": "Micron 数据中心客户追加订单，市场上修全年 ASP 预期 #20260310-06-00",
+      "content": "多家云客户追加内存与 HBM 采购计划，市场重新评估 Micron 全年 ASP 和利润弹性。",
+      "url": "https://demo.local/sim/mu-20260310-06-00",
+      "source": "demo_slot_06",
+      "type": "stock",
+      "related_symbols": [
+        "MU"
+      ],
+      "importance_stars": 3,
+      "rule_passed": 1,
+      "rule_reason": "涉及跟踪标的 MU",
+      "processing_status": "llm_processed",
+      "ai_summary": "Micron 数据中心客户追加订单，市场上修全年 ASP 预期",
+      "market_impact": "订单与价格双升改善 Micron 业绩弹性。",
+      "news_hash": "f0701022c4f3eb6972f3207ecda0fa62"
+    },
+    {
+      "pub_date": "2026-03-10 06:18:00",
+      "title": "Micron 上调 HBM 与 DDR5 出货指引，存储链景气度继续抬升 #20260310-06-01",
+      "content": "渠道反馈显示 Micron 将上调 HBM 与 DDR5 出货预期，服务器与封装链订单能见度同步延长。",
+      "url": "https://demo.local/sim/mu-20260310-06-01",
+      "source": "demo_slot_06",
+      "type": "stock",
+      "related_symbols": [
+        "MU"
+      ],
+      "importance_stars": 3,
+      "rule_passed": 1,
+      "rule_reason": "涉及跟踪标的 MU",
+      "processing_status": "llm_processed",
+      "ai_summary": "Micron 上调 HBM 与 DDR5 出货指引，存储链景气度继续抬升",
+      "market_impact": "有利于存储链与 AI 服务器链条的景气预期继续修复。",
+      "news_hash": "69b63c414cca625d0a30cde5668171a0"
+    },
+    {
+      "pub_date": "2026-03-10 08:05:00",
+      "title": "美国零售销售低于预期，市场重新交易增长放缓 #20260310-07-01",
+      "content": "美国零售销售与可选消费数据略低于预期，利率预期回落，但市场对盈利周期的担忧上升。",
+      "url": "https://demo.local/sim/macro-20260310-07-01",
+      "source": "demo_slot_07",
+      "type": "index",
+      "related_symbols": [
+        "GSPC",
+        "DXY"
+      ],
+      "importance_stars": 4,
+      "rule_passed": 1,
+      "rule_reason": "宏观主线命中 ^GSPC, DX-Y.NYB",
+      "processing_status": "llm_processed",
+      "ai_summary": "美国零售销售低于预期，市场重新交易增长放缓",
+      "market_impact": "增长预期回落利好利率敏感资产，但压制顺周期板块。",
+      "news_hash": "7098b0ba4bf7a01bcb999be525556789"
+    },
+    {
+      "pub_date": "2026-03-10 08:18:00",
+      "title": "标普500逼近阶段高位，风险偏好延续修复 #20260310-07-00",
+      "content": "权重科技和金融板块同步走强，标普500 再度逼近阶段高位，市场对软着陆交易重新升温。",
+      "url": "https://demo.local/sim/market-20260310-07-00",
+      "source": "demo_slot_07",
+      "type": "sector",
+      "related_symbols": [
+        "GSPC",
+        "VIX"
+      ],
+      "importance_stars": 4,
+      "rule_passed": 1,
+      "rule_reason": "市场主线命中 ^GSPC, ^VIX",
+      "processing_status": "llm_processed",
+      "ai_summary": "标普500逼近阶段高位，风险偏好延续修复",
+      "market_impact": "指数走强通常伴随波动率回落，风险偏好改善。",
+      "news_hash": "c8f69dd5d6cf965d5f6226bd41189579"
+    },
+    {
+      "pub_date": "2026-03-10 10:18:00",
+      "title": "Micron 上调 HBM 与 DDR5 出货指引，存储链景气度继续抬升 #20260310-08-01",
+      "content": "渠道反馈显示 Micron 将上调 HBM 与 DDR5 出货预期，服务器与封装链订单能见度同步延长。",
+      "url": "https://demo.local/sim/mu-20260310-08-01",
+      "source": "demo_slot_08",
+      "type": "stock",
+      "related_symbols": [
+        "MU"
+      ],
+      "importance_stars": 4,
+      "rule_passed": 1,
+      "rule_reason": "涉及跟踪标的 MU",
+      "processing_status": "llm_processed",
+      "ai_summary": "Micron 上调 HBM 与 DDR5 出货指引，存储链景气度继续抬升",
+      "market_impact": "有利于存储链与 AI 服务器链条的景气预期继续修复。",
+      "news_hash": "40f259d0304746c07d0a12c93f972275"
+    },
+    {
+      "pub_date": "2026-03-10 10:33:00",
+      "title": "半导体指数走强，AI 基建链景气度预期继续上修 #20260310-08-00",
+      "content": "半导体与光模块板块联动上涨，AI 基建需求被市场再次计价，带动相关高弹性资产走强。",
+      "url": "https://demo.local/sim/market-20260310-08-00",
+      "source": "demo_slot_08",
+      "type": "sector",
+      "related_symbols": [
+        "MU",
+        "LITE",
+        "GSPC"
+      ],
+      "importance_stars": 5,
+      "rule_passed": 1,
+      "rule_reason": "市场主线命中 MU, LITE",
+      "processing_status": "llm_processed",
+      "ai_summary": "半导体指数走强，AI 基建链景气度预期继续上修",
+      "market_impact": "AI 资本开支相关链条继续获得相对收益。",
+      "news_hash": "1a8f2d9e46da510bc850756258e49c11"
+    },
+    {
+      "pub_date": "2026-03-10 10:33:00",
+      "title": "美联储官员释放偏鹰信号，美元与长端利率同步走高 #20260310-08-02",
+      "content": "多位美联储官员强调通胀仍具韧性，市场下调短期降息预期，美元指数和10年期美债收益率联动上行。",
+      "url": "https://demo.local/sim/macro-20260310-08-02",
+      "source": "demo_slot_08",
+      "type": "index",
+      "related_symbols": [
+        "DXY",
+        "GSPC"
+      ],
+      "importance_stars": 5,
+      "rule_passed": 1,
+      "rule_reason": "宏观主线命中 DX-Y.NYB, ^GSPC",
+      "processing_status": "llm_processed",
+      "ai_summary": "美联储官员释放偏鹰信号，美元与长端利率同步走高",
+      "market_impact": "美元走强与贴现率上升压制成长资产风险偏好。",
+      "news_hash": "7aefe260876f01dcdc61bf1eb0ba309d"
+    },
+    {
+      "pub_date": "2026-03-10 12:33:00",
+      "title": "Lumentum 获得新一轮光模块订单，AI 网络链再获催化 #20260310-09-00",
+      "content": "Lumentum 获得头部客户新增光模块订单，市场上修 AI 网络基础设施资本开支预期。",
+      "url": "https://demo.local/sim/lite-20260310-09-00",
+      "source": "demo_slot_09",
+      "type": "stock",
+      "related_symbols": [
+        "LITE"
+      ],
+      "importance_stars": 5,
+      "rule_passed": 1,
+      "rule_reason": "涉及跟踪标的 LITE",
+      "processing_status": "llm_processed",
+      "ai_summary": "Lumentum 获得新一轮光模块订单，AI 网络链再获催化",
+      "market_impact": "光模块与 AI 网络链条继续受益于资本开支扩张。",
+      "news_hash": "eed80bfdf4a239cd15c8d232e091a125"
+    },
+    {
+      "pub_date": "2026-03-10 14:05:00",
+      "title": "美联储官员释放偏鹰信号，美元与长端利率同步走高 #20260310-10-01",
+      "content": "多位美联储官员强调通胀仍具韧性，市场下调短期降息预期，美元指数和10年期美债收益率联动上行。",
+      "url": "https://demo.local/sim/macro-20260310-10-01",
+      "source": "demo_slot_10",
+      "type": "index",
+      "related_symbols": [
+        "DXY",
+        "GSPC"
+      ],
+      "importance_stars": 5,
+      "rule_passed": 1,
+      "rule_reason": "宏观主线命中 DX-Y.NYB, ^GSPC",
+      "processing_status": "llm_processed",
+      "ai_summary": "美联储官员释放偏鹰信号，美元与长端利率同步走高",
+      "market_impact": "美元走强与贴现率上升压制成长资产风险偏好。",
+      "news_hash": "6bbc93a4907bfb73f1c31a6c32f2a696"
+    },
+    {
+      "pub_date": "2026-03-10 14:41:00",
+      "title": "VIX 回落到阶段低位，短线情绪转向乐观 #20260310-10-00",
+      "content": "波动率指标连续回落，表明避险需求下降，风险偏好修复对 AI、半导体和可选消费形成支撑。",
+      "url": "https://demo.local/sim/market-20260310-10-00",
+      "source": "demo_slot_10",
+      "type": "sector",
+      "related_symbols": [
+        "VIX",
+        "GSPC"
+      ],
+      "importance_stars": 4,
+      "rule_passed": 1,
+      "rule_reason": "市场主线命中 ^VIX, ^GSPC",
+      "processing_status": "llm_processed",
+      "ai_summary": "VIX 回落到阶段低位，短线情绪转向乐观",
+      "market_impact": "风险偏好回暖有利于高 Beta 板块继续获得增量资金。",
+      "news_hash": "2be9ce88ac2e41b7a71edad1c6fa14a8"
+    },
+    {
+      "pub_date": "2026-03-10 14:48:00",
+      "title": "谷歌云 AI 产品订单增长，市场重新关注利润率弹性 #20260310-10-02",
+      "content": "谷歌云的 AI 产品订单与续约率持续提升，市场对云业务利润率弹性更为乐观。",
+      "url": "https://demo.local/sim/googl-20260310-10-02",
+      "source": "demo_slot_10",
+      "type": "stock",
+      "related_symbols": [
+        "GOOGL"
+      ],
+      "importance_stars": 3,
+      "rule_passed": 1,
+      "rule_reason": "涉及跟踪标的 GOOGL",
+      "processing_status": "llm_processed",
+      "ai_summary": "谷歌云 AI 产品订单增长，市场重新关注利润率弹性",
+      "market_impact": "云业务订单改善有助于提升估值稳定性。",
+      "news_hash": "89383e7594f713cb9add5e7ff3e4f437"
+    }
+  ]
+}

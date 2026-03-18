@@ -1,0 +1,398 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>复盘头部紧凑方案预览</title>
+    <style>
+      :root {
+        --bg: #f3f6fb;
+        --panel: rgba(255, 255, 255, 0.78);
+        --panel-strong: rgba(255, 255, 255, 0.92);
+        --line: rgba(15, 23, 42, 0.08);
+        --text: #17233c;
+        --muted: #66758f;
+        --accent: #2f66f6;
+        --accent-soft: rgba(47, 102, 246, 0.1);
+        --warm: rgba(247, 184, 75, 0.18);
+        --success: #157347;
+        --warning: #b56a16;
+        --shadow: 0 18px 48px rgba(36, 56, 99, 0.1);
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      body {
+        margin: 0;
+        padding: 28px;
+        font-family: "SF Pro SC", "PingFang SC", "Helvetica Neue", sans-serif;
+        background:
+          radial-gradient(circle at top left, rgba(66, 133, 244, 0.12), transparent 28%),
+          radial-gradient(circle at top right, rgba(255, 193, 7, 0.14), transparent 24%),
+          linear-gradient(180deg, #f7f9fd 0%, #eef3fa 100%);
+        color: var(--text);
+      }
+
+      .page {
+        max-width: 1500px;
+        margin: 0 auto;
+        display: grid;
+        gap: 22px;
+      }
+
+      .intro {
+        display: grid;
+        gap: 8px;
+      }
+
+      .intro h1 {
+        margin: 0;
+        font-size: 28px;
+      }
+
+      .intro p {
+        margin: 0;
+        color: var(--muted);
+      }
+
+      .preview-grid {
+        display: grid;
+        gap: 24px;
+      }
+
+      .variant {
+        display: grid;
+        gap: 14px;
+        padding: 22px;
+        border-radius: 30px;
+        background: rgba(255, 255, 255, 0.68);
+        border: 1px solid rgba(255, 255, 255, 0.72);
+        box-shadow: var(--shadow);
+        backdrop-filter: blur(24px);
+      }
+
+      .variant-title {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 12px;
+      }
+
+      .variant-title h2 {
+        margin: 0;
+        font-size: 20px;
+      }
+
+      .variant-title span {
+        color: var(--muted);
+        font-size: 14px;
+      }
+
+      .card {
+        border-radius: 24px;
+        border: 1px solid var(--line);
+        background:
+          radial-gradient(circle at top right, rgba(247, 184, 75, 0.12), transparent 20%),
+          radial-gradient(circle at top left, rgba(47, 102, 246, 0.08), transparent 24%),
+          linear-gradient(180deg, rgba(255, 255, 255, 0.96), rgba(249, 250, 253, 0.92));
+        padding: 22px;
+        display: grid;
+        gap: 18px;
+      }
+
+      .pill,
+      .ghost {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        min-height: 38px;
+        padding: 0 18px;
+        border-radius: 999px;
+        font-weight: 600;
+        border: 1px solid transparent;
+        background: #17233c;
+        color: #fff;
+      }
+
+      .ghost {
+        background: rgba(255, 255, 255, 0.9);
+        border-color: rgba(15, 23, 42, 0.08);
+        color: var(--text);
+      }
+
+      .status {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        min-height: 34px;
+        padding: 0 16px;
+        border-radius: 999px;
+        background: rgba(247, 184, 75, 0.18);
+        color: var(--warning);
+        font-weight: 700;
+      }
+
+      .eyebrow {
+        color: var(--muted);
+        font-size: 13px;
+        letter-spacing: 0.04em;
+      }
+
+      .meta-line,
+      .topline {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: center;
+        gap: 10px 14px;
+        color: var(--muted);
+        font-size: 15px;
+      }
+
+      .dot {
+        width: 4px;
+        height: 4px;
+        border-radius: 999px;
+        background: rgba(102, 117, 143, 0.45);
+      }
+
+      .actions {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        flex-wrap: wrap;
+      }
+
+      .headline {
+        display: flex;
+        align-items: flex-end;
+        justify-content: space-between;
+        gap: 18px;
+      }
+
+      .headline h3 {
+        margin: 0;
+        font-size: 58px;
+        line-height: 1.04;
+        letter-spacing: -0.04em;
+      }
+
+      .headline p {
+        margin: 10px 0 0;
+        color: var(--muted);
+        font-size: 16px;
+      }
+
+      .headline-main {
+        min-width: 0;
+      }
+
+      .headline-side {
+        display: grid;
+        gap: 10px;
+        justify-items: end;
+      }
+
+      .layout-a {
+        gap: 16px;
+      }
+
+      .layout-a .topline {
+        justify-content: space-between;
+      }
+
+      .layout-b {
+        gap: 14px;
+      }
+
+      .layout-b .toolbar {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 16px;
+        flex-wrap: wrap;
+      }
+
+      .layout-b .headline h3 {
+        font-size: 48px;
+      }
+
+      .layout-c {
+        gap: 12px;
+        padding: 18px 20px;
+      }
+
+      .layout-c .toolbar {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) auto;
+        gap: 14px;
+        align-items: start;
+      }
+
+      .layout-c .headline {
+        align-items: center;
+      }
+
+      .layout-c .headline h3 {
+        font-size: 42px;
+      }
+
+      .layout-c .summary-band {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: center;
+        gap: 10px 14px;
+        padding: 2px 0;
+        color: var(--muted);
+      }
+
+      .layout-c .summary-wrap {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) auto;
+        gap: 14px;
+        align-items: end;
+      }
+
+      .layout-c .summary-wrap .status {
+        justify-self: end;
+      }
+
+      @media (max-width: 1100px) {
+        .headline,
+        .layout-c .toolbar {
+          grid-template-columns: 1fr;
+          display: grid;
+        }
+
+        .headline-side,
+        .actions {
+          justify-items: start;
+          justify-content: flex-start;
+        }
+
+        .layout-c .summary-wrap {
+          grid-template-columns: 1fr;
+        }
+
+        .layout-c .summary-wrap .status {
+          justify-self: start;
+        }
+
+        .headline h3,
+        .layout-b .headline h3,
+        .layout-c .headline h3 {
+          font-size: 38px;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <main class="page">
+      <section class="intro">
+        <h1>复盘头部紧凑方案预览</h1>
+        <p>先只看结构密度，不动正式页面。你挑一个方向，我们再把它正式接进去。</p>
+      </section>
+
+      <section class="preview-grid">
+        <article class="variant">
+          <div class="variant-title">
+            <h2>A · 两行主视觉</h2>
+            <span>保留层级感，但明显收紧</span>
+          </div>
+          <div class="card layout-a">
+            <div class="topline">
+              <div class="meta-line">
+                <span class="eyebrow">当日复盘</span>
+                <span class="dot"></span>
+                <span>北京时间 03/12 21:30 - 03/13 04:00</span>
+                <span class="dot"></span>
+                <span>新闻窗口 03/12 04:00 → 03/13 04:00</span>
+              </div>
+              <div class="actions">
+                <span class="pill">保存</span>
+                <span class="ghost">已初始化</span>
+                <span class="ghost">关闭</span>
+              </div>
+            </div>
+            <div class="headline">
+              <div class="headline-main">
+                <div class="eyebrow">Review Date</div>
+                <h3>2026-03-12 · 美股交易日</h3>
+                <p>无上一复盘日参考</p>
+              </div>
+              <div class="headline-side">
+                <span class="status">待开始</span>
+              </div>
+            </div>
+          </div>
+        </article>
+
+        <article class="variant">
+          <div class="variant-title">
+            <h2>B · 工具条压缩型</h2>
+            <span>更像控制台，信息集中</span>
+          </div>
+          <div class="card layout-b">
+            <div class="toolbar">
+              <div class="meta-line">
+                <span class="eyebrow">当日复盘</span>
+                <span class="dot"></span>
+                <span>北京时间 03/12 21:30 - 03/13 04:00</span>
+                <span class="dot"></span>
+                <span>无上一复盘日参考</span>
+              </div>
+              <div class="actions">
+                <span class="status">待开始</span>
+                <span class="pill">保存</span>
+                <span class="ghost">已初始化</span>
+                <span class="ghost">关闭</span>
+              </div>
+            </div>
+            <div class="headline">
+              <div class="headline-main">
+                <div class="eyebrow">Review Date</div>
+                <h3>2026-03-12 · 美股交易日</h3>
+              </div>
+            </div>
+            <div class="meta-line">
+              <span>新闻窗口（北京时间） 2026/03/12 04:00:00 → 2026/03/13 04:00:00</span>
+            </div>
+          </div>
+        </article>
+
+        <article class="variant">
+          <div class="variant-title">
+            <h2>C · 最紧凑摘要条</h2>
+            <span>适合你现在嫌空的方向，密度最高</span>
+          </div>
+          <div class="card layout-c">
+            <div class="toolbar">
+              <div class="headline-main">
+                <div class="eyebrow">当日复盘</div>
+                <div class="headline">
+                  <h3>2026-03-12 · 美股交易日</h3>
+                </div>
+              </div>
+              <div class="actions">
+                <span class="pill">保存</span>
+                <span class="ghost">已初始化</span>
+                <span class="ghost">关闭</span>
+              </div>
+            </div>
+            <div class="summary-wrap">
+              <div class="summary-band">
+                <span>北京时间 03/12 21:30 - 03/13 04:00</span>
+                <span class="dot"></span>
+                <span>新闻窗口 03/12 04:00 → 03/13 04:00</span>
+                <span class="dot"></span>
+                <span>无上一复盘日参考</span>
+              </div>
+              <span class="status">待开始</span>
+            </div>
+          </div>
+        </article>
+      </section>
+    </main>
+  </body>
+  </html>

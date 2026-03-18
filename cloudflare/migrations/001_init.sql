@@ -15,57 +15,56 @@ CREATE TABLE IF NOT EXISTS stock_raw (
     UNIQUE(k_date, symbol)
 );
 
-CREATE TABLE IF NOT EXISTS stock_news_raw (
+CREATE TABLE IF NOT EXISTS news_raw_data (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     pub_date DATETIME,
     title TEXT,
-    summary TEXT,
     content TEXT,
     url TEXT,
     source TEXT,
     type TEXT,
+    rule_passed INTEGER DEFAULT 0,
+    rule_reason TEXT,
+    processing_status TEXT DEFAULT 'rule_screened',
     ai_summary TEXT,
+    market_impact TEXT,
+    importance_stars INTEGER DEFAULT 0,
+    related_symbols TEXT,
+    is_relevant_to_review INTEGER DEFAULT 0,
     news_hash TEXT,
     captured_at DATETIME,
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
     UNIQUE(news_hash)
 );
 
-CREATE TABLE IF NOT EXISTS stock_archive (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    archive_date TEXT NOT NULL,
+CREATE TABLE IF NOT EXISTS daily_review_archive (
+    archive_date TEXT PRIMARY KEY,
     review_status TEXT NOT NULL DEFAULT 'draft',
-    hist_price_level TEXT,
-    news_summary TEXT,
+    news_brief TEXT,
     market_sentiment TEXT,
     sector_rotation TEXT,
     asset_plan TEXT,
-    custom_notes TEXT,
     trading_summary TEXT,
-    source_snapshot_json TEXT,
-    carry_forward_from_date TEXT,
     reviewed_at DATETIME,
-    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-    UNIQUE(archive_date)
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
 );
 
-CREATE TABLE IF NOT EXISTS news_analysis (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    analysis_date TEXT NOT NULL,
-    global_news TEXT,
-    market_news TEXT,
-    market_analysis TEXT,
-    raw_summary TEXT,
-    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+CREATE TABLE IF NOT EXISTS daily_news_ai_analysis (
+    analysis_date TEXT PRIMARY KEY,
+    daily_major_events TEXT,
+    sector_impact_map TEXT,
+    linkage_logic_chain TEXT,
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
 );
 
 CREATE INDEX IF NOT EXISTS idx_stock_raw_date ON stock_raw(k_date);
 CREATE INDEX IF NOT EXISTS idx_stock_raw_symbol ON stock_raw(symbol);
-CREATE INDEX IF NOT EXISTS idx_stock_news_pub_date ON stock_news_raw(pub_date);
-CREATE INDEX IF NOT EXISTS idx_stock_news_source ON stock_news_raw(source);
-CREATE INDEX IF NOT EXISTS idx_stock_news_type ON stock_news_raw(type);
-CREATE INDEX IF NOT EXISTS idx_stock_archive_date ON stock_archive(archive_date);
-CREATE UNIQUE INDEX IF NOT EXISTS idx_stock_archive_unique_date ON stock_archive(archive_date);
-CREATE INDEX IF NOT EXISTS idx_stock_archive_status_date ON stock_archive(review_status, archive_date);
-CREATE INDEX IF NOT EXISTS idx_news_analysis_date ON news_analysis(analysis_date);
+CREATE INDEX IF NOT EXISTS idx_news_raw_data_pub_date ON news_raw_data(pub_date);
+CREATE INDEX IF NOT EXISTS idx_news_raw_data_source ON news_raw_data(source);
+CREATE INDEX IF NOT EXISTS idx_news_raw_data_type ON news_raw_data(type);
+CREATE INDEX IF NOT EXISTS idx_news_raw_data_rule_passed ON news_raw_data(rule_passed);
+CREATE INDEX IF NOT EXISTS idx_news_raw_data_status ON news_raw_data(processing_status);
+CREATE INDEX IF NOT EXISTS idx_news_raw_data_relevant ON news_raw_data(is_relevant_to_review);
+CREATE INDEX IF NOT EXISTS idx_daily_review_archive_date ON daily_review_archive(archive_date);
+CREATE INDEX IF NOT EXISTS idx_daily_review_archive_status_date ON daily_review_archive(review_status, archive_date);
+CREATE INDEX IF NOT EXISTS idx_daily_news_ai_analysis_date ON daily_news_ai_analysis(analysis_date);

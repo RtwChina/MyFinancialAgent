@@ -2,108 +2,202 @@ const JSON_HEADERS = {
   "content-type": "application/json; charset=utf-8",
 };
 
+// 静态兜底列表，仅供 deriveRelatedSymbols 在无存储 related_symbols 时使用。
+// symbol 值必须与 tracked_symbols.symbol 保持一致（系统代码，非 Yahoo 代码）。
+const TRACKED_SYMBOLS = [
+  { symbol: "MU",   aliases: ["MU", "Micron", "Micron Technology", "美光", "美光科技"] },
+  { symbol: "LITE", aliases: ["LITE", "Lumentum", "Lumentum Holdings"] },
+  { symbol: "MSFT", aliases: ["MSFT", "Microsoft", "微软", "Microsoft Corporation"] },
+  { symbol: "GOOGL",aliases: ["GOOGL", "Google", "Alphabet", "谷歌", "Alphabet Inc"] },
+  { symbol: "GSPC", aliases: ["S&P 500", "SP500", "标普500", "标普", "SPX", "^GSPC"] },
+  { symbol: "NDX",  aliases: ["Nasdaq 100", "纳指", "纳斯达克100", "纳斯达克", "^NDX"] },
+  { symbol: "DJI",  aliases: ["Dow Jones", "DJIA", "道指", "道琼斯", "^DJI"] },
+  { symbol: "VIX",  aliases: ["VIX", "Volatility Index", "恐慌指数", "波动率指数", "^VIX"] },
+  { symbol: "HSI",  aliases: ["HSI", "Hang Seng", "恒指", "恒生指数", "^HSI"] },
+  { symbol: "SSE",  aliases: ["SSE Composite", "上证指数", "沪指", "上证", "000001.SS"] },
+  { symbol: "DXY",  aliases: ["Dollar Index", "DXY", "美元指数", "美元", "DX-Y.NYB"] },
+  { symbol: "GOLD", aliases: ["Gold", "黄金", "金价", "COMEX黄金", "GC=F"] },
+  { symbol: "CL",   aliases: ["Crude Oil", "WTI", "原油", "油价", "CL=F"] },
+  { symbol: "XLK",  aliases: ["XLK", "科技板块", "科技ETF", "Technology"] },
+  { symbol: "SOXX", aliases: ["SOXX", "半导体", "芯片板块", "iShares Semiconductor"] },
+  { symbol: "XLE",  aliases: ["XLE", "能源板块", "能源ETF", "Energy"] },
+  { symbol: "XLF",  aliases: ["XLF", "金融板块", "金融ETF", "Financial"] },
+  { symbol: "XLY",  aliases: ["XLY", "可选消费", "消费板块", "Consumer Discretionary"] },
+];
+
 export default {
   async fetch(request, env) {
+    const appEnv = getAppEnv(env);
     const url = new URL(request.url);
 
     if (url.pathname.startsWith("/api/")) {
-      return handleApi(request, env, url);
+      return handleApi(request, env, url, appEnv);
     }
 
     return env.ASSETS.fetch(request);
   },
 };
 
-async function handleApi(request, env, url) {
+function getAppEnv(env) {
+  const value = String(env.APP_ENV || "").trim();
+  if (value === "test" || value === "prod") return value;
+  const error = new Error(`Invalid APP_ENV: ${value || "undefined"}`);
+  error.statusCode = 500;
+  throw error;
+}
+
+async function handleApi(request, env, url, appEnv) {
   try {
     if (request.method === "OPTIONS") {
-      return new Response(null, { headers: corsHeaders() });
+      return new Response(null, { headers: corsHeaders(request) });
     }
 
     if (url.pathname === "/api/health") {
-      return json({ ok: true, service: "my-financial-agent-api" });
+      return json({ ok: true, service: "my-financial-agent-api", env: appEnv }, 200, request);
     }
 
     if (url.pathname === "/api/ingest/prices" && request.method === "POST") {
-      requireAuth(request, env);
+      requireWriteAuth(request, env, appEnv);
       const body = await request.json();
-      return json(await ingestPrices(env, body.items || []));
+      return json(await ingestPrices(env, body.items || []), 200, request);
     }
 
     if (url.pathname === "/api/ingest/news" && request.method === "POST") {
-      requireAuth(request, env);
+      requireWriteAuth(request, env, appEnv);
       const body = await request.json();
-      return json(await ingestNews(env, body.items || []));
+      return json(await ingestNews(env, body.items || []), 200, request);
     }
 
     if (url.pathname === "/api/ingest/news-analysis" && request.method === "POST") {
-      requireAuth(request, env);
+      requireWriteAuth(request, env, appEnv);
       const body = await request.json();
-      return json(await ingestNewsAnalysis(env, body));
+      return json(await ingestNewsAnalysis(env, body), 200, request);
     }
 
+    // ── Symbol Management ──────────────────────────────────────
+    if (url.pathname === "/api/symbols" && request.method === "GET") {
+      return json(await getSymbols(env, url), 200, request);
+    }
+    if (url.pathname === "/api/symbols" && request.method === "POST") {
+      requireWriteAuth(request, env, appEnv);
+      const body = await request.json();
+      return json(await createSymbol(env, body), 200, request);
+    }
+    if (url.pathname === "/api/symbols/resolve" && request.method === "POST") {
+      requireWriteAuth(request, env, appEnv);
+      const body = await request.json();
+      return json(await resolveSymbol(env, body), 200, request);
+    }
+    if (url.pathname === "/api/symbols/validate" && request.method === "POST") {
+      requireWriteAuth(request, env, appEnv);
+      const body = await request.json();
+      return json(await fetchYahooValidation(body.yahoo_symbol || body.symbol), 200, request);
+    }
+    const symbolMatch = url.pathname.match(/^\/api\/symbols\/(\d+)$/);
+    if (symbolMatch) {
+      const symbolId = Number(symbolMatch[1]);
+      if (request.method === "GET")    return json(await getSymbolById(env, symbolId), 200, request);
+      if (request.method === "PUT") {
+        requireWriteAuth(request, env, appEnv);
+        return json(await updateSymbol(env, symbolId, await request.json()), 200, request);
+      }
+      if (request.method === "DELETE") {
+        requireWriteAuth(request, env, appEnv);
+        return json(await deleteSymbol(env, symbolId), 200, request);
+      }
+    }
+    // ─────────────────────────────────────────────────────────
+
     if (url.pathname === "/api/reviews/pending" && request.method === "GET") {
-      return json(await getPendingReviews(env, url));
+      return json(await getPendingReviews(env, url), 200, request);
+    }
+
+    if (url.pathname === "/api/news" && request.method === "GET") {
+      return json(await getNewsList(env, url), 200, request);
+    }
+
+    const newsMatch = url.pathname.match(/^\/api\/news\/(\d+)$/);
+    if (newsMatch && request.method === "GET") {
+      return json(await getNewsById(env, Number(newsMatch[1])), 200, request);
     }
 
     if (url.pathname === "/api/reviews" && request.method === "GET") {
-      return json(await getReviews(env, url));
+      return json(await getReviews(env, url), 200, request);
     }
 
-    const reviewMatch = url.pathname.match(/^\/api\/reviews\/(\d{4}-\d{2}-\d{2})(?:\/(bootstrap|complete))?$/);
+    const reviewMatch = url.pathname.match(/^\/api\/reviews\/(\d{4}-\d{2}-\d{2})(?:\/(bootstrap|complete|initialize|delete))?$/);
     if (reviewMatch) {
       const [, archiveDate, action] = reviewMatch;
       if (!action && request.method === "GET") {
-        return json(await getReviewByDate(env, archiveDate));
+        return json(await getReviewByDate(env, archiveDate), 200, request);
       }
       if (action === "bootstrap" && request.method === "GET") {
-        return json(await getReviewBootstrap(env, archiveDate));
+        return json(await getReviewBootstrap(env, archiveDate), 200, request);
       }
       if (!action && request.method === "POST") {
+        requireWriteAuth(request, env, appEnv);
         const body = await request.json();
-        return json(await saveReviewDraft(env, archiveDate, body));
+        return json(await saveReviewDraft(env, archiveDate, body), 200, request);
       }
       if (action === "complete" && request.method === "POST") {
-        return json(await completeReview(env, archiveDate));
+        requireWriteAuth(request, env, appEnv);
+        return json(await completeReview(env, archiveDate), 200, request);
+      }
+      if ((action === "initialize" || action === "delete") && request.method === "POST") {
+        requireWriteAuth(request, env, appEnv);
+        return json(await initializeReview(env, archiveDate), 200, request);
       }
     }
 
-    return json({ error: "Not Found" }, 404);
+    return json({ error: "Not Found" }, 404, request);
   } catch (error) {
     return json(
       {
         error: error instanceof Error ? error.message : "Unknown error",
       },
       error.statusCode || 500,
+      request,
     );
   }
 }
 
-function requireAuth(request, env) {
-  const expected = env.INGEST_API_TOKEN;
+function getApiToken(env) {
+  return String(env.APP_API_TOKEN || env.INGEST_API_TOKEN || "").trim();
+}
+
+function requireWriteAuth(request, env, appEnv) {
+  const expected = getApiToken(env);
+  if (!expected) {
+    if (appEnv === "test") return;
+    const error = new Error("Write API token is not configured");
+    error.statusCode = 500;
+    throw error;
+  }
   const actual = request.headers.get("authorization")?.replace(/^Bearer\s+/i, "");
-  if (!expected || actual !== expected) {
+  if (actual !== expected) {
     const error = new Error("Unauthorized");
     error.statusCode = 401;
     throw error;
   }
 }
 
-function json(data, status = 200) {
+function json(data, status = 200, request = null) {
   return new Response(JSON.stringify(data, null, 2), {
     status,
     headers: {
       ...JSON_HEADERS,
-      ...corsHeaders(),
+      ...corsHeaders(request),
     },
   });
 }
 
-function corsHeaders() {
+function corsHeaders(request) {
+  const sameOrigin = request ? new URL(request.url).origin : "*";
   return {
-    "access-control-allow-origin": "*",
-    "access-control-allow-methods": "GET,POST,OPTIONS",
+    "access-control-allow-origin": sameOrigin,
+    "access-control-allow-methods": "GET,POST,PUT,DELETE,OPTIONS",
     "access-control-allow-headers": "Content-Type, Authorization",
+    vary: "Origin",
   };
 }
 
@@ -141,51 +235,104 @@ async function ingestPrices(env, items) {
 
 async function ingestNews(env, items) {
   let inserted = 0;
+  let updated = 0;
   let ignored = 0;
+  const idMap = {};
 
   for (const item of items) {
     const newsHash = item.news_hash || await digest(`${item.title || ""}|${item.content || ""}|${item.time || item.pub_date || ""}`);
+    const existing = await env.DB.prepare(
+      `SELECT id FROM news_raw_data WHERE news_hash = ? LIMIT 1`,
+    )
+      .bind(newsHash)
+      .first();
     const result = await env.DB.prepare(
-      `INSERT OR IGNORE INTO stock_news_raw
-      (pub_date, title, summary, content, url, source, type, ai_summary, news_hash, captured_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      `INSERT INTO news_raw_data
+      (
+        pub_date, title, content, url, source, type,
+        rule_passed, rule_reason, processing_status, ai_summary, market_impact,
+        importance_stars, related_symbols, is_relevant_to_review, news_hash, captured_at
+      )
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ON CONFLICT(news_hash) DO UPDATE SET
+        pub_date = excluded.pub_date,
+        title = excluded.title,
+        content = excluded.content,
+        url = excluded.url,
+        source = excluded.source,
+        type = excluded.type,
+        rule_passed = excluded.rule_passed,
+        rule_reason = excluded.rule_reason,
+        processing_status = excluded.processing_status,
+        ai_summary = excluded.ai_summary,
+        market_impact = excluded.market_impact,
+        importance_stars = excluded.importance_stars,
+        related_symbols = excluded.related_symbols,
+        is_relevant_to_review = excluded.is_relevant_to_review,
+        captured_at = excluded.captured_at`,
     )
       .bind(
         item.time || item.pub_date || null,
         item.title || "",
-        item.summary || "",
         item.content || "",
         item.url || "",
         item.source || "",
-        item.type || "0",
+        item.type || "market",
+        item.rule_passed ? 1 : 0,
+        item.rule_reason || "",
+        item.processing_status || "rule_screened",
         item.ai_summary || "",
+        item.market_impact || "",
+        Number(item.importance_stars || 0),
+        JSON.stringify(item.related_symbols || []),
+        item.is_relevant_to_review ? 1 : 0,
         newsHash,
         item.captured_at || isoNow(),
       )
       .run();
 
+    const persisted = await env.DB.prepare(
+      `SELECT id FROM news_raw_data WHERE news_hash = ? LIMIT 1`,
+    )
+      .bind(newsHash)
+      .first();
+    if (persisted?.id != null) {
+      idMap[newsHash] = Number(persisted.id);
+    }
+
     if (result.meta.changes > 0) {
-      inserted += 1;
+      if (existing) {
+        updated += 1;
+      } else {
+        inserted += 1;
+      }
     } else {
       ignored += 1;
     }
   }
 
-  return { inserted, ignored, total: items.length };
+  return { inserted, updated, ignored, total: items.length, id_map: idMap };
 }
 
 async function ingestNewsAnalysis(env, body) {
   await env.DB.prepare(
-    `INSERT INTO news_analysis
-    (analysis_date, global_news, market_news, market_analysis, raw_summary)
-    VALUES (?, ?, ?, ?, ?)`,
+    `INSERT INTO daily_news_ai_analysis
+    (analysis_date, daily_major_events, sector_impact_map, linkage_logic_chain, source_news_ids, updated_at)
+    VALUES (?, ?, ?, ?, ?, ?)
+    ON CONFLICT(analysis_date) DO UPDATE SET
+      daily_major_events = excluded.daily_major_events,
+      sector_impact_map = excluded.sector_impact_map,
+      linkage_logic_chain = excluded.linkage_logic_chain,
+      source_news_ids = excluded.source_news_ids,
+      updated_at = excluded.updated_at`,
   )
     .bind(
       body.analysis_date || todayDate(),
-      body.global_news || "",
-      body.market_news || "",
-      body.market_analysis || "",
-      body.raw_summary || JSON.stringify(body),
+      body.daily_major_events || "",
+      body.sector_impact_map || "",
+      body.linkage_logic_chain || "",
+      body.source_news_ids || "[]",
+      isoNow(),
     )
     .run();
 
@@ -199,40 +346,130 @@ async function getPendingReviews(env, url) {
     return { items: [], latestClosedDate: null };
   }
 
-  const tradeDates = await env.DB.prepare(
-    `SELECT DISTINCT k_date
-     FROM stock_raw
-     WHERE k_date <= ?
-     ORDER BY k_date DESC
+  const archiveRows = await env.DB.prepare(
+    `SELECT archive_date, review_status, updated_at
+     FROM daily_review_archive
+     WHERE archive_date <= ?
+       AND COALESCE(review_status, 'initialized') != 'reviewed'
+     ORDER BY archive_date DESC
      LIMIT ?`,
   )
     .bind(latestClosedDate, limit)
     .all();
 
-  const archiveRows = await env.DB.prepare(
-    `SELECT archive_date, review_status, updated_at
-     FROM stock_archive
-     WHERE archive_date <= ?`,
-  )
-    .bind(latestClosedDate)
-    .all();
-
-  const archiveMap = new Map((archiveRows.results || []).map((row) => [row.archive_date, row]));
-  const pendingItems = (tradeDates.results || [])
-    .map((row) => {
-      const archive = archiveMap.get(row.k_date);
-      return {
-        archiveDate: row.k_date,
-        reviewStatus: archive?.review_status || "missing",
-        updatedAt: archive?.updated_at || null,
-      };
-    })
-    .filter((row) => row.reviewStatus !== "completed");
-
   return {
     latestClosedDate,
-    items: pendingItems,
+    items: (archiveRows.results || []).map((row) => ({
+      archiveDate: row.archive_date,
+      reviewStatus: normalizeReviewStatus(row.review_status),
+      updatedAt: row.updated_at || null,
+    })),
   };
+}
+
+async function getNewsList(env, url) {
+  const keyword = (url.searchParams.get("keyword") || "").trim();
+  const dateFrom = url.searchParams.get("dateFrom");
+  const dateTo = url.searchParams.get("dateTo");
+  const source = url.searchParams.get("source");
+  const type = url.searchParams.get("type");
+  const symbol = url.searchParams.get("symbol");
+  const stars = [
+    ...url.searchParams.getAll("stars"),
+    ...(url.searchParams.get("stars") || "").split(","),
+  ]
+    .map((value) => Number(value))
+    .filter((value, index, array) => Number.isFinite(value) && value > 0 && array.indexOf(value) === index);
+  const limit = Math.min(Number(url.searchParams.get("limit") || "100"), 200);
+
+  const clauses = [];
+  const params = [];
+
+  if (keyword) {
+    clauses.push("(title LIKE ? OR ai_summary LIKE ? OR content LIKE ? OR market_impact LIKE ?)");
+    const like = `%${keyword}%`;
+    params.push(like, like, like, like);
+  }
+  if (dateFrom) {
+    clauses.push("pub_date >= ?");
+    params.push(`${dateFrom} 00:00:00`);
+  }
+  if (dateTo) {
+    clauses.push("pub_date <= ?");
+    params.push(`${dateTo} 23:59:59`);
+  }
+  if (source) {
+    clauses.push("source = ?");
+    params.push(source);
+  }
+  if (type) {
+    // 兼容新旧 type 值：macro/market/symbol → index/sector/stock
+    const typeMap = { macro: "index", market: "sector", symbol: "stock" };
+    const normalizedType = typeMap[type] || type;
+    if (normalizedType === "index") {
+      clauses.push("type IN ('index', 'macro')");
+    } else if (normalizedType === "sector") {
+      clauses.push("type IN ('sector', 'market')");
+    } else if (normalizedType === "stock") {
+      clauses.push("type IN ('stock', 'symbol')");
+    } else {
+      clauses.push("type = ?");
+      params.push(normalizedType);
+    }
+  }
+
+  const whereClause = clauses.length ? `WHERE ${clauses.join(" AND ")}` : "";
+  const query = `SELECT id, pub_date, title, content, url, source, type,
+    rule_passed, rule_reason, processing_status, ai_summary, market_impact,
+    importance_stars, related_symbols, is_relevant_to_review
+    FROM news_raw_data
+    ${whereClause}
+    ORDER BY pub_date DESC, id DESC
+    LIMIT ?`;
+  const result = await env.DB.prepare(query).bind(...params, limit).all();
+  let items = (result.results || []).map(enrichNewsItem);
+
+  if (symbol) {
+    items = items.filter((item) => item.related_symbols.includes(symbol));
+  }
+  if (stars.length) {
+    items = items.filter((item) => stars.includes(Number(item.importance_stars || 0)));
+  }
+
+  return {
+    items,
+    total: items.length,
+    filters: {
+      keyword,
+      dateFrom,
+      dateTo,
+      source,
+      type,
+      symbol,
+      stars,
+    },
+  };
+}
+
+async function getNewsById(env, id) {
+  const row = await env.DB.prepare(
+    `SELECT id, pub_date, title, content, url, source, type,
+      rule_passed, rule_reason, processing_status, ai_summary, market_impact,
+      importance_stars, related_symbols, is_relevant_to_review
+     FROM news_raw_data
+     WHERE id = ?
+     LIMIT 1`,
+  )
+    .bind(id)
+    .first();
+
+  if (!row) {
+    const error = new Error("News not found");
+    error.statusCode = 404;
+    throw error;
+  }
+
+  return { item: enrichNewsItem(row) };
 }
 
 async function getReviews(env, url) {
@@ -241,44 +478,67 @@ async function getReviews(env, url) {
   const to = url.searchParams.get("to");
   const clauses = [];
   const params = [];
-
-  if (status) {
-    clauses.push("review_status = ?");
-    params.push(status);
-  }
   if (from) {
-    clauses.push("archive_date >= ?");
+    clauses.push("a.archive_date >= ?");
     params.push(from);
   }
   if (to) {
-    clauses.push("archive_date <= ?");
+    clauses.push("a.archive_date <= ?");
     params.push(to);
   }
-
   const whereClause = clauses.length ? `WHERE ${clauses.join(" AND ")}` : "";
-  const query = `SELECT archive_date, review_status, updated_at, reviewed_at,
-    CASE WHEN source_snapshot_json IS NULL OR source_snapshot_json = '' THEN 0 ELSE 1 END AS has_snapshot
-    FROM stock_archive
+  const query = `SELECT
+      a.archive_date,
+      COALESCE(a.review_status, 'initialized') AS review_status,
+      a.updated_at,
+      a.reviewed_at,
+      a.reviewer_news_notes,
+      a.market_sentiment,
+      a.sector_rotation,
+      a.asset_plan,
+      a.trading_summary,
+      n.linkage_logic_chain
+    FROM daily_review_archive a
+    LEFT JOIN daily_news_ai_analysis n ON n.analysis_date = a.archive_date
     ${whereClause}
-    ORDER BY archive_date DESC
+    ORDER BY a.archive_date DESC
     LIMIT 100`;
 
   const result = await env.DB.prepare(query).bind(...params).all();
-  return { items: result.results || [] };
+  let items = (result.results || []).map((item) => ({
+    ...item,
+    review_status: normalizeReviewStatus(item.review_status),
+    news_summary: item.reviewer_news_notes || item.linkage_logic_chain || "",
+  }));
+  if (status) {
+    items = items.filter((item) => item.review_status === status);
+  }
+  return {
+    items,
+  };
 }
 
 async function getReviewByDate(env, archiveDate) {
   const archive = await env.DB.prepare(
-    `SELECT * FROM stock_archive WHERE archive_date = ? LIMIT 1`,
+    `SELECT * FROM daily_review_archive WHERE archive_date = ? LIMIT 1`,
   )
     .bind(archiveDate)
     .first();
 
-  return { archiveDate, review: archive || null };
+  return {
+    archiveDate,
+    review: archive ? { ...archive, review_status: normalizeReviewStatus(archive.review_status) } : null,
+  };
 }
 
 async function getReviewBootstrap(env, archiveDate) {
-  const currentPrices = await env.DB.prepare(
+  const existingDraft = await env.DB.prepare(
+    `SELECT * FROM daily_review_archive WHERE archive_date = ? LIMIT 1`,
+  )
+    .bind(archiveDate)
+    .first();
+
+  const currentPricesRaw = await env.DB.prepare(
     `SELECT symbol, stock_name, current_price, change_percent, volume
      FROM stock_raw
      WHERE k_date = ?
@@ -287,85 +547,265 @@ async function getReviewBootstrap(env, archiveDate) {
     .bind(archiveDate)
     .all();
 
-  const newsWindow = await getNewsWindowForDate(env, archiveDate);
-  const news = await env.DB.prepare(
-    `SELECT pub_date, title, content, source, type, ai_summary, url
-     FROM stock_news_raw
-     WHERE pub_date >= ? AND pub_date <= ?
-     ORDER BY pub_date DESC
-     LIMIT 200`,
-  )
-    .bind(newsWindow.start, newsWindow.end)
-    .all();
+  // 从 tracked_symbols 获取分组信息
+  const trackedSymbols = await env.DB.prepare(
+    `SELECT symbol, yahoo_symbol, display_name, symbol_type, sort_order
+     FROM tracked_symbols WHERE is_active = 1`,
+  ).all();
+  const symbolInfoMap = {};
+  for (const s of (trackedSymbols.results || [])) {
+    symbolInfoMap[s.symbol] = s;
+  }
 
+  // prices 按 index / sector / stock 分组
+  const pricesByType = { index: [], sector: [], stock: [] };
+  for (const p of (currentPricesRaw.results || [])) {
+    const info = symbolInfoMap[p.symbol];
+    const type = info?.symbol_type || "stock";
+    const bucket = pricesByType[type] || pricesByType.stock;
+    bucket.push({
+      ...p,
+      display_name: info?.display_name || p.stock_name || p.symbol,
+      sort_order: info?.sort_order ?? 999,
+    });
+  }
+  for (const bucket of Object.values(pricesByType)) {
+    bucket.sort((a, b) => a.sort_order - b.sort_order);
+  }
+
+  const newsWindow = await getNewsWindowForDate(env, archiveDate);
+  const useArchivedNews = normalizeReviewStatus(existingDraft?.review_status) === "reviewed";
   const analysis = await env.DB.prepare(
-    `SELECT * FROM news_analysis WHERE analysis_date = ? ORDER BY id DESC LIMIT 1`,
+    `SELECT * FROM daily_news_ai_analysis WHERE analysis_date = ? LIMIT 1`,
   )
     .bind(archiveDate)
     .first();
+  const sourceNewsIds = parseStoredIds(analysis?.source_news_ids);
+  let newsItems = [];
+
+  if (useArchivedNews) {
+    const archivedNews = await env.DB.prepare(
+      `SELECT id AS archive_news_id, original_news_id, pub_date, title, content, source, type,
+        ai_summary, market_impact, related_symbols, rule_passed, rule_reason,
+        processing_status, importance_stars, url, news_hash
+       FROM daily_review_archive_news
+       WHERE archive_date = ?
+       ORDER BY pub_date DESC, id DESC`,
+    )
+      .bind(archiveDate)
+      .all();
+    newsItems = (archivedNews.results || []).map((item) => enrichNewsItem({
+      ...item,
+      id: item.archive_news_id,
+      archived: 1,
+    }));
+  }
+
+  if (!newsItems.length) {
+    if (sourceNewsIds.length) {
+      const placeholders = sourceNewsIds.map(() => "?").join(", ");
+      const sourceNews = await env.DB.prepare(
+        `SELECT id, pub_date, title, content, source, type, ai_summary, market_impact,
+          related_symbols, is_relevant_to_review, rule_passed, rule_reason,
+          processing_status, importance_stars, url, news_hash
+         FROM news_raw_data
+         WHERE id IN (${placeholders})
+         ORDER BY pub_date DESC, id DESC`,
+      )
+        .bind(...sourceNewsIds)
+        .all();
+      newsItems = (sourceNews.results || []).map(enrichNewsItem);
+    }
+
+    if (!newsItems.length) {
+      const news = await env.DB.prepare(
+        `SELECT id, pub_date, title, content, source, type, ai_summary, market_impact,
+          related_symbols, is_relevant_to_review, rule_passed, rule_reason,
+          processing_status, importance_stars, url, news_hash
+         FROM news_raw_data
+         WHERE pub_date >= ? AND pub_date <= ?
+           AND COALESCE(importance_stars, 0) >= 3
+           AND (
+             COALESCE(rule_passed, 0) = 1
+             OR type IN ('macro', 'market', 'symbol')
+             OR COALESCE(ai_summary, '') != ''
+           )
+         ORDER BY pub_date DESC
+         LIMIT 200`,
+      )
+        .bind(newsWindow.start, newsWindow.end)
+        .all();
+      newsItems = (news.results || []).map(enrichNewsItem);
+    }
+
+    if (!newsItems.length) {
+      const fallbackNews = await env.DB.prepare(
+        `SELECT id, pub_date, title, content, source, type, ai_summary, market_impact,
+          related_symbols, is_relevant_to_review, rule_passed, rule_reason,
+          processing_status, importance_stars, url, news_hash
+         FROM news_raw_data
+         WHERE COALESCE(importance_stars, 0) >= 3
+           AND processing_status IN ('llm_processed', 'reviewed')
+         ORDER BY pub_date DESC
+         LIMIT 12`,
+      ).all();
+      newsItems = (fallbackNews.results || []).map(enrichNewsItem);
+    }
+  }
 
   const previousCompletedReview = await env.DB.prepare(
-    `SELECT archive_date, market_sentiment, sector_rotation, asset_plan
-     FROM stock_archive
-     WHERE archive_date < ? AND review_status = 'completed'
+    `SELECT archive_date, reviewer_news_notes, market_sentiment, sector_rotation, asset_plan
+     FROM daily_review_archive
+     WHERE archive_date < ? AND review_status = 'reviewed'
      ORDER BY archive_date DESC
      LIMIT 1`,
   )
     .bind(archiveDate)
     .first();
 
-  const existingDraft = await env.DB.prepare(
-    `SELECT * FROM stock_archive WHERE archive_date = ? LIMIT 1`,
-  )
-    .bind(archiveDate)
-    .first();
+  // news 按类型分组
+  const newsByType = { index: [], sector: [], stock: [] };
+  for (const item of newsItems) {
+    const t = item.type || "index";
+    const bucket = newsByType[t] || newsByType.index;
+    bucket.push(item);
+  }
 
   return {
     archiveDate,
     newsWindow,
-    prices: currentPrices.results || [],
-    news: news.results || [],
-    analysis,
+    // 兼容旧版：prices 同时提供扁平数组和分组对象
+    prices: pricesByType,
+    pricesFlat: (currentPricesRaw.results || []),
+    news: newsItems,          // 全量（兼容旧版）
+    newsByType,               // 按 index/sector/stock 分组
+    analysis: normalizeReviewAnalysis(analysis, newsItems),
     carryForward: previousCompletedReview,
-    draft: existingDraft,
+    draft: existingDraft ? { ...existingDraft, review_status: normalizeReviewStatus(existingDraft.review_status) } : null,
+  };
+}
+
+function enrichNewsItem(item) {
+  const relatedSymbols = parseStoredSymbols(item.related_symbols)
+    || deriveRelatedSymbols(`${item.title || ""}\n${item.content || ""}`);
+  const primarySymbol = relatedSymbols[0] || null;
+  const isRelevantToReview = Number(item.is_relevant_to_review ?? 0) || (relatedSymbols.length > 0 ? 1 : 0);
+  const rulePassed = item.rule_passed == null ? null : Number(item.rule_passed ?? 0);
+  const importanceStars = Number(item.importance_stars ?? 0);
+
+  return {
+    ...item,
+    primary_symbol: primarySymbol,
+    related_symbols: relatedSymbols,
+    is_relevant_to_review: isRelevantToReview,
+    rule_passed: rulePassed,
+    importance_stars: importanceStars,
+  };
+}
+
+function deriveRelatedSymbols(text) {
+  const normalized = text.toLowerCase();
+  return TRACKED_SYMBOLS.filter((entry) => entry.aliases.some((alias) => normalized.includes(alias.toLowerCase())))
+    .map((entry) => entry.symbol);
+}
+
+function parseStoredSymbols(value) {
+  if (Array.isArray(value)) return value;
+  if (typeof value !== "string" || !value) return null;
+  try {
+    const parsed = JSON.parse(value);
+    return Array.isArray(parsed) ? parsed.filter(Boolean) : null;
+  } catch {
+    return null;
+  }
+}
+
+function parseStoredIds(value) {
+  if (Array.isArray(value)) {
+    return value.map((item) => Number(item)).filter((item) => Number.isInteger(item) && item > 0);
+  }
+  if (typeof value !== "string" || !value) return [];
+  try {
+    const parsed = JSON.parse(value);
+    return Array.isArray(parsed)
+      ? parsed.map((item) => Number(item)).filter((item) => Number.isInteger(item) && item > 0)
+      : [];
+  } catch {
+    return [];
+  }
+}
+
+function normalizeReviewStatus(status) {
+  if (status === "completed") return "reviewed";
+  if (status === "deleted") return "initialized";
+  return status || "initialized";
+}
+
+function normalizeReviewAnalysis(analysis, newsItems) {
+  const hasAnalysisContent = analysis && [
+    analysis.daily_major_events,
+    analysis.sector_impact_map,
+    analysis.linkage_logic_chain,
+  ].some((value) => String(value || "").trim());
+
+  if (hasAnalysisContent && !String(analysis.linkage_logic_chain || "").startsWith("保留 ")) {
+    return analysis;
+  }
+
+  const grouped = {
+    major: newsItems.slice(0, 3),
+    symbol: newsItems.filter((item) => item.type === "stock" || item.type === "symbol").slice(0, 3),
+  };
+  const summaryLine = (item) => item.ai_summary || item.title || item.content || "";
+  const impactLine = (item) => item.market_impact || item.rule_reason || "";
+  const buildLines = (items) => items.map((item) => summaryLine(item)).filter(Boolean).map((item) => `- ${item}`).join("\n");
+  const topImpacts = newsItems
+    .slice(0, 3)
+    .map((item) => impactLine(item))
+    .filter(Boolean)
+    .map((item) => `- ${item}`)
+    .join("\n");
+
+  return {
+    ...(analysis || {}),
+    daily_major_events: buildLines(grouped.major),
+    sector_impact_map: topImpacts || "- 暂无可用的大盘与板块影响，请先更新新闻数据。",
+    linkage_logic_chain: buildLines(grouped.symbol) || topImpacts || "- 暂无可用的联动逻辑链，请先更新新闻数据。",
   };
 }
 
 async function saveReviewDraft(env, archiveDate, body) {
-  const sourceSnapshotJson = JSON.stringify(body.sourceSnapshot || {});
-  const reviewStatus = body.reviewStatus || "draft";
+  const existing = await env.DB.prepare(
+    `SELECT review_status FROM daily_review_archive WHERE archive_date = ? LIMIT 1`,
+  )
+    .bind(archiveDate)
+    .first();
+  const reviewStatus = body.reviewStatus
+    || (existing?.review_status === "initialized" ? "draft" : existing?.review_status)
+    || "draft";
 
   await env.DB.prepare(
-    `INSERT INTO stock_archive (
-      archive_date, review_status, hist_price_level, news_summary, market_sentiment,
-      sector_rotation, asset_plan, custom_notes, trading_summary, source_snapshot_json,
-      carry_forward_from_date, updated_at
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `INSERT INTO daily_review_archive (
+      archive_date, review_status, reviewer_news_notes, market_sentiment,
+      sector_rotation, asset_plan, trading_summary, updated_at
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
     ON CONFLICT(archive_date) DO UPDATE SET
       review_status = excluded.review_status,
-      hist_price_level = excluded.hist_price_level,
-      news_summary = excluded.news_summary,
+      reviewer_news_notes = excluded.reviewer_news_notes,
       market_sentiment = excluded.market_sentiment,
       sector_rotation = excluded.sector_rotation,
       asset_plan = excluded.asset_plan,
-      custom_notes = excluded.custom_notes,
       trading_summary = excluded.trading_summary,
-      source_snapshot_json = excluded.source_snapshot_json,
-      carry_forward_from_date = excluded.carry_forward_from_date,
       updated_at = excluded.updated_at`,
   )
     .bind(
       archiveDate,
       reviewStatus,
-      body.histPriceLevel || "",
-      body.newsSummary || "",
+      body.reviewerNewsNotes || body.newsBrief || "",
       body.marketSentiment || "",
       body.sectorRotation || "",
       body.assetPlan || "",
-      body.customNotes || "",
       body.tradingSummary || "",
-      sourceSnapshotJson,
-      body.carryForwardFromDate || null,
       isoNow(),
     )
     .run();
@@ -375,29 +815,192 @@ async function saveReviewDraft(env, archiveDate, body) {
 
 async function completeReview(env, archiveDate) {
   const existing = await env.DB.prepare(
-    `SELECT archive_date FROM stock_archive WHERE archive_date = ? LIMIT 1`,
+    `SELECT archive_date FROM daily_review_archive WHERE archive_date = ? LIMIT 1`,
   )
     .bind(archiveDate)
     .first();
 
   if (!existing) {
     await env.DB.prepare(
-      `INSERT INTO stock_archive (archive_date, review_status, reviewed_at, updated_at)
-       VALUES (?, 'completed', ?, ?)`,
+      `INSERT INTO daily_review_archive (archive_date, review_status, reviewed_at, updated_at)
+       VALUES (?, 'reviewed', ?, ?)`,
     )
       .bind(archiveDate, isoNow(), isoNow())
       .run();
   } else {
     await env.DB.prepare(
-      `UPDATE stock_archive
-       SET review_status = 'completed', reviewed_at = ?, updated_at = ?
+      `UPDATE daily_review_archive
+       SET review_status = 'reviewed', reviewed_at = ?, updated_at = ?
        WHERE archive_date = ?`,
     )
       .bind(isoNow(), isoNow(), archiveDate)
       .run();
   }
 
-  return { ok: true, archiveDate, reviewStatus: "completed" };
+  const newsWindow = await getNewsWindowForDate(env, archiveDate);
+  const analysis = await env.DB.prepare(
+    `SELECT source_news_ids FROM daily_news_ai_analysis WHERE analysis_date = ? LIMIT 1`,
+  )
+    .bind(archiveDate)
+    .first();
+  const sourceNewsIds = parseStoredIds(analysis?.source_news_ids);
+  if (sourceNewsIds.length) {
+    const placeholders = sourceNewsIds.map(() => "?").join(", ");
+    await env.DB.prepare(
+      `UPDATE news_raw_data
+       SET processing_status = 'reviewed'
+       WHERE id IN (${placeholders})`,
+    )
+      .bind(...sourceNewsIds)
+      .run();
+  } else {
+    await env.DB.prepare(
+      `UPDATE news_raw_data
+       SET processing_status = 'reviewed'
+       WHERE pub_date >= ? AND pub_date <= ?
+         AND COALESCE(importance_stars, 0) >= 3
+         AND (
+           COALESCE(rule_passed, 0) = 1
+           OR type IN ('index', 'sector', 'stock', 'macro', 'market', 'symbol')
+           OR COALESCE(ai_summary, '') != ''
+         )`,
+    )
+      .bind(newsWindow.start, newsWindow.end)
+      .run();
+  }
+  let archiveRows;
+  if (sourceNewsIds.length) {
+    const placeholders = sourceNewsIds.map(() => "?").join(", ");
+    archiveRows = await env.DB.prepare(
+      `SELECT id, pub_date, title, content, url, source, type, rule_passed, rule_reason,
+         processing_status, ai_summary, market_impact, importance_stars, related_symbols, news_hash
+       FROM news_raw_data
+       WHERE id IN (${placeholders})
+       ORDER BY pub_date DESC, id DESC`,
+    )
+      .bind(...sourceNewsIds)
+      .all();
+  } else {
+    const archiveQuery = `SELECT id, pub_date, title, content, url, source, type, rule_passed, rule_reason,
+           processing_status, ai_summary, market_impact, importance_stars, related_symbols, news_hash
+         FROM news_raw_data
+         WHERE pub_date >= ? AND pub_date <= ?
+           AND COALESCE(importance_stars, 0) >= 3
+           AND (
+             COALESCE(rule_passed, 0) = 1
+             OR type IN ('index', 'sector', 'stock', 'macro', 'market', 'symbol')
+             OR COALESCE(ai_summary, '') != ''
+           )
+         ORDER BY pub_date DESC, id DESC`;
+    archiveRows = await env.DB.prepare(archiveQuery)
+      .bind(newsWindow.start, newsWindow.end)
+      .all();
+  }
+
+  await env.DB.prepare(`DELETE FROM daily_review_archive_news WHERE archive_date = ?`)
+    .bind(archiveDate)
+    .run();
+
+  for (const item of archiveRows.results || []) {
+    await env.DB.prepare(
+      `INSERT INTO daily_review_archive_news (
+        archive_date, original_news_id, pub_date, title, content, url, source, type,
+        rule_passed, rule_reason, processing_status, ai_summary, market_impact,
+        importance_stars, related_symbols, news_hash, archived_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ON CONFLICT(archive_date, news_hash) DO UPDATE SET
+        original_news_id = excluded.original_news_id,
+        pub_date = excluded.pub_date,
+        title = excluded.title,
+        content = excluded.content,
+        url = excluded.url,
+        source = excluded.source,
+        type = excluded.type,
+        rule_passed = excluded.rule_passed,
+        rule_reason = excluded.rule_reason,
+        processing_status = excluded.processing_status,
+        ai_summary = excluded.ai_summary,
+        market_impact = excluded.market_impact,
+        importance_stars = excluded.importance_stars,
+        related_symbols = excluded.related_symbols,
+        news_hash = excluded.news_hash,
+        archived_at = excluded.archived_at`,
+    )
+      .bind(
+        archiveDate,
+        item.id || null,
+        item.pub_date || null,
+        item.title || "",
+        item.content || "",
+        item.url || "",
+        item.source || "",
+        item.type || "market",
+        item.rule_passed ? 1 : 0,
+        item.rule_reason || "",
+        item.processing_status || "",
+        item.ai_summary || "",
+        item.market_impact || "",
+        Number(item.importance_stars || 0),
+        item.related_symbols || "[]",
+        item.news_hash || null,
+        isoNow(),
+      )
+      .run();
+  }
+
+  return { ok: true, archiveDate, reviewStatus: "reviewed" };
+}
+
+async function initializeReview(env, archiveDate) {
+  const now = isoNow();
+  const newsWindow = await getNewsWindowForDate(env, archiveDate);
+  const existing = await env.DB.prepare(
+    `SELECT review_status FROM daily_review_archive WHERE archive_date = ? LIMIT 1`,
+  )
+    .bind(archiveDate)
+    .first();
+
+  if (!existing) {
+    await env.DB.prepare(
+      `INSERT INTO daily_review_archive (
+        archive_date, review_status, reviewer_news_notes, market_sentiment,
+        sector_rotation, asset_plan, trading_summary, reviewed_at, updated_at
+      )
+       VALUES (?, 'initialized', '', '', '', '', '', NULL, ?)`,
+    )
+      .bind(archiveDate, now)
+      .run();
+  } else {
+    await env.DB.prepare(
+      `UPDATE daily_review_archive
+       SET review_status = 'initialized',
+           reviewer_news_notes = '',
+           market_sentiment = '',
+           sector_rotation = '',
+           asset_plan = '',
+           trading_summary = '',
+           reviewed_at = NULL,
+           updated_at = ?
+       WHERE archive_date = ?`,
+    )
+      .bind(now, archiveDate)
+      .run();
+  }
+
+  await env.DB.prepare(`DELETE FROM daily_review_archive_news WHERE archive_date = ?`)
+    .bind(archiveDate)
+    .run();
+
+  await env.DB.prepare(
+    `UPDATE news_raw_data
+     SET processing_status = 'llm_processed'
+     WHERE pub_date >= ? AND pub_date <= ?
+       AND processing_status = 'reviewed'`,
+  )
+    .bind(newsWindow.start, newsWindow.end)
+    .run();
+
+  return { ok: true, archiveDate, reviewStatus: "initialized" };
 }
 
 async function getLatestPriceDate(env) {
@@ -411,14 +1014,14 @@ async function getNewsWindowForDate(env, archiveDate) {
      FROM stock_raw
      WHERE k_date <= ?
      ORDER BY k_date DESC
-     LIMIT 3`,
+     LIMIT 2`,
   )
     .bind(archiveDate)
     .all();
 
   const dates = (datesResult.results || []).map((row) => row.k_date).sort();
   const endDate = archiveDate;
-  const startDate = dates.length >= 3 ? dates[0] : subtractTradingDays(archiveDate, 2);
+  const startDate = dates.length >= 2 ? dates[0] : subtractTradingDays(archiveDate, 1);
   return {
     start: `${startDate} 16:00:00`,
     end: `${endDate} 16:00:00`,
@@ -452,4 +1055,247 @@ function subtractTradingDays(dateString, count) {
   }
 
   return current.toISOString().slice(0, 10);
+}
+
+// ============================================================
+// Symbol Management
+// ============================================================
+
+async function getSymbols(env, url) {
+  const type = url.searchParams.get("type");
+  const activeOnly = url.searchParams.get("active") !== "0";
+  const clauses = [];
+  const params = [];
+  if (type) { clauses.push("symbol_type = ?"); params.push(type); }
+  if (activeOnly) { clauses.push("is_active = 1"); }
+  const where = clauses.length ? `WHERE ${clauses.join(" AND ")}` : "";
+  const result = await env.DB.prepare(
+    `SELECT id, symbol, yahoo_symbol, display_name, symbol_type, aliases, is_active, sort_order, created_at, updated_at
+     FROM tracked_symbols ${where} ORDER BY symbol_type, sort_order, id`,
+  ).bind(...params).all();
+  const items = (result.results || []).map(enrichSymbolItem);
+  return { items, total: items.length };
+}
+
+async function getSymbolById(env, id) {
+  const row = await env.DB.prepare(
+    `SELECT id, symbol, yahoo_symbol, display_name, symbol_type, aliases, is_active, sort_order, created_at, updated_at
+     FROM tracked_symbols WHERE id = ? LIMIT 1`,
+  ).bind(id).first();
+  if (!row) { const e = new Error("Symbol not found"); e.statusCode = 404; throw e; }
+  return { item: enrichSymbolItem(row) };
+}
+
+async function createSymbol(env, body) {
+  validateSymbolBody(body);
+  const now = isoNow();
+  const aliases = normalizeAliases(body.aliases, body.symbol, body.display_name);
+  const result = await env.DB.prepare(
+    `INSERT INTO tracked_symbols (symbol, yahoo_symbol, display_name, symbol_type, aliases, is_active, sort_order, created_at, updated_at)
+     VALUES (?, ?, ?, ?, ?, 1, ?, ?, ?)`,
+  ).bind(
+    body.symbol.trim().toUpperCase(),
+    (body.yahoo_symbol || "").trim() || null,
+    body.display_name.trim(),
+    body.symbol_type,
+    JSON.stringify(aliases),
+    Number(body.sort_order ?? 0),
+    now, now,
+  ).run();
+  const created = await env.DB.prepare(
+    `SELECT * FROM tracked_symbols WHERE id = ? LIMIT 1`,
+  ).bind(result.meta.last_row_id).first();
+  return { ok: true, item: enrichSymbolItem(created) };
+}
+
+async function updateSymbol(env, id, body) {
+  const existing = await env.DB.prepare(
+    `SELECT * FROM tracked_symbols WHERE id = ? LIMIT 1`,
+  ).bind(id).first();
+  if (!existing) { const e = new Error("Symbol not found"); e.statusCode = 404; throw e; }
+
+  const symbol = (body.symbol || existing.symbol).trim().toUpperCase();
+  const displayName = (body.display_name || existing.display_name).trim();
+  const aliases = body.aliases != null
+    ? normalizeAliases(body.aliases, symbol, displayName)
+    : JSON.parse(existing.aliases || "[]");
+
+  await env.DB.prepare(
+    `UPDATE tracked_symbols SET
+       symbol = ?, yahoo_symbol = ?, display_name = ?, symbol_type = ?,
+       aliases = ?, is_active = ?, sort_order = ?, updated_at = ?
+     WHERE id = ?`,
+  ).bind(
+    symbol,
+    (body.yahoo_symbol != null ? body.yahoo_symbol : existing.yahoo_symbol) || null,
+    displayName,
+    body.symbol_type || existing.symbol_type,
+    JSON.stringify(aliases),
+    body.is_active != null ? Number(body.is_active) : existing.is_active,
+    body.sort_order != null ? Number(body.sort_order) : existing.sort_order,
+    isoNow(),
+    id,
+  ).run();
+  const updated = await env.DB.prepare(`SELECT * FROM tracked_symbols WHERE id = ? LIMIT 1`).bind(id).first();
+  return { ok: true, item: enrichSymbolItem(updated) };
+}
+
+async function deleteSymbol(env, id) {
+  const existing = await env.DB.prepare(`SELECT * FROM tracked_symbols WHERE id = ? LIMIT 1`).bind(id).first();
+  if (!existing) { const e = new Error("Symbol not found"); e.statusCode = 404; throw e; }
+  // 软删除
+  await env.DB.prepare(`UPDATE tracked_symbols SET is_active = 0, updated_at = ? WHERE id = ?`).bind(isoNow(), id).run();
+  const updated = await env.DB.prepare(`SELECT * FROM tracked_symbols WHERE id = ? LIMIT 1`).bind(id).first();
+  return { ok: true, id, item: enrichSymbolItem(updated) };
+}
+
+async function resolveSymbol(env, body) {
+  const userInput = (body.input || "").trim();
+  if (!userInput) { const e = new Error("input is required"); e.statusCode = 400; throw e; }
+
+  // 已有标的（避免重复提示）
+  const existing = await env.DB.prepare(`SELECT symbol FROM tracked_symbols WHERE is_active = 1`).all();
+  const existingSymbols = (existing.results || []).map((r) => r.symbol);
+
+  // 调用 LLM 识别
+  const llmApiKey = env.LLM_API_KEY;
+  const llmBaseUrl = env.LLM_BASE_URL || "https://dashscope.aliyuncs.com/compatible-mode/v1";
+  const llmModel = env.LLM_MODEL_ID || "qwen-plus";
+
+  let resolved = null;
+  if (llmApiKey) {
+    resolved = await callLLMForSymbol(llmApiKey, llmBaseUrl, llmModel, userInput, existingSymbols);
+  }
+
+  // Yahoo 验价（并行，但 LLM 可能失败）
+  let validation = null;
+  const yahooCode = resolved?.yahoo_symbol || resolved?.symbol;
+  if (yahooCode) {
+    validation = await fetchYahooValidation(yahooCode);
+    // Yahoo 返回的 instrumentType 可辅助校正 symbol_type
+    if (validation?.valid && validation.instrumentType && resolved) {
+      const inferredType = inferSymbolType(validation.instrumentType);
+      if (inferredType && inferredType !== resolved.symbol_type) {
+        resolved._yahoo_type_hint = inferredType;
+      }
+    }
+  }
+
+  return {
+    resolved,
+    validation,
+    isDuplicate: resolved ? existingSymbols.includes(resolved.symbol) : false,
+  };
+}
+
+async function callLLMForSymbol(apiKey, baseUrl, model, userInput, existingSymbols) {
+  const prompt = `请识别以下输入对应的金融标的："${userInput}"
+
+返回一个 JSON 对象（只返回 JSON，不要解释）：
+{
+  "symbol": "系统唯一标识，简短人类友好。个股用ticker(如MU)，指数去掉^前缀(如GSPC)，ETF用代码(如XLK)",
+  "yahoo_symbol": "Yahoo Finance精确代码。注意：美股指数需要^前缀(如^GSPC)，上证用000001.SS，美元指数用DX-Y.NYB，黄金用GC=F，原油用CL=F",
+  "display_name": "中文显示名称",
+  "symbol_type": "index（大盘指数/大宗商品/汇率/波动率）或 sector（板块ETF/行业指数）或 stock（个股）",
+  "aliases": ["中英文别名数组，用于新闻匹配，至少包含symbol、公司名、中文名"],
+  "confidence": "high 或 medium 或 low",
+  "reason": "一句话识别依据"
+}
+
+已有标的（参考，避免重复）：${JSON.stringify(existingSymbols)}
+只返回 JSON。`;
+
+  try {
+    const resp = await fetch(`${baseUrl.replace(/\/$/, "")}/chat/completions`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Authorization: `Bearer ${apiKey}` },
+      body: JSON.stringify({
+        model,
+        messages: [
+          { role: "system", content: "你是金融标的识别助手，只输出JSON，不输出解释。" },
+          { role: "user", content: prompt },
+        ],
+        max_tokens: 500,
+        temperature: 0.1,
+      }),
+      signal: AbortSignal.timeout(15000),
+    });
+    if (!resp.ok) return null;
+    const data = await resp.json();
+    const text = data?.choices?.[0]?.message?.content || "";
+    const jsonMatch = text.match(/\{[\s\S]*\}/);
+    if (!jsonMatch) return null;
+    const parsed = JSON.parse(jsonMatch[0]);
+    // 规范化字段
+    if (parsed.symbol) parsed.symbol = parsed.symbol.trim().toUpperCase();
+    if (!["index", "sector", "stock"].includes(parsed.symbol_type)) parsed.symbol_type = "stock";
+    if (!Array.isArray(parsed.aliases)) parsed.aliases = [parsed.symbol];
+    return parsed;
+  } catch {
+    return null;
+  }
+}
+
+async function fetchYahooValidation(yahooSymbol) {
+  try {
+    const url = `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(yahooSymbol)}?range=1d&interval=1d`;
+    const resp = await fetch(url, {
+      headers: { "User-Agent": "Mozilla/5.0" },
+      signal: AbortSignal.timeout(6000),
+    });
+    if (!resp.ok) return { valid: false, error: `HTTP ${resp.status}` };
+    const data = await resp.json();
+    const meta = data?.chart?.result?.[0]?.meta;
+    if (!meta) return { valid: false, error: "no data" };
+    const prev = meta.chartPreviousClose || meta.previousClose || meta.regularMarketPreviousClose;
+    const cur = meta.regularMarketPrice;
+    return {
+      valid: true,
+      latestPrice: cur,
+      previousClose: prev,
+      changePct: cur && prev ? (((cur - prev) / prev) * 100).toFixed(2) + "%" : null,
+      currency: meta.currency,
+      exchangeName: meta.fullExchangeName || meta.exchangeName,
+      instrumentType: meta.instrumentType,
+    };
+  } catch (err) {
+    return { valid: false, error: err.message };
+  }
+}
+
+function inferSymbolType(instrumentType) {
+  if (!instrumentType) return null;
+  const t = instrumentType.toUpperCase();
+  if (t === "EQUITY") return "stock";
+  if (t === "ETF") return "sector";
+  if (t === "INDEX" || t === "FUTURE" || t === "CURRENCY" || t === "MUTUALFUND") return "index";
+  return null;
+}
+
+function enrichSymbolItem(row) {
+  if (!row) return null;
+  let aliases = [];
+  try { aliases = JSON.parse(row.aliases || "[]"); } catch { aliases = []; }
+  return { ...row, aliases };
+}
+
+function normalizeAliases(input, symbol, displayName) {
+  let list = [];
+  if (typeof input === "string") {
+    list = input.split(",").map((s) => s.trim()).filter(Boolean);
+  } else if (Array.isArray(input)) {
+    list = input.map(String).map((s) => s.trim()).filter(Boolean);
+  }
+  // 始终包含 symbol 和 displayName
+  if (symbol && !list.includes(symbol)) list.unshift(symbol);
+  if (displayName && !list.includes(displayName)) list.push(displayName);
+  return [...new Set(list)];
+}
+
+function validateSymbolBody(body) {
+  if (!body.symbol?.trim()) { const e = new Error("symbol is required"); e.statusCode = 400; throw e; }
+  if (!body.display_name?.trim()) { const e = new Error("display_name is required"); e.statusCode = 400; throw e; }
+  if (!["index", "sector", "stock"].includes(body.symbol_type)) {
+    const e = new Error("symbol_type must be index, sector, or stock"); e.statusCode = 400; throw e;
+  }
 }

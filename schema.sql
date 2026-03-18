@@ -27,16 +27,22 @@ CREATE TABLE IF NOT EXISTS stock_raw (
 --   - captured_at: 数据保存时间 (脚本采集时间)
 --   - created_at: 记录创建时间
 -- ============================================================
-CREATE TABLE IF NOT EXISTS stock_news_raw (
+CREATE TABLE IF NOT EXISTS news_raw_data (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     pub_date DATETIME,                 -- 新闻发布时间 (重要: 复盘时按此时间筛选)
     title TEXT,                        -- 标题
-    summary TEXT,                      -- 概述
     content TEXT,                      -- 正文
     url TEXT,                          -- 链接
     source TEXT,                       -- 来源: sina/cls_cn/jin10/yahoo_finance
-    type TEXT,                         -- 类型: 0=重大新闻, 1=标的相关新闻
+    type TEXT,                         -- 类型: index(大盘) / sector(板块) / stock(个股)
+    rule_passed INTEGER DEFAULT 0,     -- 是否通过规则初筛
+    rule_reason TEXT,                  -- 规则保留原因
+    processing_status TEXT DEFAULT 'rule_screened', -- 状态: rule_screened/llm_processed/llm_discarded/reviewed
     ai_summary TEXT,                   -- AI总结 (LLM对单条新闻的总结)
+    market_impact TEXT,                -- 对市场影响概述
+    importance_stars INTEGER DEFAULT 0, -- 重要程度星级: 0-5
+    related_symbols TEXT,              -- 归属标的列表(JSON)
+    is_relevant_to_review INTEGER DEFAULT 0, -- 是否建议纳入复盘
     news_hash TEXT,                    -- 唯一标识 (用于去重)
     captured_at DATETIME,              -- 数据保存时间 (脚本采集时间)
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,  -- 记录创建时间
@@ -46,36 +52,67 @@ CREATE TABLE IF NOT EXISTS stock_news_raw (
 -- ============================================================
 -- 表 C：复盘存档表
 -- ============================================================
-CREATE TABLE IF NOT EXISTS stock_archive (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    archive_date TEXT NOT NULL,        -- 复盘日期
-    review_status TEXT NOT NULL DEFAULT 'draft', -- 状态: draft/completed
-    hist_price_level TEXT,             -- 历史价位复盘
-    news_summary TEXT,                 -- 新闻总结
+CREATE TABLE IF NOT EXISTS daily_review_archive (
+    archive_date TEXT PRIMARY KEY,     -- 复盘日期
+    review_status TEXT NOT NULL DEFAULT 'draft', -- 状态: draft/reviewed/deleted
+    reviewer_news_notes TEXT,         -- 复盘人对新闻的总结与点评（可编辑）
     market_sentiment TEXT,             -- 大盘流动性追踪
     sector_rotation TEXT,              -- 大宗商品与板块轮动
     asset_plan TEXT,                   -- 个股与资产操作计划
-    custom_notes TEXT,                 -- 自定义补充内容
     trading_summary TEXT,              -- 深度思考与交易总结
-    source_snapshot_json TEXT,         -- 页面回填的源数据快照
-    carry_forward_from_date TEXT,      -- 回填参考来源日期
     reviewed_at DATETIME,              -- 完成复盘时间
-    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-    UNIQUE(archive_date)
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
 );
 
 -- ============================================================
 -- 表 D：新闻分析结果表 (LLM 筛选的重大新闻)
 -- ============================================================
-CREATE TABLE IF NOT EXISTS news_analysis (
+CREATE TABLE IF NOT EXISTS daily_news_ai_analysis (
+    analysis_date TEXT PRIMARY KEY,    -- 分析日期 (YYYY-MM-DD)
+    daily_major_events TEXT,           -- 今日大事概览（综合后的主线事件）
+    sector_impact_map TEXT,            -- 大盘与重点板块影响图谱
+    linkage_logic_chain TEXT,          -- 联动逻辑链
+    source_news_ids TEXT,              -- 生成本次 AI 日总结所使用的新闻 ID 列表(JSON)
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS daily_review_archive_news (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
-    analysis_date TEXT NOT NULL,       -- 分析日期 (YYYY-MM-DD)
-    global_news TEXT,                  -- 全球重大新闻 (LLM筛选)
-    market_news TEXT,                  -- 股票市场重大新闻 (LLM筛选)
-    market_analysis TEXT,              -- 市场分析摘要
-    raw_summary TEXT,                  -- LLM原始输出
-    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    archive_date TEXT NOT NULL,        -- 复盘日期
+    original_news_id INTEGER,          -- 原始新闻 ID（来自 news_raw_data）
+    pub_date DATETIME,
+    title TEXT,
+    content TEXT,
+    url TEXT,
+    source TEXT,
+    type TEXT,                         -- 类型: index / sector / stock
+    rule_passed INTEGER DEFAULT 0,
+    rule_reason TEXT,
+    processing_status TEXT,
+    ai_summary TEXT,
+    market_impact TEXT,
+    importance_stars INTEGER DEFAULT 0,
+    related_symbols TEXT,
+    news_hash TEXT,
+    archived_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE(archive_date, news_hash)
+);
+
+-- ============================================================
+-- 表 E：标的管理表
+-- ============================================================
+CREATE TABLE IF NOT EXISTS tracked_symbols (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    symbol TEXT NOT NULL UNIQUE,        -- 系统唯一标识，人类友好（如 GSPC、VIX、MU）
+    yahoo_symbol TEXT,                  -- Yahoo Finance 代码（为空则等同于 symbol）
+    display_name TEXT NOT NULL,         -- 中文显示名
+    symbol_type TEXT NOT NULL           -- 'index'(大盘) / 'sector'(板块) / 'stock'(个股)
+        CHECK(symbol_type IN ('index', 'sector', 'stock')),
+    aliases TEXT DEFAULT '[]',          -- JSON 数组，新闻匹配别名
+    is_active INTEGER DEFAULT 1,        -- 是否启用
+    sort_order INTEGER DEFAULT 0,       -- 同类型内排序
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
 );
 
 -- ============================================================
@@ -83,10 +120,15 @@ CREATE TABLE IF NOT EXISTS news_analysis (
 -- ============================================================
 CREATE INDEX IF NOT EXISTS idx_stock_raw_date ON stock_raw(k_date);
 CREATE INDEX IF NOT EXISTS idx_stock_raw_symbol ON stock_raw(symbol);
-CREATE INDEX IF NOT EXISTS idx_stock_news_pub_date ON stock_news_raw(pub_date);
-CREATE INDEX IF NOT EXISTS idx_stock_news_source ON stock_news_raw(source);
-CREATE INDEX IF NOT EXISTS idx_stock_news_type ON stock_news_raw(type);
-CREATE INDEX IF NOT EXISTS idx_stock_archive_date ON stock_archive(archive_date);
-CREATE UNIQUE INDEX IF NOT EXISTS idx_stock_archive_unique_date ON stock_archive(archive_date);
-CREATE INDEX IF NOT EXISTS idx_stock_archive_status_date ON stock_archive(review_status, archive_date);
-CREATE INDEX IF NOT EXISTS idx_news_analysis_date ON news_analysis(analysis_date);
+CREATE INDEX IF NOT EXISTS idx_news_raw_data_pub_date ON news_raw_data(pub_date);
+CREATE INDEX IF NOT EXISTS idx_news_raw_data_source ON news_raw_data(source);
+CREATE INDEX IF NOT EXISTS idx_news_raw_data_type ON news_raw_data(type);
+CREATE INDEX IF NOT EXISTS idx_news_raw_data_rule_passed ON news_raw_data(rule_passed);
+CREATE INDEX IF NOT EXISTS idx_news_raw_data_status ON news_raw_data(processing_status);
+CREATE INDEX IF NOT EXISTS idx_news_raw_data_relevant ON news_raw_data(is_relevant_to_review);
+CREATE INDEX IF NOT EXISTS idx_daily_review_archive_date ON daily_review_archive(archive_date);
+CREATE INDEX IF NOT EXISTS idx_daily_review_archive_status_date ON daily_review_archive(review_status, archive_date);
+CREATE INDEX IF NOT EXISTS idx_daily_news_ai_analysis_date ON daily_news_ai_analysis(analysis_date);
+CREATE INDEX IF NOT EXISTS idx_daily_review_archive_news_date ON daily_review_archive_news(archive_date);
+CREATE INDEX IF NOT EXISTS idx_tracked_symbols_type   ON tracked_symbols(symbol_type);
+CREATE INDEX IF NOT EXISTS idx_tracked_symbols_active ON tracked_symbols(is_active);

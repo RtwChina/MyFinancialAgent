@@ -24,3 +24,11 @@ Python 采集脚本需要配置：
 Workers 侧需要配置环境变量：
 
 - `INGEST_API_TOKEN`
+- `APP_API_TOKEN`（可选。前端页面的写操作可单独使用这个 token；未配置时会回退复用 `INGEST_API_TOKEN`）
+
+## 当前鉴权口径
+
+- `GET` 类只读接口默认可访问
+- Python ingest 写接口必须带 Bearer Token
+- 前端页面中的写操作（如复盘保存、标的增删改、智能解析）也必须带 Bearer Token
+- 前端首次触发写操作时会提示输入 token，并缓存到浏览器本地存储

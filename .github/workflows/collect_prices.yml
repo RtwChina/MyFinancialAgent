@@ -32,7 +32,7 @@ jobs:
           LLM_MODEL_ID: ${{ secrets.LLM_MODEL_ID }}
           SKIP_LLM: "true"  # 价格采集不需要 LLM
         run: |
-          python collect_prices.py
+          python main.py close-summary
 
       - name: 上传数据库文件
         uses: actions/upload-artifact@v4
