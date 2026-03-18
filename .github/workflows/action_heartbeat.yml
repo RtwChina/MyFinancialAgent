@@ -1,0 +1,21 @@
+name: Actions 心跳检测
+
+on:
+  schedule:
+    # 每10分钟执行一次
+    - cron: '*/10 * * * *'
+  workflow_dispatch:
+
+jobs:
+  heartbeat:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: 输出时间戳
+        run: |
+          echo "GitHub Actions heartbeat"
+          echo "UTC: $(date -u '+%Y-%m-%d %H:%M:%S UTC')"
+          echo "Shanghai: $(TZ=Asia/Shanghai date '+%Y-%m-%d %H:%M:%S CST')"
+          echo "Repository: $GITHUB_REPOSITORY"
+          echo "Workflow: $GITHUB_WORKFLOW"
+          echo "Run ID: $GITHUB_RUN_ID"
