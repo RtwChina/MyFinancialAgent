@@ -10,6 +10,10 @@ const state = {
   homepageInsightSections: [],
   symbolsLoaded: false,
   symbolResolveResult: null,
+  newsPage: 1,
+  newsPageSize: 20,
+  reviewsPage: 1,
+  reviewsPageSize: 20,
 };
 
 const APP_TOKEN_STORAGE_KEY = "myFinancialAgentApiToken";
@@ -141,6 +145,22 @@ const closeNewsDetailBtn = document.querySelector("#closeNewsDetailBtn");
 
 const reviewsList = document.querySelector("#reviewsList");
 
+// 新闻检索台分页控件
+const newsPagination = document.querySelector("#newsPagination");
+const newsPrevBtn = document.querySelector("#newsPrevBtn");
+const newsNextBtn = document.querySelector("#newsNextBtn");
+const newsPageInfo = document.querySelector("#newsPageInfo");
+const newsTotalInfo = document.querySelector("#newsTotalInfo");
+const newsPageSizeSelect = document.querySelector("#newsPageSizeSelect");
+
+// 复盘工作台分页控件
+const reviewsPagination = document.querySelector("#reviewsPagination");
+const reviewsPrevBtn = document.querySelector("#reviewsPrevBtn");
+const reviewsNextBtn = document.querySelector("#reviewsNextBtn");
+const reviewsPageInfo = document.querySelector("#reviewsPageInfo");
+const reviewsTotalInfo = document.querySelector("#reviewsTotalInfo");
+const reviewsPageSizeSelect = document.querySelector("#reviewsPageSizeSelect");
+
 const reviewDrawer = document.querySelector("#reviewDrawer");
 const reviewForm = document.querySelector("#reviewForm");
 const archiveDateLabel = document.querySelector("#archiveDateLabel");
@@ -163,20 +183,34 @@ navButtons.forEach((button) => {
   button.addEventListener("click", () => switchView(button.dataset.view));
 });
 
-document.querySelector("#refreshNewsBtn").addEventListener("click", () => loadNewsList());
+document.querySelector("#refreshNewsBtn").addEventListener("click", () => loadNewsList(null, true));
 document.querySelector("#resetNewsFiltersBtn").addEventListener("click", () => {
   newsFiltersForm.reset();
-  loadNewsList();
+  loadNewsList(null, true);
 });
 newsFiltersForm.addEventListener("submit", (event) => {
   event.preventDefault();
-  loadNewsList(new FormData(newsFiltersForm));
+  loadNewsList(new FormData(newsFiltersForm), true);
+});
+newsPrevBtn.addEventListener("click", () => { state.newsPage--; loadNewsList(); });
+newsNextBtn.addEventListener("click", () => { state.newsPage++; loadNewsList(); });
+newsPageSizeSelect.addEventListener("change", () => {
+  state.newsPageSize = Number(newsPageSizeSelect.value);
+  state.newsPage = 1;
+  loadNewsList();
 });
 
-document.querySelector("#refreshReviewsBtn").addEventListener("click", () => loadReviews());
+document.querySelector("#refreshReviewsBtn").addEventListener("click", () => loadReviews(null, true));
 document.querySelector("#filtersForm").addEventListener("submit", (event) => {
   event.preventDefault();
-  loadReviews(new FormData(event.currentTarget));
+  loadReviews(new FormData(event.currentTarget), true);
+});
+reviewsPrevBtn.addEventListener("click", () => { state.reviewsPage--; loadReviews(); });
+reviewsNextBtn.addEventListener("click", () => { state.reviewsPage++; loadReviews(); });
+reviewsPageSizeSelect.addEventListener("change", () => {
+  state.reviewsPageSize = Number(reviewsPageSizeSelect.value);
+  state.reviewsPage = 1;
+  loadReviews();
 });
 
 saveDraftBtn.addEventListener("click", async () => {
@@ -409,7 +443,8 @@ function closeDailyInsightModal() {
   dailyInsightModal.classList.add("hidden");
 }
 
-async function loadNewsList(formData = null) {
+async function loadNewsList(formData = null, resetPage = false) {
+  if (resetPage) state.newsPage = 1;
   newsList.innerHTML = `<tr><td colspan="5" class="table-empty">加载中...</td></tr>`;
   const params = new URLSearchParams();
   const sourceData = formData || getDefaultNewsFilters();
@@ -424,23 +459,41 @@ async function loadNewsList(formData = null) {
     }
   }
   state.newsFilters = params;
+  params.set("page", state.newsPage);
+  params.set("pageSize", state.newsPageSize);
 
-  const query = params.toString() ? `?${params.toString()}` : "";
+  const query = `?${params.toString()}`;
   try {
     const data = await fetchJson(`/api/news${query}`);
-    newsSummary.textContent = `当前结果 ${data.total} 条`;
     newsList.innerHTML = "";
     if (!data.items.length) {
       newsList.innerHTML = `<tr><td colspan="5" class="table-empty">没有查到匹配新闻</td></tr>`;
+      newsSummary.textContent = "共 0 条";
+      newsPagination.classList.add("hidden");
       return;
     }
-    data.items.forEach((item) => {
-      newsList.appendChild(buildNewsRow(item));
-    });
+    data.items.forEach((item) => newsList.appendChild(buildNewsRow(item)));
+    renderNewsPagination(data);
   } catch (error) {
     newsSummary.textContent = "加载失败";
     newsList.innerHTML = `<tr><td colspan="5" class="table-empty">新闻加载失败: ${error.message}</td></tr>`;
+    newsPagination.classList.add("hidden");
   }
+}
+
+function renderNewsPagination(data) {
+  const { total = 0, page = 1, totalPages = 1 } = data;
+  newsSummary.textContent = `共 ${total} 条`;
+  if (total === 0) {
+    newsPagination.classList.add("hidden");
+    return;
+  }
+  newsPagination.classList.remove("hidden");
+  newsPageInfo.textContent = `${page} / ${totalPages} 页`;
+  newsTotalInfo.textContent = `共 ${total} 条`;
+  newsPrevBtn.disabled = page <= 1;
+  newsNextBtn.disabled = page >= totalPages;
+  state.newsPage = page;
 }
 
 async function loadNewsDetail(id) {
@@ -487,7 +540,8 @@ function closeNewsDetail() {
   newsDetailModal.classList.add("hidden");
 }
 
-async function loadReviews(formData = null) {
+async function loadReviews(formData = null, resetPage = false) {
+  if (resetPage) state.reviewsPage = 1;
   reviewsList.innerHTML = `<tr><td colspan="7" class="table-empty">加载中...</td></tr>`;
   const params = new URLSearchParams();
   if (formData) {
@@ -495,19 +549,39 @@ async function loadReviews(formData = null) {
       if (value) params.set(key, value);
     }
   }
+  state.reviewsFilters = params;
+  params.set("page", state.reviewsPage);
+  params.set("pageSize", state.reviewsPageSize);
 
-  const query = params.toString() ? `?${params.toString()}` : "";
+  const query = `?${params.toString()}`;
   try {
     const data = await fetchJson(`/api/reviews${query}`);
     reviewsList.innerHTML = "";
     if (!data.items.length) {
       reviewsList.innerHTML = `<tr><td colspan="7" class="table-empty">还没有复盘记录</td></tr>`;
+      reviewsPagination.classList.add("hidden");
       return;
     }
     data.items.forEach((item) => reviewsList.appendChild(buildReviewRow(item)));
+    renderReviewsPagination(data);
   } catch (error) {
     reviewsList.innerHTML = `<tr><td colspan="7" class="table-empty">查询失败: ${error.message}</td></tr>`;
+    reviewsPagination.classList.add("hidden");
   }
+}
+
+function renderReviewsPagination(data) {
+  const { total = 0, page = 1, totalPages = 1 } = data;
+  if (total === 0) {
+    reviewsPagination.classList.add("hidden");
+    return;
+  }
+  reviewsPagination.classList.remove("hidden");
+  reviewsPageInfo.textContent = `${page} / ${totalPages} 页`;
+  reviewsTotalInfo.textContent = `共 ${total} 条`;
+  reviewsPrevBtn.disabled = page <= 1;
+  reviewsNextBtn.disabled = page >= totalPages;
+  state.reviewsPage = page;
 }
 
 async function openReviewDrawer(archiveDate) {
@@ -584,7 +658,10 @@ function buildNewsRow(item) {
   row.className = "news-row";
 
   const timeCell = document.createElement("td");
-  timeCell.innerHTML = `<strong>${escapeHtml(item.pub_date || "未知时间")}</strong><small>${escapeHtml(item.source || "未知来源")}</small>`;
+  const pubDate = item.pub_date || "";
+  const dateDisplay = pubDate.slice(0, 10) || "未知日期";
+  const timeDisplay = pubDate.length >= 16 ? pubDate.slice(11, 16) : (pubDate || "未知时间");
+  timeCell.innerHTML = `<strong>${escapeHtml(dateDisplay)}</strong><small>${escapeHtml(timeDisplay)} · ${escapeHtml(item.source || "未知来源")}</small>`;
 
   const summaryCell = document.createElement("td");
   summaryCell.className = "news-summary-cell";

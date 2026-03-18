@@ -32,7 +32,7 @@ SRC = ROOT / "src"
 if str(SRC) not in sys.path:
     sys.path.insert(0, str(SRC))
 
-from collect_news_v3 import get_current_review_trading_day
+from collect_news_v3 import get_latest_closed_trading_day
 from runtime.context import build_execution_context
 
 FIXTURE_DIR = ROOT / "tests" / "testdata"
@@ -314,7 +314,74 @@ def resolve_live_review_date(explicit_live_date: str | None) -> str:
     if explicit_live_date:
         return explicit_live_date
     context = build_execution_context(app_env="test", test_mode="none", data_mode="live")
-    return get_current_review_trading_day(context)
+    return get_latest_closed_trading_day(context)
+
+
+def validate_nyse_closed_trading_day(db_name: str, worker_base: str) -> dict[str, Any]:
+    """INT-010: 验证复盘候选日来自 ^GSPC 而非跨市场最大日期。
+
+    步骤：
+    1. 向 stock_raw 注入一条 ^HSI 的未来日期行（2099-12-31）
+    2. 调用 GET /api/reviews，断言 latestClosedDate 仍为 ^GSPC 的最大 k_date（不是 2099-12-31）
+    3. 清理注入行
+    """
+    inject_sql = (
+        "INSERT OR IGNORE INTO stock_raw "
+        "(k_date, stock_code, stock_name, symbol, current_price, change_percent, volume, captured_at) "
+        "VALUES ('2099-12-31', '^HSI', '恒生指数', '^HSI', 99999.0, 0.0, 0, datetime('now'));"
+    )
+    d1_execute_sql(db_name, inject_sql)
+
+    reviews = http_get_json(f"{worker_base}/api/reviews")
+    latest_closed_date = reviews.get("latestClosedDate")
+
+    cleanup_sql = "DELETE FROM stock_raw WHERE k_date = '2099-12-31' AND symbol = '^HSI';"
+    d1_execute_sql(db_name, cleanup_sql)
+
+    if latest_closed_date == "2099-12-31":
+        raise IntegrationError(
+            f"INT-010 FAILED: latestClosedDate='2099-12-31' — Worker is still using MAX(k_date) across all symbols instead of ^GSPC"
+        )
+    return {"latestClosedDate": latest_closed_date, "injected_date": "2099-12-31", "ok": True}
+
+
+def validate_cross_market_price_query(db_name: str, worker_base: str, gspc_date: str) -> dict[str, Any]:
+    """INT-011: 验证跨市场价格查询——archive_date 后一天有亚洲指数数据时，美股个股仍能展示。
+
+    步骤：
+    1. 向 stock_raw 注入 ^HSI 在 gspc_date+1 的一条价格行
+    2. 调用 GET /api/reviews/{gspc_date}/bootstrap
+    3. 断言 prices 中存在 US 股票（symbol_type=stock）
+    4. 清理注入行
+    """
+    import datetime as _dt
+    next_day = (_dt.date.fromisoformat(gspc_date) + _dt.timedelta(days=1)).isoformat()
+    inject_sql = (
+        f"INSERT OR IGNORE INTO stock_raw "
+        f"(k_date, stock_code, stock_name, symbol, current_price, change_percent, volume, captured_at) "
+        f"VALUES ('{next_day}', '^HSI', '恒生指数', '^HSI', 20000.0, 0.5, 100000, datetime('now'));"
+    )
+    d1_execute_sql(db_name, inject_sql)
+
+    payload = http_get_json(f"{worker_base}/api/reviews/{gspc_date}/bootstrap")
+    prices = payload.get("prices") or {}
+    stock_prices = prices.get("stock") or []
+    stock_symbols = [p["symbol"] for p in stock_prices]
+
+    cleanup_sql = f"DELETE FROM stock_raw WHERE k_date = '{next_day}' AND symbol = '^HSI';"
+    d1_execute_sql(db_name, cleanup_sql)
+
+    if not stock_prices:
+        raise IntegrationError(
+            f"INT-011 FAILED: bootstrap for {gspc_date} returned no stock prices "
+            f"even though ^HSI has k_date={next_day}. Per-symbol price query may be broken."
+        )
+    return {
+        "archive_date": gspc_date,
+        "injected_hsi_date": next_day,
+        "stock_symbols_found": stock_symbols,
+        "ok": True,
+    }
 
 
 def final_integrity_snapshot(db_name: str, worker_base: str, live_date: str) -> dict[str, Any]:
@@ -446,6 +513,12 @@ def main() -> int:
         history_validations = validate_history_dates(args.worker_base, args.history_dates)
         history_ok = all(item["listed"] and item["price_count"] > 0 and item["news_count"] > 0 and item["has_analysis"] for item in history_validations)
         steps.append(StepResult("validate-history-baseline", history_ok, json.dumps(history_validations, ensure_ascii=False)))
+
+        nyse_date_result = validate_nyse_closed_trading_day(args.db_name, args.worker_base)
+        steps.append(StepResult("validate-nyse-closed-date", True, json.dumps(nyse_date_result, ensure_ascii=False)))
+
+        cross_market_result = validate_cross_market_price_query(args.db_name, args.worker_base, args.history_dates[-1])
+        steps.append(StepResult("validate-cross-market-price", True, json.dumps(cross_market_result, ensure_ascii=False)))
 
         symbol_result = validate_symbol_crud(args.worker_base)
         steps.append(StepResult("symbol-crud", True, json.dumps(symbol_result, ensure_ascii=False)))

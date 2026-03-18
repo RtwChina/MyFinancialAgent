@@ -341,7 +341,7 @@ async function ingestNewsAnalysis(env, body) {
 
 async function getPendingReviews(env, url) {
   const limit = Number(url.searchParams.get("limit") || "10");
-  const latestClosedDate = await getLatestPriceDate(env);
+  const latestClosedDate = await getLatestClosedNyseTradingDay(env);
   if (!latestClosedDate) {
     return { items: [], latestClosedDate: null };
   }
@@ -380,7 +380,14 @@ async function getNewsList(env, url) {
   ]
     .map((value) => Number(value))
     .filter((value, index, array) => Number.isFinite(value) && value > 0 && array.indexOf(value) === index);
-  const limit = Math.min(Number(url.searchParams.get("limit") || "100"), 200);
+
+  // 分页参数：page 存在时启用服务端分页，否则退回 limit 兼容模式
+  const pageParam = url.searchParams.get("page");
+  const usePagination = pageParam !== null;
+  const page = Math.max(1, Number(pageParam || "1"));
+  const pageSize = Math.min(Math.max(1, Number(url.searchParams.get("pageSize") || "20")), 100);
+  const limit = usePagination ? pageSize : Math.min(Number(url.searchParams.get("limit") || "100"), 200);
+  const offset = usePagination ? (page - 1) * pageSize : 0;
 
   const clauses = [];
   const params = [];
@@ -417,37 +424,50 @@ async function getNewsList(env, url) {
       params.push(normalizedType);
     }
   }
+  if (symbol) {
+    clauses.push("related_symbols LIKE ?");
+    params.push(`%${symbol}%`);
+  }
+  if (stars.length) {
+    const placeholders = stars.map(() => "?").join(", ");
+    clauses.push(`importance_stars IN (${placeholders})`);
+    params.push(...stars);
+  }
 
   const whereClause = clauses.length ? `WHERE ${clauses.join(" AND ")}` : "";
-  const query = `SELECT id, pub_date, title, content, url, source, type,
+
+  const dataQuery = `SELECT id, pub_date, title, content, url, source, type,
     rule_passed, rule_reason, processing_status, ai_summary, market_impact,
     importance_stars, related_symbols, is_relevant_to_review
     FROM news_raw_data
     ${whereClause}
     ORDER BY pub_date DESC, id DESC
-    LIMIT ?`;
-  const result = await env.DB.prepare(query).bind(...params, limit).all();
-  let items = (result.results || []).map(enrichNewsItem);
+    LIMIT ? OFFSET ?`;
 
-  if (symbol) {
-    items = items.filter((item) => item.related_symbols.includes(symbol));
-  }
-  if (stars.length) {
-    items = items.filter((item) => stars.includes(Number(item.importance_stars || 0)));
+  if (usePagination) {
+    const countQuery = `SELECT COUNT(*) AS cnt FROM news_raw_data ${whereClause}`;
+    const [countResult, dataResult] = await Promise.all([
+      env.DB.prepare(countQuery).bind(...params).first(),
+      env.DB.prepare(dataQuery).bind(...params, limit, offset).all(),
+    ]);
+    const total = Number(countResult?.cnt || 0);
+    const items = (dataResult.results || []).map(enrichNewsItem);
+    return {
+      items,
+      total,
+      page,
+      pageSize,
+      totalPages: Math.ceil(total / pageSize),
+    };
   }
 
+  // 兼容模式（不传 page）
+  const result = await env.DB.prepare(dataQuery).bind(...params, limit, 0).all();
+  const items = (result.results || []).map(enrichNewsItem);
   return {
     items,
     total: items.length,
-    filters: {
-      keyword,
-      dateFrom,
-      dateTo,
-      source,
-      type,
-      symbol,
-      stars,
-    },
+    filters: { keyword, dateFrom, dateTo, source, type, symbol, stars },
   };
 }
 
@@ -476,6 +496,15 @@ async function getReviews(env, url) {
   const status = url.searchParams.get("status");
   const from = url.searchParams.get("from");
   const to = url.searchParams.get("to");
+
+  // 分页参数
+  const pageParam = url.searchParams.get("page");
+  const usePagination = pageParam !== null;
+  const page = Math.max(1, Number(pageParam || "1"));
+  const pageSize = Math.min(Math.max(1, Number(url.searchParams.get("pageSize") || "20")), 100);
+  const offset = usePagination ? (page - 1) * pageSize : 0;
+  const limitVal = usePagination ? pageSize : 100;
+
   const clauses = [];
   const params = [];
   if (from) {
@@ -486,8 +515,13 @@ async function getReviews(env, url) {
     clauses.push("a.archive_date <= ?");
     params.push(to);
   }
+  if (status) {
+    clauses.push("COALESCE(a.review_status, 'initialized') = ?");
+    params.push(status);
+  }
   const whereClause = clauses.length ? `WHERE ${clauses.join(" AND ")}` : "";
-  const query = `SELECT
+
+  const dataQuery = `SELECT
       a.archive_date,
       COALESCE(a.review_status, 'initialized') AS review_status,
       a.updated_at,
@@ -502,9 +536,25 @@ async function getReviews(env, url) {
     LEFT JOIN daily_news_ai_analysis n ON n.analysis_date = a.archive_date
     ${whereClause}
     ORDER BY a.archive_date DESC
-    LIMIT 100`;
+    LIMIT ? OFFSET ?`;
 
-  const result = await env.DB.prepare(query).bind(...params).all();
+  if (usePagination) {
+    const countQuery = `SELECT COUNT(*) AS cnt FROM daily_review_archive a ${whereClause}`;
+    const [countResult, dataResult] = await Promise.all([
+      env.DB.prepare(countQuery).bind(...params).first(),
+      env.DB.prepare(dataQuery).bind(...params, limitVal, offset).all(),
+    ]);
+    const total = Number(countResult?.cnt || 0);
+    const items = (dataResult.results || []).map((item) => ({
+      ...item,
+      review_status: normalizeReviewStatus(item.review_status),
+      news_summary: item.reviewer_news_notes || item.linkage_logic_chain || "",
+    }));
+    return { items, total, page, pageSize, totalPages: Math.ceil(total / pageSize) };
+  }
+
+  // 兼容模式
+  const result = await env.DB.prepare(dataQuery).bind(...params, limitVal, 0).all();
   let items = (result.results || []).map((item) => ({
     ...item,
     review_status: normalizeReviewStatus(item.review_status),
@@ -513,9 +563,7 @@ async function getReviews(env, url) {
   if (status) {
     items = items.filter((item) => item.review_status === status);
   }
-  return {
-    items,
-  };
+  return { items };
 }
 
 async function getReviewByDate(env, archiveDate) {
@@ -538,11 +586,18 @@ async function getReviewBootstrap(env, archiveDate) {
     .bind(archiveDate)
     .first();
 
+  // 跨市场资产的 k_date 不统一（美股/亚洲/汇率/商品收盘时间不同），
+  // 对每个 symbol 取 k_date <= archiveDate 的最近一条，避免因日期偏差漏掉美股个股/板块价格。
   const currentPricesRaw = await env.DB.prepare(
-    `SELECT symbol, stock_name, current_price, change_percent, volume
-     FROM stock_raw
-     WHERE k_date = ?
-     ORDER BY symbol`,
+    `SELECT p.symbol, p.stock_name, p.current_price, p.change_percent, p.volume, p.k_date
+     FROM stock_raw p
+     JOIN (
+       SELECT symbol, MAX(k_date) AS latest_k_date
+       FROM stock_raw
+       WHERE k_date <= ?
+       GROUP BY symbol
+     ) latest ON latest.symbol = p.symbol AND latest.latest_k_date = p.k_date
+     ORDER BY p.symbol`,
   )
     .bind(archiveDate)
     .all();
@@ -1003,8 +1058,12 @@ async function initializeReview(env, archiveDate) {
   return { ok: true, archiveDate, reviewStatus: "initialized" };
 }
 
-async function getLatestPriceDate(env) {
-  const row = await env.DB.prepare(`SELECT MAX(k_date) AS latest FROM stock_raw`).first();
+// 以 ^GSPC（S&P 500）作为 NYSE 收盘日代理：当 ^GSPC 有价格记录时，说明 NYSE 当天已收盘。
+// 这样可以避免亚洲指数/汇率/商品先进入下一自然日时把复盘候选日错误推进。
+async function getLatestClosedNyseTradingDay(env) {
+  const row = await env.DB.prepare(
+    `SELECT MAX(k_date) AS latest FROM stock_raw WHERE symbol = '^GSPC'`,
+  ).first();
   return row?.latest || null;
 }
 
@@ -1035,11 +1094,11 @@ async function digest(input) {
 }
 
 function isoNow() {
-  return new Date().toISOString().slice(0, 19).replace("T", " ");
+  return new Date(Date.now() + 8 * 3600 * 1000).toISOString().slice(0, 19).replace("T", " ");
 }
 
 function todayDate() {
-  return new Date().toISOString().slice(0, 10);
+  return new Date(Date.now() + 8 * 3600 * 1000).toISOString().slice(0, 10);
 }
 
 function subtractTradingDays(dateString, count) {
