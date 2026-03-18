@@ -35,7 +35,6 @@ jobs:
           INGEST_API_BASE_URL: ${{ secrets.INGEST_API_BASE_URL }}
           INGEST_API_TOKEN: ${{ secrets.INGEST_API_TOKEN }}
         run: |
-          python main.py hourly-news
           python main.py close-summary
 
       - name: 上传数据库文件
