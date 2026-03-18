@@ -14,6 +14,7 @@ from symbol_registry import get_tracked_symbols, get_yahoo_symbol
 
 
 logger = get_logger("price_live")
+# 拉取单只标的时的最大重试次数及每次重试的基础等待秒数
 PRICE_FETCH_RETRIES = 3
 PRICE_FETCH_RETRY_DELAY = 1.0
 
@@ -29,11 +30,13 @@ def fetch_stock_data_live(symbol_record: dict, context: ExecutionContext) -> dic
         try:
             logger.info("正在获取 %s (%s) 的数据...", display_name, yahoo_code)
             ticker = yf.Ticker(yahoo_code)
+            # 拉取最近一周 K 线；若无数据则直接放弃该标的
             hist = ticker.history(period="1wk")
             if hist.empty:
                 logger.warning("标的 %s 没有获取到数据", yahoo_code)
                 return None
 
+            # 取最后一根 K 线作为当日收盘数据
             last_row = hist.iloc[-1]
             trading_date = hist.index[-1]
             k_date = trading_date.strftime("%Y-%m-%d")
@@ -45,6 +48,7 @@ def fetch_stock_data_live(symbol_record: dict, context: ExecutionContext) -> dic
             except Exception as exc:
                 logger.warning("获取 %s 信息失败，使用默认名称: %s", yahoo_code, exc)
 
+            # 优先用前一日收盘价计算涨跌幅；若只有一根 K 线则退而以开盘价估算
             change_percent = None
             if len(hist) >= 2:
                 prev_close = hist.iloc[-2]["Close"]
@@ -73,6 +77,7 @@ def fetch_stock_data_live(symbol_record: dict, context: ExecutionContext) -> dic
             last_error = exc
             if attempt < PRICE_FETCH_RETRIES:
                 logger.warning("获取 %s 数据失败，第 %s/%s 次重试: %s", yahoo_code, attempt, PRICE_FETCH_RETRIES, exc)
+                # 指数退避：等待时间随重试次数线性增长，避免频繁冲击接口
                 time.sleep(PRICE_FETCH_RETRY_DELAY * attempt)
             else:
                 logger.error("获取 %s 数据时发生错误: %s", yahoo_code, exc)
@@ -93,6 +98,7 @@ def fetch_all_prices_live(context: ExecutionContext) -> list[dict]:
         if data:
             all_data.append(data)
         else:
+            # 采集失败时仍插入占位记录，保证下游能感知到该标的本次无数据
             all_data.append({
                 "k_date": None,
                 "stock_code": sym_record["symbol"],

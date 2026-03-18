@@ -38,6 +38,8 @@ def _headers() -> Dict[str, str]:
 
 
 def _sanitize_payload(value: Any) -> Any:
+    """递归清理 payload，将 NaN/Inf 等非法浮点值替换为 None，避免 JSON 序列化失败"""
+    # 非有限浮点数（NaN / Inf）无法被 JSON 标准序列化，统一置 None
     if isinstance(value, float):
         return value if math.isfinite(value) else None
     if isinstance(value, dict):
@@ -48,6 +50,7 @@ def _sanitize_payload(value: Any) -> Any:
 
 
 def _post(path: str, payload: Dict[str, Any]) -> Dict[str, Any]:
+    """向 Workers API 发送 POST 请求，带指数退避重试"""
     if not is_remote_write_configured():
         raise CloudflareIngestError("未配置 INGEST_API_BASE_URL 或 INGEST_API_TOKEN")
 
@@ -63,6 +66,7 @@ def _post(path: str, payload: Dict[str, Any]) -> Dict[str, Any]:
         except requests.RequestException as exc:
             last_error = exc
             logger.warning("调用 Workers API 失败，第 %s/%s 次重试: %s", attempt, DEFAULT_MAX_RETRIES, exc)
+            # 每次重试等待时间随次数线性递增，避免瞬时大量冲击
             if attempt < DEFAULT_MAX_RETRIES:
                 time.sleep(DEFAULT_RETRY_DELAY * attempt)
 
@@ -70,6 +74,7 @@ def _post(path: str, payload: Dict[str, Any]) -> Dict[str, Any]:
 
 
 def _get(path: str, query: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+    """向 Workers API 发送 GET 请求，带重试；query 参数自动 URL 编码拼接"""
     if not is_remote_write_configured():
         raise CloudflareIngestError("未配置 INGEST_API_BASE_URL 或 INGEST_API_TOKEN")
 
@@ -92,9 +97,11 @@ def _get(path: str, query: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
 
 
 def _send_in_batches(path: str, items: List[Dict[str, Any]], batch_size: int) -> Dict[str, Any]:
+    """将数据列表按 batch_size 分批 POST，并汇总各批次的 inserted/updated/ignored 统计"""
     inserted = 0
     updated = 0
     ignored = 0
+    # 汇总所有批次返回的 news_hash -> id 映射，供调用方追踪写入 ID
     id_map: Dict[str, int] = {}
 
     for start in range(0, len(items), batch_size):
@@ -104,6 +111,7 @@ def _send_in_batches(path: str, items: List[Dict[str, Any]], batch_size: int) ->
         updated += result.get("updated", 0)
         ignored += result.get("ignored", 0)
         batch_id_map = result.get("id_map") or {}
+        # 严格做类型转换，防止 Workers 返回非预期类型导致后续操作出错
         if isinstance(batch_id_map, dict):
             for news_hash, news_id in batch_id_map.items():
                 try:

@@ -17,15 +17,15 @@ def setup_logger(name: str) -> logging.Logger:
     logger = logging.getLogger(name)
     logger.setLevel(getattr(logging, LOG_LEVEL.upper(), logging.INFO))
 
-    # 避免重复添加 handler
+    # Python logging 使用单例模式，同名 logger 多次调用时会重复追加 handler，此处提前返回避免重复输出
     if logger.handlers:
         return logger
 
-    # 文件处理器
+    # 文件处理器：记录所有级别（DEBUG+），便于排查问题
     file_handler = logging.FileHandler(LOG_FILE, encoding='utf-8')
     file_handler.setLevel(logging.DEBUG)
 
-    # 控制台处理器
+    # 控制台处理器：只输出 INFO+，减少终端噪音
     console_handler = logging.StreamHandler()
     console_handler.setLevel(logging.INFO)
 

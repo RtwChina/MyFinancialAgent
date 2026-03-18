@@ -100,17 +100,23 @@ _FALLBACK_SYMBOLS = [
      "aliases": ["GOOGL", "Google", "Alphabet", "谷歌", "Alphabet Inc"]},
 ]
 
+# 模块级缓存，避免重复查询数据库；None 表示尚未加载
 _cache: list[dict] | None = None
 
 
 def _parse_aliases(raw: Any) -> list[str]:
+    """将 aliases 字段统一解析为字符串列表。
+    数据库存储形式可能是 Python list、JSON 字符串或逗号分隔字符串，此处统一处理。
+    """
     if isinstance(raw, list):
         return raw
     if isinstance(raw, str):
         try:
+            # 优先尝试 JSON 解析（D1 返回的标准格式）
             parsed = json.loads(raw)
             return parsed if isinstance(parsed, list) else []
         except (json.JSONDecodeError, ValueError):
+            # 降级：按逗号分割（旧格式兼容）
             return [s.strip() for s in raw.split(",") if s.strip()]
     return []
 
@@ -162,9 +168,11 @@ def _load_from_remote() -> list[dict] | None:
 def get_tracked_symbols(force_refresh: bool = False) -> list[dict]:
     """返回所有活跃标的列表。优先 D1，fallback 本地 SQLite，再 fallback 内置列表。"""
     global _cache
+    # 命中缓存时直接返回，避免重复 I/O
     if _cache is not None and not force_refresh:
         return _cache
 
+    # 按优先级依次尝试：远程 D1 → 本地 SQLite → 内置 fallback
     symbols = None
     if ENABLE_REMOTE_WRITE:
         symbols = _load_from_remote()
@@ -178,6 +186,7 @@ def get_tracked_symbols(force_refresh: bool = False) -> list[dict]:
 
 
 def invalidate_cache() -> None:
+    """强制清除缓存，下次调用 get_tracked_symbols() 时重新从数据源加载。"""
     global _cache
     _cache = None
 
@@ -196,6 +205,7 @@ def build_aliases_lookup() -> dict[str, list[dict]]:
     lookup: dict[str, list[dict]] = {}
     for record in get_tracked_symbols():
         for alias in record.get("aliases", []):
+            # 统一小写，实现大小写不敏感匹配；同一 alias 可能对应多个标的（如宽泛别名）
             key = alias.lower()
             lookup.setdefault(key, []).append(record)
     return lookup

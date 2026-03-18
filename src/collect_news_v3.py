@@ -61,6 +61,7 @@ LLM_BATCH_SIZE = max(1, int(os.getenv("LLM_BATCH_SIZE", "6")))
 LLM_CANDIDATE_LIMIT = max(1, int(os.getenv("LLM_CANDIDATE_LIMIT", "6")))
 LLM_RULES_SAMPLE_SIZE = max(8, int(os.getenv("LLM_RULES_SAMPLE_SIZE", "12")))
 SKIP_LLM = os.getenv("SKIP_LLM", "false").lower() == "true"  # 跳过 LLM 分析开关
+# 运行时实际生效的跳过标志（预留给测试或降级逻辑修改）
 EFFECTIVE_SKIP_LLM = SKIP_LLM
 
 llm_client = LLMClient(
@@ -124,12 +125,14 @@ def fetch_cls_cn() -> list:
         resp = requests.get(url, headers=HEADERS, timeout=15)
         resp.raise_for_status()
 
+        # 财联社以 Next.js 服务端渲染方式将数据内嵌在 <script type="application/json"> 标签中
         pattern = r'<script[^>]*type="application/json"[^>]*>(.+?)</script>'
         match = re.search(pattern, resp.text, re.DOTALL)
 
         if not match:
             return []
 
+        # 从页面 Redux 初始状态中提取电报列表
         data = json.loads(match.group(1))
         telegraph_list = data.get('props', {}).get('initialState', {}).get('telegraph', {}).get('telegraphList', [])
 
@@ -165,6 +168,7 @@ def fetch_jin10() -> list:
         resp.encoding = 'utf-8'
 
         soup = BeautifulSoup(resp.text, 'html.parser')
+        # 金十快讯条目的 DOM id 以 "flash" 开头，通过此特征定位所有快讯块
         flash_items = soup.find_all(id=lambda x: x and x.startswith('flash'))
 
         news_list = []
@@ -245,7 +249,7 @@ def fetch_yahoo_finance_news() -> list:
                     'source': 'yahoo_finance',
                 })
 
-        # 方法2: 使用 yfinance 获取新闻
+        # 方法2: 通过 yfinance 的 S&P 500 Ticker 补充结构化新闻（含摘要、URL 等元数据）
         try:
             sp500 = yf.Ticker('^GSPC')
             yahoo_news = sp500.news
@@ -256,7 +260,7 @@ def fetch_yahoo_finance_news() -> list:
                     title = content.get('title', '')
                     pub_date = content.get('pubDate', '')
 
-                    # 解析时间
+                    # ISO 8601 时间字符串转为本地 naive datetime（去掉时区信息）
                     pub_time = None
                     if pub_date:
                         try:
@@ -293,7 +297,7 @@ def fetch_yahoo_finance_news() -> list:
 
 
 # 标的信息从 symbol_registry 动态加载（消除硬编码）
-# 在模块级别缓存，避免每次新闻处理都重复查询
+# 在模块级别缓存，避免每次新闻处理都重复查询数据库
 def _load_symbol_sets():
     tracked = get_tracked_symbols()
     stock_set = {s["symbol"] for s in tracked if s["symbol_type"] == "stock"}
@@ -334,6 +338,7 @@ def merge_and_deduplicate(all_news: List[Dict[str, Any]]) -> List[Dict[str, Any]
         title = (news.get('title') or '').strip()
         content = (news.get('content') or '').strip()
         pub_date = (news.get('time') or news.get('pub_date') or '').strip()
+        # 取标题前60字、内容前120字、精确到分钟的时间组合成去重 key，避免同一条新闻重复入库
         key = f"{title[:60]}|{content[:120]}|{pub_date[:19]}"
         if key in seen:
             continue
@@ -349,6 +354,7 @@ def _normalize_text(value: str) -> str:
 
 
 def derive_related_symbols(text: str) -> List[str]:
+    """从新闻正文中匹配别名表，推导出涉及的跟踪标的列表（保持发现顺序，去重）"""
     normalized = text.lower()
     lookup = build_aliases_lookup()
     matched_symbols: List[str] = []
@@ -368,6 +374,7 @@ def _score_keyword_hits(text: str, keywords: List[str]) -> List[str]:
 
 
 def _score_to_stars(score: float) -> int:
+    """将规则打分线性映射到 0-5 星重要性等级"""
     if score >= 10:
         return 5
     if score >= 8:
@@ -443,6 +450,7 @@ def _build_rules_samples(news_list: List[Dict[str, Any]], sample_size: int) -> L
     seen_hashes: set[str] = set()
     sources = list(buckets.keys())
 
+    # 轮询各数据源 bucket，每轮每个来源取一条，确保样本覆盖多个来源而不被单一来源独占
     while len(selected) < sample_size and sources:
         next_sources = []
         for source in sources:
@@ -574,9 +582,11 @@ def apply_rule_filter(news: Dict[str, Any], profile: Dict[str, Any]) -> Dict[str
             focus_hits.append(f"{topic['label']}({', '.join(matched[:2])})")
             focus_score += float(topic.get("weight", 2))
 
+    # 加权打分：跟踪标的权重最高(3.5)，宏观次之(2.5)，噪音扣分(2.5)
     score = len(macro_hits) * 2.5 + len(market_hits) * 1.7 + len(related_symbols) * 3.5 + len(symbol_context_hits) * 1.2 + focus_score
     score -= len(noise_hits) * 2.5
 
+    # VIP 付费内容通常含水分，轻微降权
     if "vip" in text:
         score -= 0.5
 
@@ -626,6 +636,7 @@ def apply_rule_filter(news: Dict[str, Any], profile: Dict[str, Any]) -> Dict[str
         rule_type = "sector"
         reasons.append(f"板块/市场事件命中 {', '.join(market_hits[:3])}")
 
+    # 噪音命中且没有跟踪标的、宏观关键词不足时，强制过滤，避免软性噪音通过评分门槛
     if noise_hits and not related_symbols and len(macro_hits) < 2:
         keep = False
 
@@ -661,12 +672,14 @@ def apply_rule_filter(news: Dict[str, Any], profile: Dict[str, Any]) -> Dict[str
 
 
 def filter_news_by_rules(news_list: List[Dict[str, Any]], profile: Dict[str, Any]) -> List[Dict[str, Any]]:
+    """对全量新闻逐条应用规则初筛，按重要性降序排序，并截断到 LLM 候选上限"""
     filtered = []
     for news in news_list:
         kept = apply_rule_filter(news, profile)
         if kept:
             filtered.append(kept)
     filtered.sort(key=lambda item: (item.get('importance_stars', 0), item.get('pub_date', '')), reverse=True)
+    # 防止候选过多导致 LLM token 超限，只取评分最高的前 N 条
     if len(filtered) > LLM_CANDIDATE_LIMIT:
         logger.info("规则初筛命中过多，按分数仅保留前 %s 条进入 LLM / 正式新闻库", LLM_CANDIDATE_LIMIT)
         filtered = filtered[:LLM_CANDIDATE_LIMIT]
@@ -675,15 +688,21 @@ def filter_news_by_rules(news_list: List[Dict[str, Any]], profile: Dict[str, Any
 
 
 def _extract_json_payload(raw_text: str) -> Any:
-    """从 LLM 输出中提取 JSON 载荷"""
+    """从 LLM 输出中提取 JSON 载荷
+
+    先尝试剥除 ```json ... ``` 代码块，再定位第一个 { 或 [ 到最后一个 } 或 ]，
+    以应对模型在 JSON 前后输出多余文本的情况。
+    """
     content = (raw_text or '').strip()
     if not content:
         raise ValueError("empty content")
 
+    # 剥除 markdown 代码块包装（LLM 常见输出格式）
     fenced_match = re.search(r"```(?:json)?\s*([\s\S]*?)```", content)
     if fenced_match:
         content = fenced_match.group(1).strip()
 
+    # 定位 JSON 有效载荷的首尾边界，截掉前后的多余文字
     start = min([pos for pos in [content.find('{'), content.find('[')] if pos != -1], default=-1)
     end = max(content.rfind('}'), content.rfind(']'))
     if start != -1 and end != -1 and end > start:
@@ -697,6 +716,7 @@ def _chunk_items(items: List[Dict[str, Any]], batch_size: int) -> List[List[Dict
 
 
 def _fallback_batch_result(news_batch: List[Dict[str, Any]], batch_id: str) -> Dict[str, Any]:
+    """LLM 调用失败时的降级处理：直接沿用规则初筛结果，全部标记为 keep=True"""
     items = []
     for news in news_batch:
         items.append({
@@ -803,6 +823,7 @@ def _call_batch_llm(news_batch: List[Dict[str, Any]], batch_id: str) -> Dict[str
 
 
 def _normalize_type(value: str | None, fallback: str) -> str:
+    """规范化新闻类型字段，兼容旧版枚举值（macro/market/symbol -> index/sector/stock）"""
     # 新值
     if value in {"index", "sector", "stock"}:
         return value
@@ -832,6 +853,8 @@ def _normalize_related_symbols(value: Any, fallback: List[str]) -> List[str]:
 
 
 def _merge_batch_result(news_batch: List[Dict[str, Any]], llm_result: Dict[str, Any], batch_no: int, analysis_date: str) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]], Dict[str, Any]]:
+    """将 LLM 批量返回结果与原始新闻合并，LLM 字段优先，缺失时回退规则字段"""
+    # 以 news_hash 为键构建 LLM 结果索引，便于 O(1) 查找
     result_by_hash = {
         item.get("news_hash"): item
         for item in llm_result.get("items", [])
@@ -881,6 +904,7 @@ def enhance_news_with_llm(filtered_news: List[Dict[str, Any]], analysis_date: st
     enhanced: List[Dict[str, Any]] = []
     batch_records: Dict[int, Dict[str, Any]] = {}
 
+    # 多批次并发调用 LLM，以 batch_no 为键收集结果，最后按批次序号重排保证输出顺序稳定
     with ThreadPoolExecutor(max_workers=LLM_MAX_WORKERS) as executor:
         futures = {}
         for index, batch in enumerate(batches, start=1):
@@ -907,6 +931,10 @@ def enhance_news_with_llm(filtered_news: List[Dict[str, Any]], analysis_date: st
 
 
 def _parse_summary_output(summary: str) -> Dict[str, str]:
+    """解析日期级综合分析的 LLM 输出。
+
+    优先尝试 JSON 解析；若失败则回退正则匹配 Markdown 章节（兼容模型输出格式不稳定的情况）。
+    """
     result = {
         "daily_major_events": [],
         "sector_impact_map": [],
@@ -925,6 +953,7 @@ def _parse_summary_output(summary: str) -> Dict[str, str]:
     except Exception:
         pass
 
+    # JSON 解析失败时，尝试按 Markdown 标题切分提取各章节内容
     patterns = {
         "daily_major_events": r"###\s*今日大事概览\s*\n([\s\S]*?)(?=###\s*大盘与板块影响图谱|###\s*联动逻辑链|$)",
         "sector_impact_map": r"###\s*大盘与板块影响图谱\s*\n([\s\S]*?)(?=###\s*联动逻辑链|$)",
@@ -1019,6 +1048,7 @@ def get_latest_closed_trading_day(context: ExecutionContext | None = None) -> st
     now_ny = context.clock.now_in_tz('America/New_York')
     nyse = mcal.get_calendar('NYSE')
     schedule = nyse.schedule(start_date=now_ny.date() - pd.Timedelta(days=10), end_date=now_ny.date())
+    # 过滤出收盘时间已过的交易日，取最后一个即为最近收盘日
     closed_sessions = schedule[schedule['market_close'] <= now_ny]
 
     if closed_sessions.empty:
@@ -1070,6 +1100,7 @@ def get_active_review_trading_day(context: ExecutionContext | None = None) -> st
 
 
 def subtract_trading_days(date_string: str, count: int) -> str:
+    """向前回退 count 个交易日（简化实现，仅跳过周末，不排除法定假日）"""
     current = datetime.strptime(date_string, "%Y-%m-%d")
     remaining = count
     while remaining > 0:
@@ -1080,6 +1111,7 @@ def subtract_trading_days(date_string: str, count: int) -> str:
 
 
 def get_analysis_window(analysis_date: str) -> Tuple[str, str]:
+    """返回分析窗口的起止时间：从上一交易日收盘(16:00)到当日收盘(16:00)"""
     start_date = subtract_trading_days(analysis_date, 1)
     return f"{start_date} 16:00:00", f"{analysis_date} 16:00:00"
 
@@ -1202,6 +1234,7 @@ def _normalize_loaded_news_item(item: Dict[str, Any]) -> Dict[str, Any]:
         or normalized.get("market_impact")
         or normalized.get("type") in {"macro", "market", "symbol"}
     )
+    # 历史数据可能缺少 rule_passed 字段，通过 LLM 结构化字段反推，避免将旧数据误排除在汇总之外
     if raw_rule_passed is None and normalized["importance_stars"] >= 3 and has_structured_enrichment:
         normalized["rule_passed"] = 1
     else:
@@ -1223,6 +1256,7 @@ def load_news_for_summary(
     use_remote: bool,
     fallback_news: List[Dict[str, Any]] | None = None,
 ) -> List[Dict[str, Any]]:
+    """从数据库（或远程）加载分析窗口内的高质量新闻，供日期级综合分析使用"""
     start_time, end_time = get_analysis_window(analysis_date)
     if use_remote:
         items = fetch_remote_news(start_time[:10], end_time[:10], limit=200)
@@ -1232,9 +1266,11 @@ def load_news_for_summary(
             datetime.strptime(end_time, "%Y-%m-%d %H:%M:%S"),
         )
 
+    # 将本次新采集的新闻并入，确保入库前即可参与当日汇总（尤其在首次运行时库内为空）
     if fallback_news:
         items.extend(fallback_news)
 
+    # 以复合 key 去重后过滤：只保留经 LLM 处理且重要性 >=3 星的新闻参与汇总
     deduped: Dict[str, Dict[str, Any]] = {}
     for item in items:
         normalized = _normalize_loaded_news_item(item)
@@ -1268,6 +1304,10 @@ def load_news_for_summary(
 
 
 def _attach_remote_news_ids(items: List[Dict[str, Any]], result: Dict[str, Any] | None) -> None:
+    """将 Cloudflare D1 写入后返回的 id_map 回填到新闻列表中。
+
+    日期级汇总的 source_news_ids 字段依赖这些 id，因此必须在写入后立即回填。
+    """
     if not items or not result:
         return
     id_map = result.get("id_map") or {}

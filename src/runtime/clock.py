@@ -22,6 +22,7 @@ class Clock:
         return self.now().date()
 
     def now_in_tz(self, tz_name: str) -> datetime:
+        # 将当前时刻转换为指定时区，用于处理不同市场的交易时间判断
         return self.now().astimezone(ZoneInfo(tz_name))
 
 
@@ -29,6 +30,7 @@ class SystemClock(Clock):
     """Runtime clock for normal production and development execution."""
 
     def now(self) -> datetime:
+        # astimezone() 不传参数时，附加本机本地时区信息（带 tzinfo）
         return datetime.now().astimezone()
 
 
@@ -36,7 +38,7 @@ class SystemClock(Clock):
 class FixedClock(Clock):
     """Deterministic clock for integration replay and virtual-time execution."""
 
-    fixed_now: datetime
+    fixed_now: datetime  # 固定时间点，整个回放周期内保持不变
 
     def now(self) -> datetime:
         return self.fixed_now

@@ -26,6 +26,7 @@ def get_db_connection(db_path: str = None) -> sqlite3.Connection:
     os.makedirs(os.path.dirname(db_path), exist_ok=True)
 
     conn = sqlite3.connect(db_path)
+    # row_factory 让 fetchall 返回可按列名访问的 Row 对象，而非普通元组
     conn.row_factory = sqlite3.Row
     return conn
 
@@ -59,6 +60,7 @@ def rebuild_database(db_path: str = None):
 
 def generate_news_hash(title: str, content: str, pub_date: str = None) -> str:
     """生成新闻唯一标识hash"""
+    # 只取 content 前 100 字符，既能区分不同内容又避免因正文过长导致 hash 误差
     key = f"{title or ''}{content[:100] if content else ''}{pub_date or ''}"
     return hashlib.md5(key.encode('utf-8')).hexdigest()
 
@@ -145,8 +147,9 @@ def upsert_news_data(data: Dict[str, Any], db_path: str = None) -> str:
         bool: 是否成功插入（True=新数据，False=重复数据或无效数据）
     """
     try:
-        # 过滤无效数据：没有 pub_date 的新闻不插入
+        # 兼容两种字段名：爬虫写入用 'time'，内部流转用 'pub_date'
         pub_date = data.get('time') or data.get('pub_date')
+        # 过滤无效数据：没有 pub_date 的新闻不插入
         if not pub_date:
             logger.debug(f"跳过无发布时间的新闻: {data.get('title', '')[:50] or data.get('content', '')[:50]}")
             return False
@@ -165,6 +168,7 @@ def upsert_news_data(data: Dict[str, Any], db_path: str = None) -> str:
         )
         existing = cursor.fetchone()
         related_symbols = data.get('related_symbols')
+        # 若调用方传入列表，序列化为 JSON 字符串存储（SQLite 无原生数组类型）
         if isinstance(related_symbols, (list, tuple)):
             related_symbols = json.dumps(list(related_symbols), ensure_ascii=False)
 
@@ -213,6 +217,7 @@ def upsert_news_data(data: Dict[str, Any], db_path: str = None) -> str:
 
         conn.commit()
         conn.close()
+        # 根据写入前是否已存在记录，区分 inserted / updated 两种状态
         return "inserted" if not existing else "updated"
 
     except Exception as e:
@@ -323,10 +328,12 @@ def initialize_archive_record(archive_date: str, db_path: str = None) -> bool:
         )
         row = cursor.fetchone()
         existing_status = row['review_status'] if row else None
+        # 已完成复盘的记录不允许被 initialized 状态覆盖，提前返回保护数据
         if existing_status == 'reviewed':
             conn.close()
             return True
 
+        # SQL 层面再做一次 CASE 保护，防止并发写入时 Python 层检查失效
         cursor.execute('''
             INSERT INTO daily_review_archive
             (
@@ -469,6 +476,8 @@ def get_tracked_symbols_local(db_path: str = None) -> List[Dict]:
         result = []
         for row in rows:
             d = dict(row)
+            # aliases 在数据库中存储为 JSON 字符串，读出后反序列化为列表；
+            # 若解析失败则降级为逗号分隔方式兼容旧格式数据
             if isinstance(d.get("aliases"), str):
                 try:
                     d["aliases"] = json.loads(d["aliases"])
@@ -487,6 +496,7 @@ def upsert_tracked_symbol(data: Dict[str, Any], db_path: str = None) -> bool:
         conn = get_db_connection(db_path)
         cursor = conn.cursor()
         aliases = data.get("aliases", [])
+        # 写入前将列表序列化为 JSON 字符串，与 get_tracked_symbols_local 读取逻辑对称
         if isinstance(aliases, list):
             aliases = json.dumps(aliases, ensure_ascii=False)
         cursor.execute(

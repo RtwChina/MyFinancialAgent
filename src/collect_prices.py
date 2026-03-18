@@ -42,6 +42,7 @@ def collect_all_prices(context: ExecutionContext | None = None) -> pd.DataFrame:
     all_data = fetch_all_prices(context)
 
     df = pd.DataFrame(all_data)
+    # current_price 为 None 表示该标的当日无行情数据（停牌或接口异常）
     logger.info(f"价格数据采集完成，共获取 {len([d for d in all_data if d['current_price'] is not None])} 条有效数据")
 
     return df
@@ -76,6 +77,7 @@ def main():
         prices_df = collect_all_prices(context)
 
         prices_list = prices_df.to_dict('records')
+        # 根据配置选择远程写入（Cloudflare D1）或本地 SQLite，二者均有去重逻辑
         if ENABLE_REMOTE_WRITE and is_remote_write_configured():
             remote_result = send_prices(prices_list)
             inserted_count = remote_result.get('inserted', 0)

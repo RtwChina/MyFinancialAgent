@@ -19,6 +19,7 @@ logger = get_logger("main")
 
 def run_price_collector(context: ExecutionContext | None = None):
     """运行价格采集"""
+    # 若未传入 context，则现场构建（CLI 直接调用时走这条路径）
     context = context or build_execution_context()
     logger.info("开始执行价格采集...")
     try:
@@ -26,6 +27,7 @@ def run_price_collector(context: ExecutionContext | None = None):
         prices_df = collect_all_prices(context)
 
         prices_list = prices_df.to_dict('records')
+        # 优先写远端 Cloudflare D1；未启用远端时回退到本地 SQLite
         if ENABLE_REMOTE_WRITE and is_remote_write_configured():
             remote_result = send_prices(prices_list)
             inserted_count = remote_result.get('inserted', 0)
@@ -112,6 +114,7 @@ def run_close_summary_job(context: ExecutionContext | None = None):
 
 
 def parse_args() -> argparse.Namespace:
+    """解析命令行参数，mode 默认为 full（全量采集）"""
     parser = argparse.ArgumentParser(description="My Financial Agent 任务入口")
     parser.add_argument(
         "mode",
@@ -145,9 +148,11 @@ def main():
     print("采集任务完成!")
     print("=" * 60)
 
+    # 以 results 中非 None 的条目数衡量成功任务数
     success_count = sum(1 for v in results.values() if v is not None)
     print(f"成功: {success_count}/2 项任务")
 
+    # 所有任务均成功时返回 0，否则返回 1 供调用方或 cron 检测失败
     if all(v is not None for v in results.values()):
         print("\n输出文件:")
         if "prices" in results:
