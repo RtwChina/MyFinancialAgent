@@ -32,6 +32,24 @@ jobs:
           name: financial_data
           path: output/
 
+      - name: 环境诊断
+        env:
+          LLM_API_KEY: ${{ secrets.LLM_API_KEY }}
+          LLM_BASE_URL: ${{ secrets.LLM_BASE_URL }}
+          INGEST_API_BASE_URL: ${{ secrets.INGEST_API_BASE_URL }}
+          INGEST_API_TOKEN: ${{ secrets.INGEST_API_TOKEN }}
+        run: |
+          echo "=== Secrets 检查 ==="
+          [ -n "$LLM_API_KEY" ] && echo "LLM_API_KEY: 已设置 (${#LLM_API_KEY} 字符)" || echo "LLM_API_KEY: 未设置!"
+          [ -n "$LLM_BASE_URL" ] && echo "LLM_BASE_URL: 已设置" || echo "LLM_BASE_URL: 未设置!"
+          [ -n "$INGEST_API_BASE_URL" ] && echo "INGEST_API_BASE_URL: 已设置" || echo "INGEST_API_BASE_URL: 未设置!"
+          [ -n "$INGEST_API_TOKEN" ] && echo "INGEST_API_TOKEN: 已设置 (${#INGEST_API_TOKEN} 字符)" || echo "INGEST_API_TOKEN: 未设置!"
+          echo "=== Python & 目录 ==="
+          python --version
+          ls -la src/
+          echo "=== 测试 import ==="
+          python -c "import sys; sys.path.insert(0,'src'); from config import LLM_BASE_URL, ENABLE_REMOTE_WRITE; print(f'LLM_BASE_URL={LLM_BASE_URL[:20]}...'); print(f'ENABLE_REMOTE_WRITE={ENABLE_REMOTE_WRITE}')"
+
       - name: 运行新闻采集
         env:
           LLM_API_KEY: ${{ secrets.LLM_API_KEY }}
@@ -43,6 +61,8 @@ jobs:
           ENABLE_REMOTE_WRITE: "true"
           INGEST_API_BASE_URL: ${{ secrets.INGEST_API_BASE_URL }}
           INGEST_API_TOKEN: ${{ secrets.INGEST_API_TOKEN }}
+          LOG_LEVEL: "DEBUG"
+          PYTHONUNBUFFERED: "1"
         run: |
           python main.py
 
