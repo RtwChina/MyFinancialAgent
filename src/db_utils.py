@@ -7,6 +7,14 @@ import hashlib
 import sqlite3
 from datetime import datetime
 from typing import Optional, List, Dict, Any
+from zoneinfo import ZoneInfo
+
+_CST = ZoneInfo("Asia/Shanghai")
+
+
+def now_cst() -> str:
+    """返回当前北京时间字符串（UTC+8，格式 YYYY-MM-DD HH:MM:SS）。"""
+    return datetime.now(tz=_CST).strftime("%Y-%m-%d %H:%M:%S")
 
 from config import OUTPUT_DIR
 from logger_utils import get_logger
@@ -212,7 +220,7 @@ def upsert_news_data(data: Dict[str, Any], db_path: str = None) -> str:
             related_symbols,
             1 if data.get('is_relevant_to_review', True) else 0,
             news_hash,
-            datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+            now_cst(),
         ))
 
         conn.commit()
@@ -299,7 +307,7 @@ def save_archive(data: Dict[str, Any], db_path: str = None) -> bool:
             data.get('asset_plan'),
             data.get('trading_summary'),
             data.get('reviewed_at'),
-            data.get('updated_at', datetime.now().strftime('%Y-%m-%d %H:%M:%S')),
+            data.get('updated_at', now_cst()),
         ))
 
         conn.commit()
@@ -320,7 +328,7 @@ def initialize_archive_record(archive_date: str, db_path: str = None) -> bool:
     try:
         conn = get_db_connection(db_path)
         cursor = conn.cursor()
-        now = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+        now = now_cst()
 
         cursor.execute(
             'SELECT review_status FROM daily_review_archive WHERE archive_date = ?',
@@ -424,7 +432,7 @@ def save_daily_news_ai_analysis(data: Dict[str, Any], db_path: str = None) -> bo
             data.get('sector_impact_map'),
             data.get('linkage_logic_chain'),
             data.get('source_news_ids'),
-            datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+            now_cst(),
         ))
 
         conn.commit()

@@ -30,8 +30,7 @@ class SystemClock(Clock):
     """Runtime clock for normal production and development execution."""
 
     def now(self) -> datetime:
-        # astimezone() 不传参数时，附加本机本地时区信息（带 tzinfo）
-        return datetime.now().astimezone()
+        return datetime.now(tz=ZoneInfo("Asia/Shanghai"))
 
 
 @dataclass(frozen=True)
