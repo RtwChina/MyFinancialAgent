@@ -237,7 +237,7 @@ class LLMClient:
 
             except requests.exceptions.Timeout as exc:
                 if self.logger:
-                    self.logger.warning("%s 超时: %s", log_label, exc)
+                    self.logger.error("%s 超时: %s", log_label, exc)
                 # 仅在耗尽所有重试后才返回失败，否则继续下一次 attempt
                 if attempt == retries:
                     return LLMCallResult(

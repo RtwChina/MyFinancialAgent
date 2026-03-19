@@ -51,10 +51,10 @@ HEADERS = {
 }
 
 # ========== 可配置参数 ==========
-LLM_TIMEOUT = int(os.getenv("LLM_TIMEOUT", "120"))  # LLM 超时时间(秒)
+LLM_TIMEOUT = int(os.getenv("LLM_TIMEOUT", "300"))  # LLM 超时时间(秒)
 LLM_RULES_TIMEOUT = int(os.getenv("LLM_RULES_TIMEOUT", str(LLM_TIMEOUT)))
 LLM_BATCH_TIMEOUT = int(os.getenv("LLM_BATCH_TIMEOUT", str(LLM_TIMEOUT)))
-LLM_SUMMARY_TIMEOUT = int(os.getenv("LLM_SUMMARY_TIMEOUT", str(max(LLM_TIMEOUT, 240))))
+LLM_SUMMARY_TIMEOUT = int(os.getenv("LLM_SUMMARY_TIMEOUT", str(LLM_TIMEOUT)))
 LLM_MAX_RETRIES = int(os.getenv("LLM_MAX_RETRIES", "2"))  # 最大重试次数
 LLM_MAX_WORKERS = int(os.getenv("LLM_MAX_WORKERS", "2"))  # 并发数降低，避免超时
 LLM_BATCH_SIZE = max(1, int(os.getenv("LLM_BATCH_SIZE", "6")))
@@ -277,7 +277,7 @@ def fetch_yahoo_finance_news() -> list:
                             'source': 'yahoo_finance',
                         })
         except Exception as e:
-            logger.warning(f"Yahoo yfinance 获取失败: {str(e)}")
+            logger.error(f"Yahoo yfinance 获取失败: {str(e)}")
 
         # 去重
         seen = set()
@@ -541,7 +541,7 @@ def generate_dynamic_screening_profile(news_list: List[Dict[str, Any]], analysis
         timeout=LLM_RULES_TIMEOUT,
     )
     if not llm_result.success:
-        logger.warning("动态初筛规则生成失败，回退默认静态规则")
+        logger.error("动态初筛规则生成失败，回退默认静态规则")
         return _default_screening_profile()
 
     try:
@@ -555,7 +555,7 @@ def generate_dynamic_screening_profile(news_list: List[Dict[str, Any]], analysis
         )
         return profile
     except Exception as exc:
-        logger.warning("动态初筛规则 JSON 解析失败，回退默认静态规则: %s", exc)
+        logger.error("动态初筛规则 JSON 解析失败，回退默认静态规则: %s", exc)
         return _default_screening_profile()
 
 
@@ -818,7 +818,7 @@ def _call_batch_llm(news_batch: List[Dict[str, Any]], batch_id: str) -> Dict[str
         parsed["batch_id"] = batch_id
         return parsed
     except Exception as exc:
-        logger.warning("批次 %s JSON 解析失败，回退规则结果: %s", batch_id, exc)
+        logger.error("批次 %s JSON 解析失败，回退规则结果: %s", batch_id, exc)
         return _fallback_batch_result(news_batch, batch_id)
 
 

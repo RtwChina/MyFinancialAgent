@@ -79,17 +79,14 @@ async function handleApi(request, env, url, appEnv) {
       return json(await getSymbols(env, url), 200, request);
     }
     if (url.pathname === "/api/symbols" && request.method === "POST") {
-      requireWriteAuth(request, env, appEnv);
       const body = await request.json();
       return json(await createSymbol(env, body), 200, request);
     }
     if (url.pathname === "/api/symbols/resolve" && request.method === "POST") {
-      requireWriteAuth(request, env, appEnv);
       const body = await request.json();
       return json(await resolveSymbol(env, body), 200, request);
     }
     if (url.pathname === "/api/symbols/validate" && request.method === "POST") {
-      requireWriteAuth(request, env, appEnv);
       const body = await request.json();
       return json(await fetchYahooValidation(body.yahoo_symbol || body.symbol), 200, request);
     }
@@ -98,11 +95,9 @@ async function handleApi(request, env, url, appEnv) {
       const symbolId = Number(symbolMatch[1]);
       if (request.method === "GET")    return json(await getSymbolById(env, symbolId), 200, request);
       if (request.method === "PUT") {
-        requireWriteAuth(request, env, appEnv);
         return json(await updateSymbol(env, symbolId, await request.json()), 200, request);
       }
       if (request.method === "DELETE") {
-        requireWriteAuth(request, env, appEnv);
         return json(await deleteSymbol(env, symbolId), 200, request);
       }
     }
@@ -135,16 +130,13 @@ async function handleApi(request, env, url, appEnv) {
         return json(await getReviewBootstrap(env, archiveDate), 200, request);
       }
       if (!action && request.method === "POST") {
-        requireWriteAuth(request, env, appEnv);
         const body = await request.json();
         return json(await saveReviewDraft(env, archiveDate, body), 200, request);
       }
       if (action === "complete" && request.method === "POST") {
-        requireWriteAuth(request, env, appEnv);
         return json(await completeReview(env, archiveDate), 200, request);
       }
       if ((action === "initialize" || action === "delete") && request.method === "POST") {
-        requireWriteAuth(request, env, appEnv);
         return json(await initializeReview(env, archiveDate), 200, request);
       }
     }
@@ -675,40 +667,7 @@ async function getReviewBootstrap(env, archiveDate) {
       newsItems = (sourceNews.results || []).map(enrichNewsItem);
     }
 
-    if (!newsItems.length) {
-      const news = await env.DB.prepare(
-        `SELECT id, pub_date, title, content, source, type, ai_summary, market_impact,
-          related_symbols, is_relevant_to_review, rule_passed, rule_reason,
-          processing_status, importance_stars, url, news_hash
-         FROM news_raw_data
-         WHERE pub_date >= ? AND pub_date <= ?
-           AND COALESCE(importance_stars, 0) >= 3
-           AND (
-             COALESCE(rule_passed, 0) = 1
-             OR type IN ('macro', 'market', 'symbol')
-             OR COALESCE(ai_summary, '') != ''
-           )
-         ORDER BY pub_date DESC
-         LIMIT 200`,
-      )
-        .bind(newsWindow.start, newsWindow.end)
-        .all();
-      newsItems = (news.results || []).map(enrichNewsItem);
-    }
-
-    if (!newsItems.length) {
-      const fallbackNews = await env.DB.prepare(
-        `SELECT id, pub_date, title, content, source, type, ai_summary, market_impact,
-          related_symbols, is_relevant_to_review, rule_passed, rule_reason,
-          processing_status, importance_stars, url, news_hash
-         FROM news_raw_data
-         WHERE COALESCE(importance_stars, 0) >= 3
-           AND processing_status IN ('llm_processed', 'reviewed')
-         ORDER BY pub_date DESC
-         LIMIT 12`,
-      ).all();
-      newsItems = (fallbackNews.results || []).map(enrichNewsItem);
-    }
+    // 没有 source_news_ids 时不再回退，保持空列表
   }
 
   const previousCompletedReview = await env.DB.prepare(

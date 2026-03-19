@@ -240,8 +240,6 @@ initializeBtn.addEventListener("click", async () => {
   if (!window.confirm("请再次确认：初始化后将清空新闻汇总、操作计划和复盘结论。")) return;
   await fetchJson(`/api/reviews/${state.activeDate}/initialize`, {
     method: "POST",
-    auth: true,
-    authReason: "重新初始化复盘",
   });
   setReviewStatus("initialized");
   setReviewMode("initialized");
@@ -641,8 +639,6 @@ async function saveReview() {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(payload),
-    auth: true,
-    authReason: "保存复盘内容",
   });
 
   state.activeBootstrap = {
@@ -1099,8 +1095,6 @@ async function handleNextStep() {
     await saveReview();
     await fetchJson(`/api/reviews/${state.activeDate}/complete`, {
       method: "POST",
-      auth: true,
-      authReason: "完成复盘",
     });
     setReviewStatus("reviewed");
     setReviewMode("reviewed");
@@ -1676,8 +1670,6 @@ function buildSymbolRow(item) {
       if (isActive) {
         const result = await fetchJson(`/api/symbols/${id}`, {
           method: "DELETE",
-          auth: true,
-          authReason: "隐藏标的",
         });
         updatedItem = result.item || null;
       } else {
@@ -1685,8 +1677,6 @@ function buildSymbolRow(item) {
           method: "PUT",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ is_active: 1 }),
-          auth: true,
-          authReason: "显示标的",
         });
         updatedItem = result.item || null;
       }
@@ -1759,8 +1749,6 @@ function initSymbolDragDrop(tbody) {
           method: "PUT",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ sort_order }),
-          auth: true,
-          authReason: "保存标的排序",
         })
       ));
     } catch {
@@ -1851,16 +1839,12 @@ async function submitSymbolForm(formData) {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload),
-        auth: true,
-        authReason: "更新标的",
       });
     } else {
       await fetchJson("/api/symbols", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload),
-        auth: true,
-        authReason: "新增标的",
       });
     }
     preview.classList.add("hidden");
@@ -1888,8 +1872,6 @@ async function resolveSymbolInput() {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ input: query }),
-      auth: true,
-      authReason: "智能解析标的",
     });
     const item = data.resolved;
     state.symbolResolveResult = item;
@@ -1930,8 +1912,6 @@ async function confirmAddSymbol() {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(item),
-      auth: true,
-      authReason: "确认添加标的",
     });
     document.querySelector("#symbolResolveInput").value = "";
     document.querySelector("#symbolResolvePreview").classList.add("hidden");

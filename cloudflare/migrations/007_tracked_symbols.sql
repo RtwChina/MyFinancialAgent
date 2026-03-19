@@ -41,12 +41,13 @@ INSERT OR IGNORE INTO tracked_symbols (symbol, yahoo_symbol, display_name, symbo
 ('DXY',   'DX-Y.NYB',  '美元指数',   'index', '["DXY","Dollar Index","美元指数","美元"]', 8),
 ('GOLD',  'GC=F',      '黄金期货',   'index', '["GC=F","Gold","黄金","金价","COMEX黄金","黄金期货"]', 9),
 ('BZ=F',    'BZ=F',      '布伦特原油', 'index', '["Oil","原油","油价","布伦特原油"]', 10),
-('USDJPY','JPY=X',     '美元/日元',  'index', '["USDJPY","USD/JPY","美元/日元","美元兑日元"]', 11),
-('USDCNY','CNY=X',     '美元/人民币','index', '["USDCNY","USD/CNY","美元/人民币","美元兑人民币","离岸人民币"]', 12),
-('SILVER','SI=F',      '白银',       'index', '["SI=F","Silver","白银","银价","COMEX白银","白银/美元","现货白银"]', 13),
-('COPPER','HG=F',      '铜期货',     'index', '["COPPER","HG=F","铜","铜期货","COMEX铜"]', 14),
-('SOYBEAN','ZS=F',     '大豆期货',   'index', '["SOYBEAN","ZS=F","大豆期货","大豆"]', 15),
-('BTCUSD','BTC-USD',   '比特币/美元','index', '["BTCUSD","BTC-USD","比特币/美元","比特币","BTC"]', 16),
+('TNX',    '^TNX',      '十年期国债收益率', 'index', '["TNX","国债","十年期国债","国债收益率"]', 11),
+('USDJPY','JPY=X',     '美元/日元',  'index', '["USDJPY","USD/JPY","美元/日元","美元兑日元"]', 12),
+('USDCNY','CNY=X',     '美元/人民币','index', '["USDCNY","USD/CNY","美元/人民币","美元兑人民币","离岸人民币"]', 13),
+('SILVER','SI=F',      '白银',       'index', '["SI=F","Silver","白银","银价","COMEX白银","白银/美元","现货白银"]', 14),
+('COPPER','HG=F',      '铜期货',     'index', '["COPPER","HG=F","铜","铜期货","COMEX铜"]', 15),
+('SOYBEAN','ZS=F',     '大豆期货',   'index', '["SOYBEAN","ZS=F","大豆期货","大豆"]', 16),
+('BTCUSD','BTC-USD',   '比特币/美元','index', '["BTCUSD","BTC-USD","比特币/美元","比特币","BTC"]', 17),
 
 -- 板块 (sector)
 -- ticker 本身（XLK/SOXX 等）会出现在新闻里，保留
@@ -74,12 +75,12 @@ INSERT OR IGNORE INTO tracked_symbols (symbol, yahoo_symbol, display_name, symbo
 ('LITE',       'LITE',       'Lumentum', 'stock', '["LITE","Lumentum","Lumentum Holdings"]', 3),
 ('MSFT',       'MSFT',       '微软',     'stock', '["MSFT","Microsoft","微软","Microsoft Corporation"]', 4),
 ('GOOGL',      'GOOGL',      '谷歌',     'stock', '["GOOGL","Google","Alphabet","谷歌","Alphabet Inc"]', 5),
-('515880.SS',  '515880.SS',  '通信ETF',  'stock', '["515880.SS","通信ETF","中证通信"]', 6),
-('562500.SH',  '562500.SS',  '机器人ETF','stock', '["562500.SH","562500.SS","机器人ETF","中证机器人"]', 7),
-('300476.SZ',  '300476.SZ',  '胜宏科技', 'stock', '["300476.SZ","胜宏科技","胜宏"]', 8),
-('300442.SZ',  '300442.SZ',  '润泽科技', 'stock', '["300442.SZ","润泽科技","润泽"]', 9),
-('9988.HK',    '9988.HK',    '阿里巴巴', 'stock', '["9988.HK","阿里巴巴","阿里","Alibaba"]', 10),
-('601899.SS',  '601899.SS',  '紫金矿业', 'stock', '["601899.SS","紫金矿业","紫金"]', 11);
+('通信ETF',  '515880.SS',  '通信ETF',  'stock', '["515880.SS","通信ETF","中证通信"]', 6),
+('机器人ETF',  '562500.SS',  '机器人ETF','stock', '["562500.SH","562500.SS","机器人ETF","中证机器人"]', 7),
+('胜宏科技',  '300476.SZ',  '胜宏科技', 'stock', '["300476.SZ","胜宏科技","胜宏"]', 8),
+('润泽科技',  '300442.SZ',  '润泽科技', 'stock', '["300442.SZ","润泽科技","润泽"]', 9),
+('阿里巴巴',    '9988.HK',    '阿里巴巴', 'stock', '["9988.HK","阿里巴巴","阿里","Alibaba"]', 10),
+('紫金矿业',  '601899.SS',  '紫金矿业', 'stock', '["601899.SS","紫金矿业","紫金"]', 11);
 
 -- ============================================================
 -- 3. 新闻类型值迁移
