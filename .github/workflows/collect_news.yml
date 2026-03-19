@@ -47,7 +47,9 @@ jobs:
         env:
           LLM_API_KEY: ${{ secrets.LLM_API_KEY }}
           LLM_BASE_URL: ${{ secrets.LLM_BASE_URL }}
-          LLM_MODEL_ID: ${{ secrets.LLM_MODEL_ID }}
+          LLM_MODEL_ID: "qwen3.5-plus"
+          LLM_BATCH_MODEL_ID: "qwen3.5-flash"
+          LLM_SUMMARY_MODEL_ID: "qwen3.5-plus"
           LLM_TIMEOUT: "300"
           LLM_MAX_RETRIES: "2"
           SKIP_LLM: "false"
