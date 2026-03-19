@@ -3,12 +3,11 @@
 使用 yfinance 获取标的最近一个交易日的价格数据
 支持数据库存储和去重
 """
-import os
 import sys
 from datetime import datetime, timedelta
 import pandas as pd
 
-from config import ALL_SYMBOLS, OUTPUT_DIR, ENABLE_REMOTE_WRITE
+from config import ALL_SYMBOLS, ENABLE_REMOTE_WRITE
 from cloudflare_ingest import CloudflareIngestError, is_remote_write_configured, send_prices
 from data_sources.price_router import fetch_all_prices
 from logger_utils import get_logger
@@ -48,22 +47,6 @@ def collect_all_prices(context: ExecutionContext | None = None) -> pd.DataFrame:
     return df
 
 
-def export_to_excel(df: pd.DataFrame, filename: str = None, context: ExecutionContext | None = None) -> str:
-    """导出价格数据到 Excel"""
-    context = context or build_execution_context()
-    if filename is None:
-        filename = f"stock_prices_{context.clock.now().strftime('%Y%m%d')}.xlsx"
-
-    # 确保输出目录存在
-    if not os.path.exists(OUTPUT_DIR):
-        os.makedirs(OUTPUT_DIR)
-
-    filepath = os.path.join(OUTPUT_DIR, filename)
-    df.to_excel(filepath, sheet_name='Prices', index=False)
-    logger.info(f"价格数据已导出到: {filepath}")
-
-    return filepath
-
 
 def main():
     """主函数"""
@@ -91,16 +74,12 @@ def main():
             inserted_count = batch_insert_prices(prices_list)
             logger.info(f"数据库写入完成: 新增 {inserted_count} 条，跳过重复 {len(prices_list) - inserted_count} 条")
 
-        # 导出到 Excel
-        filepath = export_to_excel(prices_df, context=context)
-
         # 打印汇总
         print("\n" + "=" * 60)
         print("价格采集汇总:")
         print("=" * 60)
         print(prices_df.to_string(index=False))
         print("=" * 60)
-        print(f"数据已保存至: {filepath}")
         print(f"数据库新增: {inserted_count} 条")
 
         logger.info("股票价格采集脚本执行完成")

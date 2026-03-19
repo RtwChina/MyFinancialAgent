@@ -76,6 +76,30 @@ ON CONFLICT(symbol) DO UPDATE SET
   updated_at = CURRENT_TIMESTAMP;
 
 -- ============================================================
+-- 个股 (stock)
+-- ============================================================
+INSERT INTO tracked_symbols (symbol, yahoo_symbol, display_name, symbol_type, aliases, is_active, sort_order)
+VALUES
+  ('MU',        'MU',        '美光科技', 'stock', '["MU","Micron","Micron Technology","美光","美光科技"]', 1, 1),
+  ('LITE',      'LITE',      'Lumentum', 'stock', '["LITE","Lumentum","Lumentum Holdings"]', 1, 2),
+  ('MSFT',      'MSFT',      '微软',     'stock', '["MSFT","Microsoft","微软","Microsoft Corporation"]', 1, 3),
+  ('GOOGL',     'GOOGL',     '谷歌',     'stock', '["GOOGL","Google","Alphabet","谷歌","Alphabet Inc"]', 1, 4),
+  ('515880.SS', '515880.SS', '通信ETF',  'stock', '["515880.SS","通信ETF","中证通信"]', 1, 5),
+  ('562500.SH', '562500.SS', '机器人ETF','stock', '["562500.SH","562500.SS","机器人ETF","中证机器人"]', 1, 6),
+  ('300476.SZ', '300476.SZ', '胜宏科技', 'stock', '["300476.SZ","胜宏科技","胜宏"]', 1, 7),
+  ('300442.SZ', '300442.SZ', '润泽科技', 'stock', '["300442.SZ","润泽科技","润泽"]', 1, 8),
+  ('9988.HK',   '9988.HK',   '阿里巴巴', 'stock', '["9988.HK","阿里巴巴","阿里","Alibaba"]', 1, 9),
+  ('601899.SS', '601899.SS', '紫金矿业', 'stock', '["601899.SS","紫金矿业","紫金"]', 1, 10)
+ON CONFLICT(symbol) DO UPDATE SET
+  yahoo_symbol = excluded.yahoo_symbol,
+  display_name = excluded.display_name,
+  symbol_type = excluded.symbol_type,
+  aliases = excluded.aliases,
+  is_active = excluded.is_active,
+  sort_order = excluded.sort_order,
+  updated_at = CURRENT_TIMESTAMP;
+
+-- ============================================================
 -- 备注
 -- ============================================================
 -- 1. 上证综合指数统一建议使用：

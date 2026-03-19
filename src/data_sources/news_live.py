@@ -30,6 +30,15 @@ BEIJING_TZ = ZoneInfo("Asia/Shanghai")
 REVIEW_TZ = ZoneInfo("America/New_York")
 
 
+def _format_beijing_time(dt: datetime | None) -> str:
+    """将带时区的 datetime 转为北京时间字符串（YYYY-MM-DD HH:MM:SS）。"""
+    if dt is None:
+        return ""
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=BEIJING_TZ)
+    return dt.astimezone(BEIJING_TZ).strftime("%Y-%m-%d %H:%M:%S")
+
+
 def _format_for_review_window(dt: datetime | None, *, assume_tz: ZoneInfo | None = None) -> str:
     """Normalize upstream timestamps into the review window timezone.
 
@@ -71,7 +80,7 @@ def fetch_sina_finance() -> list[dict]:
             pub_time = datetime.fromtimestamp(timestamp, tz=BEIJING_TZ)
             news_list.append(
                 {
-                    "time": _format_for_review_window(pub_time),
+                    "time": _format_beijing_time(pub_time),
                     "title": item.get("title", ""),
                     "content": item.get("intro", "") or item.get("title", ""),
                     "url": item.get("url", ""),
@@ -111,7 +120,7 @@ def fetch_cls_cn() -> list[dict]:
             pub_time = datetime.fromtimestamp(item.get("ctime", 0), tz=BEIJING_TZ) if item.get("ctime") else None
             news_list.append(
                 {
-                    "time": _format_for_review_window(pub_time),
+                    "time": _format_beijing_time(pub_time),
                     "title": item.get("title", ""),
                     "content": item.get("content", "")[:500],
                     "source": "cls_cn",
@@ -163,7 +172,7 @@ def fetch_jin10(context: ExecutionContext) -> list[dict]:
                 if content and len(content) > 10:
                     news_list.append(
                         {
-                            "time": _format_for_review_window(pub_time),
+                            "time": _format_beijing_time(pub_time),
                             "title": "",
                             "content": content[:500],
                             "source": "jin10",
@@ -233,7 +242,7 @@ def fetch_yahoo_finance_news() -> list[dict]:
                     if title:
                         news_list.append(
                             {
-                                "time": _format_for_review_window(pub_time),
+                                "time": _format_beijing_time(pub_time),
                                 "title": title,
                                 "content": content.get("summary", title)[:500],
                                 "url": content.get("canonicalUrl", {}).get("url", ""),

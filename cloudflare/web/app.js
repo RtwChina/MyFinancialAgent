@@ -1,3 +1,14 @@
+const NEWS_SOURCE_LABELS = {
+  sina: "新浪",
+  cls_cn: "财联社",
+  jin10: "金十",
+  yahoo_finance: "Yahoo",
+};
+
+function formatNewsSource(source) {
+  return NEWS_SOURCE_LABELS[source] || source || "未知来源";
+}
+
 const state = {
   activeView: "reviews",
   activeDate: null,
@@ -475,7 +486,7 @@ function openNewsDetailFromItem(item) {
 
   const tags = [
     buildChip(item.pub_date || "未知时间", "detail-meta-chip"),
-    ...(item.source ? [buildChip(item.source, "detail-meta-chip")] : []),
+    ...(item.source ? [buildChip(formatNewsSource(item.source), "detail-meta-chip")] : []),
     buildChip(formatStarLabel(item.importance_stars), starChipVariant(item.importance_stars)),
     buildChip(formatNewsType(item.type)),
     ...(item.related_symbols || []).map((symbol) => buildChip(symbol)),
@@ -584,7 +595,7 @@ function buildNewsRow(item) {
   row.className = "news-row";
 
   const timeCell = document.createElement("td");
-  timeCell.innerHTML = `<strong>${escapeHtml(item.pub_date || "未知时间")}</strong><small>${escapeHtml(item.source || "未知来源")}</small>`;
+  timeCell.innerHTML = `<strong>${escapeHtml(item.pub_date || "未知时间")}</strong><small>${escapeHtml(formatNewsSource(item.source))}</small><small class="muted">北京时间</small>`;
 
   const summaryCell = document.createElement("td");
   summaryCell.className = "news-summary-cell";
@@ -938,7 +949,7 @@ function buildReviewNewsItem(item) {
   const foot = document.createElement("div");
   foot.className = "review-news-item-foot";
   const time = document.createElement("small");
-  time.textContent = `${item.pub_date || "未知时间"} · ${item.source || "未知来源"}`;
+  time.textContent = `${item.pub_date || "未知时间"} · ${formatNewsSource(item.source)}`;
   const button = document.createElement("button");
   button.type = "button";
   button.className = "ghost";

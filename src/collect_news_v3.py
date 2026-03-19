@@ -8,6 +8,7 @@ import json
 import re
 import os
 from datetime import datetime
+from zoneinfo import ZoneInfo
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Any, Dict, List, Tuple
 import yfinance as yf
@@ -17,7 +18,6 @@ import pytz
 import requests
 
 from config import (
-    OUTPUT_DIR,
     LLM_API_KEY, LLM_BASE_URL, LLM_BATCH_MODEL_ID, LLM_MODEL_ID, LLM_RULES_MODEL_ID, LLM_SUMMARY_MODEL_ID,
     ENABLE_REMOTE_WRITE,
 )
@@ -1110,10 +1110,23 @@ def subtract_trading_days(date_string: str, count: int) -> str:
     return current.strftime("%Y-%m-%d")
 
 
+def _nyse_close_in_beijing(date_str: str) -> str:
+    """将 NYSE 收盘时刻（纽约时间 16:00）转换为对应的北京时间字符串。
+
+    夏令时（EDT, UTC-4）时为次日 04:00 北京；
+    冬令时（EST, UTC-5）时为次日 05:00 北京。
+    ZoneInfo 自动处理夏令时，无需手动维护偏移量。
+    """
+    ny_tz = ZoneInfo("America/New_York")
+    bj_tz = ZoneInfo("Asia/Shanghai")
+    close_ny = datetime.strptime(f"{date_str} 16:00:00", "%Y-%m-%d %H:%M:%S").replace(tzinfo=ny_tz)
+    return close_ny.astimezone(bj_tz).strftime("%Y-%m-%d %H:%M:%S")
+
+
 def get_analysis_window(analysis_date: str) -> Tuple[str, str]:
-    """返回分析窗口的起止时间：从上一交易日收盘(16:00)到当日收盘(16:00)"""
+    """返回分析窗口的起止时间（北京时间）：从上一交易日 NYSE 收盘到当日 NYSE 收盘。"""
     start_date = subtract_trading_days(analysis_date, 1)
-    return f"{start_date} 16:00:00", f"{analysis_date} 16:00:00"
+    return _nyse_close_in_beijing(start_date), _nyse_close_in_beijing(analysis_date)
 
 
 def build_daily_summary_record(news_list: List[Dict[str, Any]], analysis_date: str) -> Dict[str, Any]:
@@ -1367,24 +1380,6 @@ def collect_all_news(context: ExecutionContext | None = None) -> Dict[str, Any]:
     }
 
 
-def export_to_excel(news_list: list, summary: str, context: ExecutionContext | None = None) -> str:
-    """导出到 Excel"""
-    context = context or build_execution_context()
-    if not os.path.exists(OUTPUT_DIR):
-        os.makedirs(OUTPUT_DIR)
-
-    filepath = f"{OUTPUT_DIR}/news_v3_{context.clock.now().strftime('%Y%m%d_%H%M%S')}.xlsx"
-
-    with pd.ExcelWriter(filepath, engine='openpyxl') as writer:
-        df_news = pd.DataFrame(news_list)
-        df_news.to_excel(writer, sheet_name='News', index=False)
-
-        df_summary = pd.DataFrame({'类型': ['综合分析'], 'AI总结': [summary]})
-        df_summary.to_excel(writer, sheet_name='AI_Summary', index=False)
-
-    logger.info(f"数据已导出: {filepath}")
-    return filepath
-
 
 def run_news_pipeline(
     collect_fresh_news: bool = True,
@@ -1476,9 +1471,8 @@ def run_news_pipeline(
         news_list = window_news
     summary_text = daily_record.get("raw_summary") or _generate_rule_based_summary(news_list[:10])
 
-    filepath = export_to_excel(news_list, summary_text, context)
     return {
-        "filepath": filepath,
+        "filepath": None,
         "news_count": len(news_list),
         "inserted_count": inserted_count,
         "summary": summary_text,

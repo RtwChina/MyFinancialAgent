@@ -23,7 +23,7 @@ def run_price_collector(context: ExecutionContext | None = None):
     context = context or build_execution_context()
     logger.info("开始执行价格采集...")
     try:
-        from collect_prices import collect_all_prices, export_to_excel, batch_insert_prices
+        from collect_prices import collect_all_prices, batch_insert_prices
         prices_df = collect_all_prices(context)
 
         prices_list = prices_df.to_dict('records')
@@ -37,8 +37,7 @@ def run_price_collector(context: ExecutionContext | None = None):
             inserted_count = batch_insert_prices(prices_list)
             logger.info(f"价格数据库写入: 新增 {inserted_count} 条")
 
-        filepath = export_to_excel(prices_df, context=context)
-        return filepath
+        return True
     except Exception as e:
         logger.error(f"价格采集失败: {str(e)}", exc_info=True)
         return None
@@ -67,7 +66,7 @@ def run_news_collector(
             result.get("inserted_count"),
             result.get("persisted_summary"),
         )
-        return result.get("filepath")
+        return True
     except Exception as e:
         logger.error(f"新闻采集失败: {str(e)}", exc_info=True)
         return None
@@ -82,7 +81,7 @@ def run_full_pipeline(context: ExecutionContext | None = None):
     prices_file = run_price_collector(context)
     results["prices"] = prices_file
     if prices_file:
-        print(f"      ✓ 价格数据已保存: {prices_file}")
+        print("      ✓ 价格采集完成")
     else:
         print("      ✗ 价格采集失败")
 
@@ -90,7 +89,7 @@ def run_full_pipeline(context: ExecutionContext | None = None):
     news_file = run_news_collector(collect_fresh_news=True, persist_summary=True, context=context)
     results["news"] = news_file
     if news_file:
-        print(f"      ✓ 新闻数据已保存: {news_file}")
+        print("      ✓ 新闻采集完成")
     else:
         print("      ✗ 新闻采集失败")
     return results
@@ -154,11 +153,6 @@ def main():
 
     # 所有任务均成功时返回 0，否则返回 1 供调用方或 cron 检测失败
     if all(v is not None for v in results.values()):
-        print("\n输出文件:")
-        if "prices" in results:
-            print(f"  - 价格数据: {results['prices']}")
-        if "news" in results:
-            print(f"  - 新闻数据: {results['news']}")
         return 0
     else:
         print("\n部分任务失败，请检查日志获取详细信息。")
