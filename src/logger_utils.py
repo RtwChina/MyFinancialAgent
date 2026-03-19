@@ -3,7 +3,10 @@
 """
 import os
 import logging
+import datetime
 from config import LOG_FILE, LOG_LEVEL
+
+_BEIJING_TZ = datetime.timezone(datetime.timedelta(hours=8))
 
 
 def setup_logger(name: str) -> logging.Logger:
@@ -29,11 +32,12 @@ def setup_logger(name: str) -> logging.Logger:
     console_handler = logging.StreamHandler()
     console_handler.setLevel(logging.INFO)
 
-    # 日志格式
+    # 日志格式（强制北京时间）
     formatter = logging.Formatter(
         '%(asctime)s - %(name)s - %(levelname)s - %(message)s',
         datefmt='%Y-%m-%d %H:%M:%S'
     )
+    formatter.converter = lambda *args: datetime.datetime.now(_BEIJING_TZ).timetuple()
     file_handler.setFormatter(formatter)
     console_handler.setFormatter(formatter)
 
