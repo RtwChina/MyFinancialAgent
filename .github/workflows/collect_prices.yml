@@ -29,7 +29,9 @@ jobs:
         env:
           LLM_API_KEY: ${{ secrets.LLM_API_KEY }}
           LLM_BASE_URL: ${{ secrets.LLM_BASE_URL }}
-          LLM_MODEL_ID: ${{ secrets.LLM_MODEL_ID }}
+          LLM_MODEL_ID: "qwen3.5-plus"
+          LLM_BATCH_MODEL_ID: "qwen3.5-plus"
+          LLM_SUMMARY_MODEL_ID: "qwen3.5-plus"
           SKIP_LLM: "true"
           ENABLE_REMOTE_WRITE: "true"
           INGEST_API_BASE_URL: ${{ secrets.INGEST_API_BASE_URL }}

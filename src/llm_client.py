@@ -126,6 +126,23 @@ class LLMClient:
         s["total_prompt_chars"] += result.prompt_chars
         s["total_response_chars"] += result.response_chars
         s["total_elapsed"] += result.elapsed_seconds
+        # 每次调用完成后打印详细日志
+        if self.logger:
+            if result.success:
+                self.logger.info(
+                    "LLM 完成: model=%s, 耗时 %.1fs, prompt %s字, response %s字",
+                    result.model,
+                    result.elapsed_seconds,
+                    result.prompt_chars,
+                    result.response_chars,
+                )
+            else:
+                self.logger.error(
+                    "LLM 失败: model=%s, 耗时 %.1fs, error=%s",
+                    result.model,
+                    result.elapsed_seconds,
+                    result.error,
+                )
         return result
 
     def log_summary(self) -> None:

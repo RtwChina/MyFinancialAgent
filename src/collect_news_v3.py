@@ -766,6 +766,7 @@ def _call_batch_llm(news_batch: List[Dict[str, Any]], batch_id: str) -> Dict[str
                 "你是一位金融新闻筛选助手。"
                 "请只输出 JSON，不要输出额外解释。"
                 "你需要对输入新闻逐条判断是否值得保留进入正式新闻库。"
+                "所有 ai_summary 和 market_impact 必须使用中文。"
             ),
         },
         {
@@ -1201,6 +1202,10 @@ def build_daily_summary_record(news_list: List[Dict[str, Any]], analysis_date: s
         reverse=True,
     )[:20]
 
+    # 打印 AI 入参摘要
+    titles = [item.get("title", "")[:30] for item in summary_news]
+    logger.info("[日总结] AI入参: %s条候选, titles=%s", len(summary_news), titles)
+
     if EFFECTIVE_SKIP_LLM:
         markdown = _generate_rule_based_summary(summary_news)
     else:
@@ -1262,6 +1267,8 @@ def build_daily_summary_record(news_list: List[Dict[str, Any]], analysis_date: s
             max_tokens=1400,
             timeout=LLM_SUMMARY_TIMEOUT,
         )
+        # 打印 AI 出参摘要
+        logger.info("[日总结] AI出参(前300字): %s", llm_result.response_text[:300])
         markdown = llm_result.response_text if llm_result.success else _generate_rule_based_summary(summary_news)
 
     parsed = _parse_summary_output(markdown)
@@ -1321,6 +1328,11 @@ def load_news_for_summary(
 ) -> List[Dict[str, Any]]:
     """从数据库（或远程）加载分析窗口内的高质量新闻，供日期级综合分析使用"""
     start_time, end_time = get_analysis_window(analysis_date)
+    data_source = "remote" if use_remote else "local"
+    logger.info(
+        "[日总结] 加载候选: analysis_date=%s, 窗口=[%s ~ %s], 数据源=%s",
+        analysis_date, start_time, end_time, data_source,
+    )
     if use_remote:
         items = fetch_remote_news(start_time[:10], end_time[:10], limit=200)
     else:
@@ -1330,15 +1342,25 @@ def load_news_for_summary(
         )
 
     # 将本次新采集的新闻并入，确保入库前即可参与当日汇总（尤其在首次运行时库内为空）
+    db_count = len(items)
+    fallback_count = len(fallback_news) if fallback_news else 0
     if fallback_news:
         items.extend(fallback_news)
+    logger.info(
+        "[日总结] 加载完成: 数据库 %s条 + 当批回退 %s条 = 合计 %s条",
+        db_count, fallback_count, len(items),
+    )
 
     # 以复合 key 去重后过滤：只保留经 LLM 处理且重要性 >=3 星的新闻参与汇总
     deduped: Dict[str, Dict[str, Any]] = {}
     for item in items:
         normalized = _normalize_loaded_news_item(item)
         deduped[_summary_dedup_key(normalized)] = normalized
+    logger.info("[日总结] 去重后: %s条", len(deduped))
 
+    logger.info(
+        "[日总结] 过滤条件: importance_stars>=3, rule_passed=True, status in {llm_processed,reviewed}",
+    )
     filtered = [
         item for item in deduped.values()
         if item.get("importance_stars", 0) >= 3
@@ -1346,6 +1368,7 @@ def load_news_for_summary(
         and item.get("processing_status") in {"llm_processed", "reviewed"}
         and start_time <= item.get("pub_date", "") <= end_time
     ]
+    logger.info("[日总结] 过滤后候选: %s条", len(filtered))
     if not filtered and fallback_news:
         fallback_filtered = []
         for item in fallback_news:
