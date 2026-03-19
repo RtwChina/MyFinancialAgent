@@ -907,6 +907,7 @@ textarea {
   max-width: 400px;
   text-align: left;
   line-height: 1.6;
+  z-index: 1000;
 }
 
 .tip-trigger.tip-nav:hover .bubble {
