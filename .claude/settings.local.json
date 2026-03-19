@@ -23,7 +23,8 @@
       "Bash(openspec new:*)",
       "Bash(python3 -c \"import sys,json; d=json.load\\(sys.stdin\\); print\\(d[''''instruction''''][:300]\\); print\\(''''---''''\\); print\\(d[''''template'''']\\)\")",
       "Bash(git commit:*)",
-      "Bash(git push:*)"
+      "Bash(git push:*)",
+      "Bash(git rm:*)"
     ],
     "defaultMode": "acceptEdits"
   }

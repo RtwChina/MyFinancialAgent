@@ -22,7 +22,7 @@ GitHub Actions (定时) → Python 采集端 → Cloudflare Worker API → Cloud
 .
 ├── .github/workflows/     # GitHub Actions 定时采集
 ├── cloudflare/
-│   ├── migrations/        # D1 数据库迁移 (001-008)
+│   ├── migrations/        # D1 数据库迁移 (001-007)
 │   ├── web/               # 前端 (HTML/CSS/JS)
 │   └── worker/src/        # Cloudflare Worker API
 ├── docs/
@@ -70,7 +70,7 @@ python main.py close-summary  # 收盘后：补采新闻 + 价格 + 汇总
 
 | 任务 | 频率 | 命令 |
 |------|------|------|
-| 新闻采集 | 每 4 小时 | `python main.py` (full) |
+| 新闻采集 | 每小时 | `python main.py hourly-news` |
 | 收盘汇总 | 每天北京 05:00 | `python main.py close-summary` |
 
 ## 环境

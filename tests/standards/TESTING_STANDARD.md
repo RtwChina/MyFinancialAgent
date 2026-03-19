@@ -14,9 +14,8 @@
 
 具体测试用例不放在这里：
 
-- 冒烟测试用例：`tests/cases/smoke/`
-- 集成测试用例：`tests/cases/integration/`
-- 每次执行结果：`tests/runs/`
+- 冒烟测试用例：`tests/smoke/`
+- 集成测试用例：`tests/integration/`
 
 ## 2. 基本原则
 
@@ -30,7 +29,7 @@
 
 当前测试相关资源约束：
 
-- 测试 Worker 配置：`tests/cases/config/wrangler.test.toml`
+- 测试 Worker 配置：`tests/testdata/config/wrangler.test.toml`
 - 测试环境必须与生产环境隔离：
   - 测试 D1 与生产 D1 分离
   - 测试 Worker 与生产 Worker 分离
@@ -62,7 +61,7 @@
 
 当前辅助资源统一放在：
 
-- `tests/cases/fixtures/`
+- `tests/testdata/`
 
 第三方接口口径：
 
@@ -144,13 +143,9 @@
 
 - `tests/standards/`
   放统一测试规范
-- `tests/cases/smoke/`
+- `tests/smoke/`
   放冒烟测试用例与 UI 测试脚本
-- `tests/cases/integration/`
+- `tests/integration/`
   放集成测试用例与完整测试矩阵
-- `tests/cases/config/`
-  放测试环境配置
-- `tests/cases/fixtures/`
+- `tests/testdata/`
   放辅助测试数据
-- `tests/runs/`
-  放每次测试执行结果与发布评审材料

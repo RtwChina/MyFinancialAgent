@@ -168,8 +168,8 @@ GitHub Actions (cron 0 21 * * *)
 ### 4.2 新闻采集流程
 
 ```
-GitHub Actions (cron 0 */4 * * *)
-  → python main.py full
+GitHub Actions (cron 0 * * * *)
+  → python main.py hourly-news
     → collect_news_v3.run_news_pipeline()
       ├─ Step 1: 多源抓取
       │   → news_router.fetch_all_news()
