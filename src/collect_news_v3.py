@@ -437,6 +437,21 @@ def _normalize_focus_topics(value: Any) -> List[Dict[str, Any]]:
     return topics
 
 
+def _merge_keywords(static_list: List[str], dynamic_list: List[str]) -> List[str]:
+    """合并静态词表与动态词表，去重并保持顺序（静态优先）"""
+    seen = set()
+    merged = []
+    for word in static_list:
+        if word not in seen:
+            seen.add(word)
+            merged.append(word)
+    for word in dynamic_list:
+        if word not in seen:
+            seen.add(word)
+            merged.append(word)
+    return merged
+
+
 def _build_rules_samples(news_list: List[Dict[str, Any]], sample_size: int) -> List[Dict[str, Any]]:
     """优先覆盖多来源与较新的新闻，压缩动态规则 prompt 长度。"""
     buckets: Dict[str, List[Dict[str, Any]]] = {}
@@ -478,28 +493,74 @@ def _build_rules_samples(news_list: List[Dict[str, Any]], sample_size: int) -> L
 
 
 def _normalize_screening_profile(raw_profile: Dict[str, Any] | None) -> Dict[str, Any]:
-    profile = _default_screening_profile()
-    if not isinstance(raw_profile, dict):
-        return profile
+    """规范化并合并静态词表与 LLM 动态词表。
 
-    profile["macro_keywords"] = _normalize_keyword_list(raw_profile.get("macro_keywords"), profile["macro_keywords"])
-    profile["market_keywords"] = _normalize_keyword_list(raw_profile.get("market_keywords"), profile["market_keywords"])
-    profile["noise_keywords"] = _normalize_keyword_list(raw_profile.get("noise_keywords"), profile["noise_keywords"])
-    profile["symbol_context_keywords"] = _normalize_keyword_list(
-        raw_profile.get("symbol_context_keywords"),
-        profile["symbol_context_keywords"],
-    )
-    profile["focus_topics"] = _normalize_focus_topics(raw_profile.get("focus_topics"))
-    profile["include_rules"] = _normalize_keyword_list(raw_profile.get("include_rules"), profile["include_rules"])
-    profile["exclude_rules"] = _normalize_keyword_list(raw_profile.get("exclude_rules"), profile["exclude_rules"])
-    profile["score_threshold"] = float(raw_profile.get("score_threshold") or profile["score_threshold"])
-    profile["reasoning_summary"] = _normalize_text(raw_profile.get("reasoning_summary") or profile["reasoning_summary"])
+    静态词表作为基础层，动态词表作为增量补充。
+    """
+    # 静态词表作为基础
+    static_base = _get_static_screening_base()
+
+    if not isinstance(raw_profile, dict):
+        # 无动态词表，仅使用静态词表
+        return static_base
+
+    # 合并静态词表与动态词表
+    dynamic_macro = _normalize_keyword_list(raw_profile.get("macro_keywords"), [])
+    dynamic_market = _normalize_keyword_list(raw_profile.get("market_keywords"), [])
+    dynamic_noise = _normalize_keyword_list(raw_profile.get("noise_keywords"), [])
+    dynamic_symbol = _normalize_keyword_list(raw_profile.get("symbol_context_keywords"), [])
+
+    profile = {
+        "macro_keywords": _merge_keywords(static_base["macro_keywords"], dynamic_macro),
+        "market_keywords": _merge_keywords(static_base["market_keywords"], dynamic_market),
+        "noise_keywords": _merge_keywords(static_base["noise_keywords"], dynamic_noise),
+        "symbol_context_keywords": _merge_keywords(static_base["symbol_context_keywords"], dynamic_symbol),
+        "focus_topics": _normalize_focus_topics(raw_profile.get("focus_topics")),
+        "include_rules": _normalize_keyword_list(raw_profile.get("include_rules"), static_base["include_rules"]),
+        "exclude_rules": _normalize_keyword_list(raw_profile.get("exclude_rules"), static_base["exclude_rules"]),
+        "score_threshold": float(raw_profile.get("score_threshold", static_base["score_threshold"])),
+        "reasoning_summary": _normalize_text(raw_profile.get("reasoning_summary") or ""),
+        # 记录动态词增量，供日志使用
+        "_dynamic_macro": dynamic_macro,
+        "_dynamic_market": dynamic_market,
+        "_dynamic_noise": dynamic_noise,
+    }
     return profile
 
 
+def _get_static_screening_base() -> Dict[str, Any]:
+    """返回静态基础词表（当动态词表生成失败时使用）"""
+    return {
+        "macro_keywords": list(BASE_MACRO_KEYWORDS),
+        "market_keywords": list(BASE_MARKET_KEYWORDS),
+        "noise_keywords": list(BASE_NOISE_KEYWORDS),
+        "symbol_context_keywords": list(BASE_SYMBOL_CONTEXT_KEYWORDS),
+        "focus_topics": [],
+        "include_rules": [
+            "保留显著影响全球经济、美股大盘、能源、利率和关键科技板块的新闻",
+            "保留直接影响跟踪标的及其产业链的新闻",
+        ],
+        "exclude_rules": [
+            "丢弃分析师评级、目标价、纯情绪点评、消费民生噪音和无市场含义的碎片新闻",
+        ],
+        "score_threshold": 4.5,
+        "reasoning_summary": "",
+    }
+
+
 def generate_dynamic_screening_profile(news_list: List[Dict[str, Any]], analysis_date: str) -> Dict[str, Any]:
+    # 打印静态词表统计
+    static_base = _get_static_screening_base()
+    logger.info(
+        "[初筛] 静态词表: 宏观=%s词, 市场=%s词, 噪音=%s词",
+        len(static_base["macro_keywords"]),
+        len(static_base["market_keywords"]),
+        len(static_base["noise_keywords"]),
+    )
+
     if EFFECTIVE_SKIP_LLM:
-        return _default_screening_profile()
+        logger.warning("[初筛] SKIP_LLM=true，跳过动态规则生成，使用静态词表")
+        return static_base
 
     sample_items = []
     for news in _build_rules_samples(news_list, LLM_RULES_SAMPLE_SIZE):
@@ -541,23 +602,43 @@ def generate_dynamic_screening_profile(news_list: List[Dict[str, Any]], analysis
         max_tokens=1400,
         timeout=LLM_RULES_TIMEOUT,
     )
+
+    # LLM 调用失败，降级使用静态词表
     if not llm_result.success:
-        logger.error("[初筛] LLM失败: 动态初筛规则生成失败，回退默认静态规则")
-        return _default_screening_profile()
+        logger.warning(
+            "[初筛] 动态规则生成失败: model=%s, error=%s，降级使用静态词表",
+            LLM_RULES_MODEL_ID, llm_result.error,
+        )
+        return static_base
 
     try:
         profile = _normalize_screening_profile(_extract_json_payload(llm_result.response_text))
+        # 打印动态词增量
+        dynamic_macro = profile.pop("_dynamic_macro", [])
+        dynamic_market = profile.pop("_dynamic_market", [])
+        dynamic_noise = profile.pop("_dynamic_noise", [])
         logger.info(
-            "[初筛] 动态规则已生成: 宏观=%s, 市场=%s, 噪音=%s, 动态主题=%s",
+            "[初筛] 动态词表(LLM生成): 新增宏观=%s词%s, 新增市场=%s词%s, 新增噪音=%s词%s, 动态主题=%s个%s",
+            len(dynamic_macro), dynamic_macro[:5] if dynamic_macro else "",
+            len(dynamic_market), dynamic_market[:5] if dynamic_market else "",
+            len(dynamic_noise), dynamic_noise[:5] if dynamic_noise else "",
+            len(profile["focus_topics"]),
+            [t["label"] for t in profile["focus_topics"][:3]] if profile["focus_topics"] else "",
+        )
+        logger.info(
+            "[初筛] 合并后: 宏观=%s词, 市场=%s词, 噪音=%s词, threshold=%.1f",
             len(profile["macro_keywords"]),
             len(profile["market_keywords"]),
             len(profile["noise_keywords"]),
-            len(profile["focus_topics"]),
+            profile["score_threshold"],
         )
         return profile
     except Exception as exc:
-        logger.error("[初筛] JSON解析失败，回退默认静态规则: %s", exc)
-        return _default_screening_profile()
+        logger.warning(
+            "[初筛] 动态规则JSON解析失败: %s，降级使用静态词表。原始响应前500字: %s",
+            exc, llm_result.response_text[:500],
+        )
+        return static_base
 
 
 def apply_rule_filter(news: Dict[str, Any], profile: Dict[str, Any]) -> Dict[str, Any] | None:
