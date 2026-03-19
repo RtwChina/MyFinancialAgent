@@ -1329,10 +1329,6 @@ def load_news_for_summary(
     """从数据库（或远程）加载分析窗口内的高质量新闻，供日期级综合分析使用"""
     start_time, end_time = get_analysis_window(analysis_date)
     data_source = "remote" if use_remote else "local"
-    logger.info(
-        "[日总结] 加载候选: analysis_date=%s, 窗口=[%s ~ %s], 数据源=%s",
-        analysis_date, start_time, end_time, data_source,
-    )
     if use_remote:
         items = fetch_remote_news(start_time[:10], end_time[:10], limit=200)
     else:
@@ -1346,21 +1342,18 @@ def load_news_for_summary(
     fallback_count = len(fallback_news) if fallback_news else 0
     if fallback_news:
         items.extend(fallback_news)
-    logger.info(
-        "[日总结] 加载完成: 数据库 %s条 + 当批回退 %s条 = 合计 %s条",
-        db_count, fallback_count, len(items),
-    )
 
     # 以复合 key 去重后过滤：只保留经 LLM 处理且重要性 >=3 星的新闻参与汇总
     deduped: Dict[str, Dict[str, Any]] = {}
     for item in items:
         normalized = _normalize_loaded_news_item(item)
         deduped[_summary_dedup_key(normalized)] = normalized
-    logger.info("[日总结] 去重后: %s条", len(deduped))
 
     logger.info(
-        "[日总结] 过滤条件: importance_stars>=3, rule_passed=True, status in {llm_processed,reviewed}",
+        "[日总结] analysis_date=%s, 窗口=[%s ~ %s], 数据源=%s, 加载 %s条(db %s+回退 %s), 去重 %s条",
+        analysis_date, start_time, end_time, data_source, len(items), db_count, fallback_count, len(deduped),
     )
+
     filtered = [
         item for item in deduped.values()
         if item.get("importance_stars", 0) >= 3
@@ -1368,7 +1361,14 @@ def load_news_for_summary(
         and item.get("processing_status") in {"llm_processed", "reviewed"}
         and start_time <= item.get("pub_date", "") <= end_time
     ]
-    logger.info("[日总结] 过滤后候选: %s条", len(filtered))
+    # 打印候选和未入选的新闻 ID
+    candidate_ids = [item.get("id") for item in filtered if item.get("id")]
+    excluded_items = [item for item in deduped.values() if item not in filtered]
+    excluded_ids = [item.get("id") for item in excluded_items if item.get("id")]
+    logger.info(
+        "[日总结] 过滤(stars>=3, rule_passed, status∈{llm_processed,reviewed}): 候选 %s条 ids=%s, 排除 %s条 ids=%s",
+        len(filtered), candidate_ids, len(excluded_items), excluded_ids,
+    )
     if not filtered and fallback_news:
         fallback_filtered = []
         for item in fallback_news:
