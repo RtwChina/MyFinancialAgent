@@ -748,7 +748,7 @@ function renderMdCell(text, maxLen) {
     .map(line => line.trim().replace(/^#\s+/, ""))
     .filter(Boolean);
   if (!headings.length) return escapeHtml(truncateText(raw, maxLen || 70));
-  return escapeHtml(truncateText(headings.join(" / "), maxLen || 70));
+  return escapeHtml(truncateText(headings.join(" | "), maxLen || 70));
 }
 
 function buildReviewRow(item) {
@@ -827,18 +827,26 @@ function initMdTabs() {
     ta.parentElement.insertBefore(bar, ta);
     ta.parentElement.insertBefore(preview, ta.nextSibling);
 
-    editBtn.addEventListener("click", () => {
+    editBtn.addEventListener("click", (e) => {
+      e.preventDefault();
+      if (state.reviewStatus === "reviewed" && !state.editMode) return;
       editBtn.classList.add("active");
       previewBtn.classList.remove("active");
       ta.classList.remove("hidden");
       preview.classList.add("hidden");
     });
-    previewBtn.addEventListener("click", () => {
+    previewBtn.addEventListener("click", (e) => {
+      e.preventDefault();
+      if (state.reviewStatus === "reviewed" && !state.editMode) return;
       previewBtn.classList.add("active");
       editBtn.classList.remove("active");
       preview.innerHTML = snarkdown(mdEscape(ta.value)) || '<span class="muted">暂无内容</span>';
       ta.classList.add("hidden");
       preview.classList.remove("hidden");
+    });
+    // Prevent label click from focusing hidden textarea in readonly mode
+    preview.addEventListener("click", (e) => {
+      if (state.reviewStatus === "reviewed" && !state.editMode) e.preventDefault();
     });
   });
 }
@@ -1985,6 +1993,7 @@ async function resolveSymbolInput() {
       body: JSON.stringify({ input: query }),
     });
     const item = data.resolved;
+    if (!item) throw new Error("AI 未能识别该标的，请尝试更具体的名称或代码。");
     state.symbolResolveResult = item;
     preview.innerHTML = `
       <div class="symbol-resolve-card">
