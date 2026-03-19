@@ -11,7 +11,20 @@
       "WebFetch(domain:wallstreetcn.com)",
       "WebFetch(domain:www.cls.cn)",
       "WebFetch(domain:www.eastmoney.com)",
-      "Bash(git add:*)"
-    ]
+      "Bash(git add:*)",
+      "Bash(openspec status:*)",
+      "Bash(openspec instructions:*)",
+      "Bash(npx wrangler:*)",
+      "Bash(yes)",
+      "Bash(openspec archive:*)",
+      "Bash(openspec list:*)",
+      "Skill(update-config)",
+      "Bash(curl -s \"http://localhost:8787/api/news?page=1&pageSize=5\")",
+      "Bash(openspec new:*)",
+      "Bash(python3 -c \"import sys,json; d=json.load\\(sys.stdin\\); print\\(d[''''instruction''''][:300]\\); print\\(''''---''''\\); print\\(d[''''template'''']\\)\")",
+      "Bash(git commit:*)",
+      "Bash(git push:*)"
+    ],
+    "defaultMode": "acceptEdits"
   }
 }

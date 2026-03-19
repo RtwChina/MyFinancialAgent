@@ -852,6 +852,35 @@ def _normalize_related_symbols(value: Any, fallback: List[str]) -> List[str]:
     return fallback
 
 
+def canonicalize_related_symbols(
+    raw: List[str],
+    tracked_set: set,
+    aliases_lookup: dict,
+) -> List[str]:
+    """将 LLM 输出的原始 symbol 列表规范化为系统代码（tracked_symbols.symbol）。
+
+    - 已是系统代码 → 直接保留
+    - 是已知别名 → 映射到系统代码
+    - 无法识别 → 丢弃（如 002475.SZ 等非跟踪标的）
+    """
+    result: List[str] = []
+    seen: set = set()
+    for s in raw:
+        if s in tracked_set:
+            if s not in seen:
+                seen.add(s)
+                result.append(s)
+        else:
+            matches = aliases_lookup.get(s.lower(), [])
+            for rec in matches:
+                sym = rec["symbol"]
+                if sym not in seen:
+                    seen.add(sym)
+                    result.append(sym)
+                break
+    return result
+
+
 def _merge_batch_result(news_batch: List[Dict[str, Any]], llm_result: Dict[str, Any], batch_no: int, analysis_date: str) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]], Dict[str, Any]]:
     """将 LLM 批量返回结果与原始新闻合并，LLM 字段优先，缺失时回退规则字段"""
     # 以 news_hash 为键构建 LLM 结果索引，便于 O(1) 查找
@@ -864,11 +893,18 @@ def _merge_batch_result(news_batch: List[Dict[str, Any]], llm_result: Dict[str, 
     processed_items = []
     kept_items = []
 
+    tracked_set = {rec["symbol"] for rec in get_tracked_symbols()}
+    aliases_lookup = build_aliases_lookup()
+
     for news in news_batch:
         item_result = result_by_hash.get(news["news_hash"], {})
         keep = item_result.get("keep", True)
 
-        related_symbols = _normalize_related_symbols(item_result.get("related_symbols"), news.get("related_symbols", []))
+        related_symbols = canonicalize_related_symbols(
+            _normalize_related_symbols(item_result.get("related_symbols"), news.get("related_symbols", [])),
+            tracked_set,
+            aliases_lookup,
+        )
         merged = dict(news)
         merged["type"] = _normalize_type(item_result.get("type"), news.get("type", "index"))
         merged["ai_summary"] = _normalize_text(item_result.get("ai_summary") or news.get("summary") or news.get("title"))
@@ -1353,7 +1389,7 @@ def collect_all_news(context: ExecutionContext | None = None) -> Dict[str, Any]:
     logger.info("=" * 60)
 
     all_news: List[Dict[str, Any]] = []
-    analysis_date = get_current_review_trading_day(context)
+    analysis_date = get_latest_closed_trading_day(context)
     logger.info("当前新闻分析目标日: %s", analysis_date)
 
     print("\n正在采集新闻...")
@@ -1392,7 +1428,7 @@ def run_news_pipeline(
     persist_summary=False 适合小时任务，只入新闻库，不写 daily_news_ai_analysis。
     """
     context = context or build_execution_context()
-    analysis_date = get_current_review_trading_day(context)
+    analysis_date = get_latest_closed_trading_day(context)
     batch_analysis_records: List[Dict[str, Any]] = []
     news_list: List[Dict[str, Any]] = []
     processed_news: List[Dict[str, Any]] = []

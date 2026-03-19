@@ -57,4 +57,4 @@ jobs:
           LOG_LEVEL: "DEBUG"
           PYTHONUNBUFFERED: "1"
         run: |
-          python main.py
+          python main.py hourly-news

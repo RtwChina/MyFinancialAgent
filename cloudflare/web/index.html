@@ -128,6 +128,21 @@
                   <tbody id="newsList"></tbody>
                 </table>
               </div>
+              <div id="newsPagination" class="pagination-bar hidden">
+                <button id="newsPrevBtn" class="ghost compact-button" disabled>上一页</button>
+                <span id="newsPageInfo" class="pagination-info"></span>
+                <button id="newsNextBtn" class="ghost compact-button" disabled>下一页</button>
+                <label class="pagination-size">
+                  每页
+                  <select id="newsPageSizeSelect">
+                    <option value="20" selected>20</option>
+                    <option value="50">50</option>
+                    <option value="100">100</option>
+                  </select>
+                  条
+                </label>
+                <span id="newsTotalInfo" class="muted pagination-total"></span>
+              </div>
             </div>
           </section>
         </section>
@@ -173,6 +188,21 @@
                   </thead>
                   <tbody id="reviewsList"></tbody>
                 </table>
+              </div>
+              <div id="reviewsPagination" class="pagination-bar hidden">
+                <button id="reviewsPrevBtn" class="ghost compact-button" disabled>上一页</button>
+                <span id="reviewsPageInfo" class="pagination-info"></span>
+                <button id="reviewsNextBtn" class="ghost compact-button" disabled>下一页</button>
+                <label class="pagination-size">
+                  每页
+                  <select id="reviewsPageSizeSelect">
+                    <option value="20" selected>20</option>
+                    <option value="50">50</option>
+                    <option value="100">100</option>
+                  </select>
+                  条
+                </label>
+                <span id="reviewsTotalInfo" class="muted pagination-total"></span>
               </div>
             </section>
           </div>
