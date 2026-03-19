@@ -672,7 +672,7 @@ function buildNewsRow(item) {
   const pubDate = item.pub_date || "";
   const dateDisplay = pubDate.slice(0, 10) || "未知日期";
   const timeDisplay = pubDate.length >= 16 ? pubDate.slice(11, 16) : (pubDate || "未知时间");
-  timeCell.innerHTML = `<strong>${escapeHtml(dateDisplay)}</strong><small>${escapeHtml(timeDisplay)} · ${escapeHtml(formatNewsSource(item.source))}</small><small class="muted">北京时间</small>`;
+  timeCell.innerHTML = `<strong>${escapeHtml(dateDisplay)}</strong><small>${escapeHtml(timeDisplay)} · ${escapeHtml(formatNewsSource(item.source))}</small>`;
 
   const summaryCell = document.createElement("td");
   summaryCell.className = "news-summary-cell";

@@ -25,9 +25,8 @@ logger = get_logger("news_live")
 HEADERS = {
     "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
 }
-# 国内新闻源时区（北京）与下游复盘窗口所用时区（纽约）
+# 国内新闻源时区（北京）
 BEIJING_TZ = ZoneInfo("Asia/Shanghai")
-REVIEW_TZ = ZoneInfo("America/New_York")
 
 
 def _format_beijing_time(dt: datetime | None) -> str:
@@ -37,21 +36,6 @@ def _format_beijing_time(dt: datetime | None) -> str:
     if dt.tzinfo is None:
         dt = dt.replace(tzinfo=BEIJING_TZ)
     return dt.astimezone(BEIJING_TZ).strftime("%Y-%m-%d %H:%M:%S")
-
-
-def _format_for_review_window(dt: datetime | None, *, assume_tz: ZoneInfo | None = None) -> str:
-    """Normalize upstream timestamps into the review window timezone.
-
-    The downstream summary window compares plain `YYYY-MM-DD HH:MM:SS` strings
-    against NYSE-based review windows. Live source timestamps therefore need to
-    be converted into the same timezone before entering the business pipeline.
-    """
-
-    if dt is None:
-        return ""
-    if dt.tzinfo is None:
-        dt = dt.replace(tzinfo=assume_tz or REVIEW_TZ)
-    return dt.astimezone(REVIEW_TZ).strftime("%Y-%m-%d %H:%M:%S")
 
 
 def fetch_sina_finance() -> list[dict]:

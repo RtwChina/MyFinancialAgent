@@ -32,26 +32,21 @@ CREATE INDEX IF NOT EXISTS idx_tracked_symbols_active ON tracked_symbols(is_acti
 -- aliases 只存新闻里实际出现的写法，不包含 yahoo_symbol 技术代码
 INSERT OR IGNORE INTO tracked_symbols (symbol, yahoo_symbol, display_name, symbol_type, aliases, sort_order) VALUES
 ('GSPC',  '^GSPC',     '标普500',    'index', '["S&P 500","SP500","标普500","标普","SPX"]', 1),
-('NDX',   '^NDX',      '纳斯达克100','index', '["Nasdaq 100","纳指","纳斯达克100","纳斯达克"]', 2),
+('IXIC',   '^IXIC',      '纳斯达克','index', '["Nasdaq","纳指","纳斯达克"]', 2),
 ('DJI',   '^DJI',      '道琼斯',     'index', '["Dow Jones","DJIA","道指","道琼斯"]', 3),
 ('STOXX50E','^STOXX50E','欧洲斯托克50','index','["STOXX50E","Euro Stoxx 50","欧洲斯托克50","欧股50"]', 4),
-('VIX',   '^VIX',      '恐慌指数',   'index', '["VIX","Volatility Index","恐慌指数","波动率指数"]', 4),
-('HSI',   '^HSI',      '恒生指数',   'index', '["HSI","Hang Seng","恒指","恒生指数"]', 5),
+('VIX',   '^VIX',      '恐慌指数',   'index', '["VIX","Volatility Index","恐慌指数","波动率指数"]', 5),
 ('SSE',   '000001.SS', '上证指数',   'index', '["SSE Composite","上证指数","沪指","上证"]', 6),
-('DXY',   'DX-Y.NYB',  '美元指数',   'index', '["DXY","Dollar Index","美元指数","美元"]', 7),
-('GOLD',  'GC=F',      '黄金',       'index', '["GC=F","Gold","黄金","金价","COMEX黄金","黄金现货/美元","现货黄金"]', 8),
-('CL',    'CL=F',      '原油',       'index', '["Crude Oil","WTI","原油","油价","WTI原油"]', 9),
-('USDJPY','JPY=X',     '美元/日元',  'index', '["USDJPY","USD/JPY","美元/日元","美元兑日元"]', 10),
-('USDCNY','CNY=X',     '美元/人民币','index', '["USDCNY","USD/CNY","美元/人民币","美元兑人民币","离岸人民币"]', 11),
-('SILVER','SI=F',      '白银',       'index', '["SI=F","Silver","白银","银价","COMEX白银","白银/美元","现货白银"]', 12),
-('COPPER','HG=F',      '铜期货',     'index', '["COPPER","HG=F","铜","铜期货","COMEX铜"]', 13),
-('SOYBEAN','ZS=F',     '大豆期货',   'index', '["SOYBEAN","ZS=F","大豆期货","大豆"]', 14),
-('BRENT', 'BZ=F',      'Brent原油',  'index', '["BRENT","BZ=F","Brent","布伦特原油","Brent原油"]', 15),
+('HSI',   '^HSI',      '恒生指数',   'index', '["HSI","Hang Seng","恒指","恒生指数"]', 7),
+('DXY',   'DX-Y.NYB',  '美元指数',   'index', '["DXY","Dollar Index","美元指数","美元"]', 8),
+('GOLD',  'GC=F',      '黄金期货',   'index', '["GC=F","Gold","黄金","金价","COMEX黄金","黄金期货"]', 9),
+('BZ=F',    'BZ=F',      '布伦特原油', 'index', '["Oil","原油","油价","布伦特原油"]', 10),
+('USDJPY','JPY=X',     '美元/日元',  'index', '["USDJPY","USD/JPY","美元/日元","美元兑日元"]', 11),
+('USDCNY','CNY=X',     '美元/人民币','index', '["USDCNY","USD/CNY","美元/人民币","美元兑人民币","离岸人民币"]', 12),
+('SILVER','SI=F',      '白银',       'index', '["SI=F","Silver","白银","银价","COMEX白银","白银/美元","现货白银"]', 13),
+('COPPER','HG=F',      '铜期货',     'index', '["COPPER","HG=F","铜","铜期货","COMEX铜"]', 14),
+('SOYBEAN','ZS=F',     '大豆期货',   'index', '["SOYBEAN","ZS=F","大豆期货","大豆"]', 15),
 ('BTCUSD','BTC-USD',   '比特币/美元','index', '["BTCUSD","BTC-USD","比特币/美元","比特币","BTC"]', 16),
-('KOSPI', '^KS11',     '韩国综合股价指数','index','["KOSPI","韩国综合股价指数","韩国综合指数","韩综指"]', 17),
-('HSTECH','3067.HK',   '恒生科技ETF','index','["3067.HK","iShares Hang Seng TECH ETF","Hang Seng TECH","恒生科技指数","恒科指","恒生科技ETF"]', 18),
-('QQQ',   'QQQ',       '纳指100ETF', 'index', '["QQQ","Invesco QQQ","纳指ETF","纳斯达克100ETF"]', 19),
-('SPY',   'SPY',       '标普500ETF', 'index', '["SPY","SPDR S&P 500 ETF","标普500ETF"]', 20);
 
 -- 板块 (sector)
 -- ticker 本身（XLK/SOXX 等）会出现在新闻里，保留
@@ -75,16 +70,16 @@ INSERT OR IGNORE INTO tracked_symbols (symbol, yahoo_symbol, display_name, symbo
 -- 个股 (stock)
 INSERT OR IGNORE INTO tracked_symbols (symbol, yahoo_symbol, display_name, symbol_type, aliases, sort_order) VALUES
 ('SNDK',        'SNDK',      '闪迪', 'stock', '["SNDK","Micron","Micron Technology","闪迪"]', 1),
-('MU',         'MU',         '美光科技', 'stock', '["MU","Micron","Micron Technology","美光","美光科技"]', 1),
-('LITE',       'LITE',       'Lumentum', 'stock', '["LITE","Lumentum","Lumentum Holdings"]', 2),
-('MSFT',       'MSFT',       '微软',     'stock', '["MSFT","Microsoft","微软","Microsoft Corporation"]', 3),
-('GOOGL',      'GOOGL',      '谷歌',     'stock', '["GOOGL","Google","Alphabet","谷歌","Alphabet Inc"]', 4),
-('515880.SS',  '515880.SS',  '通信ETF',  'stock', '["515880.SS","通信ETF","中证通信"]', 5),
-('562500.SH',  '562500.SS',  '机器人ETF','stock', '["562500.SH","562500.SS","机器人ETF","中证机器人"]', 6),
-('300476.SZ',  '300476.SZ',  '胜宏科技', 'stock', '["300476.SZ","胜宏科技","胜宏"]', 7),
-('300442.SZ',  '300442.SZ',  '润泽科技', 'stock', '["300442.SZ","润泽科技","润泽"]', 8),
-('9988.HK',    '9988.HK',    '阿里巴巴', 'stock', '["9988.HK","阿里巴巴","阿里","Alibaba"]', 9),
-('601899.SS',  '601899.SS',  '紫金矿业', 'stock', '["601899.SS","紫金矿业","紫金"]', 10);
+('MU',         'MU',         '美光科技', 'stock', '["MU","Micron","Micron Technology","美光","美光科技"]', 2),
+('LITE',       'LITE',       'Lumentum', 'stock', '["LITE","Lumentum","Lumentum Holdings"]', 3),
+('MSFT',       'MSFT',       '微软',     'stock', '["MSFT","Microsoft","微软","Microsoft Corporation"]', 4),
+('GOOGL',      'GOOGL',      '谷歌',     'stock', '["GOOGL","Google","Alphabet","谷歌","Alphabet Inc"]', 5),
+('515880.SS',  '515880.SS',  '通信ETF',  'stock', '["515880.SS","通信ETF","中证通信"]', 6),
+('562500.SH',  '562500.SS',  '机器人ETF','stock', '["562500.SH","562500.SS","机器人ETF","中证机器人"]', 7),
+('300476.SZ',  '300476.SZ',  '胜宏科技', 'stock', '["300476.SZ","胜宏科技","胜宏"]', 8),
+('300442.SZ',  '300442.SZ',  '润泽科技', 'stock', '["300442.SZ","润泽科技","润泽"]', 9),
+('9988.HK',    '9988.HK',    '阿里巴巴', 'stock', '["9988.HK","阿里巴巴","阿里","Alibaba"]', 10),
+('601899.SS',  '601899.SS',  '紫金矿业', 'stock', '["601899.SS","紫金矿业","紫金"]', 11);
 
 -- ============================================================
 -- 3. 新闻类型值迁移

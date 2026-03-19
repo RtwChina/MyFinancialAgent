@@ -185,9 +185,10 @@ def upsert_news_data(data: Dict[str, Any], db_path: str = None) -> str:
             (
                 pub_date, title, content, url, source, type,
                 rule_passed, rule_reason, processing_status, ai_summary, market_impact,
-                importance_stars, related_symbols, is_relevant_to_review, news_hash, captured_at
+                importance_stars, related_symbols, is_relevant_to_review, news_hash, captured_at,
+                created_at
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(news_hash) DO UPDATE SET
                 pub_date = excluded.pub_date,
                 title = excluded.title,
@@ -220,6 +221,7 @@ def upsert_news_data(data: Dict[str, Any], db_path: str = None) -> str:
             related_symbols,
             1 if data.get('is_relevant_to_review', True) else 0,
             news_hash,
+            now_cst(),
             now_cst(),
         ))
 
@@ -511,7 +513,7 @@ def upsert_tracked_symbol(data: Dict[str, Any], db_path: str = None) -> bool:
             """
             INSERT INTO tracked_symbols
                 (symbol, yahoo_symbol, display_name, symbol_type, aliases, is_active, sort_order, created_at, updated_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, datetime('now'), datetime('now'))
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(symbol) DO UPDATE SET
                 yahoo_symbol = excluded.yahoo_symbol,
                 display_name = excluded.display_name,
@@ -519,7 +521,7 @@ def upsert_tracked_symbol(data: Dict[str, Any], db_path: str = None) -> bool:
                 aliases      = excluded.aliases,
                 is_active    = excluded.is_active,
                 sort_order   = excluded.sort_order,
-                updated_at   = datetime('now')
+                updated_at   = excluded.updated_at
             """,
             (
                 data.get("symbol"),
@@ -529,6 +531,8 @@ def upsert_tracked_symbol(data: Dict[str, Any], db_path: str = None) -> bool:
                 aliases,
                 1 if data.get("is_active", True) else 0,
                 data.get("sort_order", 99),
+                now_cst(),
+                now_cst(),
             ),
         )
         conn.commit()

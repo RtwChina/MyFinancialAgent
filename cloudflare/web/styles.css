@@ -840,6 +840,64 @@ textarea {
   text-transform: uppercase;
 }
 
+.tip-trigger {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  margin-left: 6px;
+  vertical-align: middle;
+  cursor: help;
+}
+
+.tip-trigger svg {
+  width: 14px;
+  height: 14px;
+  fill: none;
+  stroke: #bfbfbf;
+  stroke-width: 1.6;
+}
+
+.tip-trigger:hover svg {
+  stroke: #595959;
+}
+
+.tip-trigger .bubble {
+  position: absolute;
+  top: calc(100% + 10px);
+  left: 50%;
+  transform: translateX(-50%) translateY(-4px);
+  padding: 8px 14px;
+  background: #fff;
+  color: #333;
+  font-size: 13px;
+  white-space: nowrap;
+  border-radius: 8px;
+  box-shadow: 0 4px 16px rgba(0,0,0,0.12), 0 0 0 1px rgba(0,0,0,0.04);
+  pointer-events: none;
+  opacity: 0;
+  transition: all 0.2s cubic-bezier(0.215, 0.61, 0.355, 1);
+  z-index: 10;
+}
+
+.tip-trigger .bubble::after {
+  content: "";
+  position: absolute;
+  bottom: 100%;
+  left: 50%;
+  transform: translateX(-50%);
+  border: 6px solid transparent;
+  border-bottom-color: #fff;
+  filter: drop-shadow(0 -1px 1px rgba(0,0,0,0.06));
+}
+
+.tip-trigger:hover .bubble {
+  opacity: 1;
+  transform: translateX(-50%) translateY(0);
+}
+
 .news-row:hover {
   background: rgba(37, 99, 235, 0.04);
 }

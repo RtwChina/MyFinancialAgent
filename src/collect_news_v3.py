@@ -58,7 +58,7 @@ LLM_SUMMARY_TIMEOUT = int(os.getenv("LLM_SUMMARY_TIMEOUT", str(max(LLM_TIMEOUT, 
 LLM_MAX_RETRIES = int(os.getenv("LLM_MAX_RETRIES", "2"))  # 最大重试次数
 LLM_MAX_WORKERS = int(os.getenv("LLM_MAX_WORKERS", "2"))  # 并发数降低，避免超时
 LLM_BATCH_SIZE = max(1, int(os.getenv("LLM_BATCH_SIZE", "6")))
-LLM_CANDIDATE_LIMIT = max(1, int(os.getenv("LLM_CANDIDATE_LIMIT", "6")))
+LLM_CANDIDATE_LIMIT = max(1, int(os.getenv("LLM_CANDIDATE_LIMIT", "10")))
 LLM_RULES_SAMPLE_SIZE = max(8, int(os.getenv("LLM_RULES_SAMPLE_SIZE", "12")))
 SKIP_LLM = os.getenv("SKIP_LLM", "false").lower() == "true"  # 跳过 LLM 分析开关
 # 运行时实际生效的跳过标志（预留给测试或降级逻辑修改）
@@ -1340,11 +1340,12 @@ def load_news_for_summary(
                 normalized.get("importance_stars", 0) >= 3
                 and normalized.get("rule_passed")
                 and normalized.get("processing_status") in {"llm_processed", "reviewed"}
+                and start_time <= normalized.get("pub_date", "") <= end_time
             ):
                 fallback_filtered.append(normalized)
         filtered = fallback_filtered
         logger.info(
-            "日期级 summary 窗口为空，回退使用当前批次有效新闻 %s 条 (analysis_date=%s)",
+            "日期级 summary 窗口为空，回退使用当前批次窗口内有效新闻 %s 条 (analysis_date=%s)",
             len(filtered),
             analysis_date,
         )

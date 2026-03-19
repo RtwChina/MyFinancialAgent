@@ -251,9 +251,10 @@ async function ingestNews(env, items) {
       (
         pub_date, title, content, url, source, type,
         rule_passed, rule_reason, processing_status, ai_summary, market_impact,
-        importance_stars, related_symbols, is_relevant_to_review, news_hash, captured_at
+        importance_stars, related_symbols, is_relevant_to_review, news_hash, captured_at,
+        created_at
       )
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       ON CONFLICT(news_hash) DO UPDATE SET
         pub_date = excluded.pub_date,
         title = excluded.title,
@@ -288,6 +289,7 @@ async function ingestNews(env, items) {
         item.is_relevant_to_review ? 1 : 0,
         newsHash,
         item.captured_at || isoNow(),
+        isoNow(),
       )
       .run();
 
