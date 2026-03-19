@@ -2,7 +2,8 @@ from __future__ import annotations
 
 import json
 import time
-from dataclasses import dataclass
+from collections import defaultdict
+from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional
 
 import requests
@@ -113,6 +114,33 @@ class LLMClient:
         self.timeout = timeout
         self.max_retries = max_retries
         self.logger = logger
+        # 按模型累计调用统计
+        self._stats: Dict[str, Dict[str, float]] = defaultdict(
+            lambda: {"call_count": 0, "total_prompt_chars": 0, "total_response_chars": 0, "total_elapsed": 0.0}
+        )
+
+    def _record_stats(self, result: LLMCallResult) -> LLMCallResult:
+        """更新按模型的累计统计并返回原始结果。"""
+        s = self._stats[result.model]
+        s["call_count"] += 1
+        s["total_prompt_chars"] += result.prompt_chars
+        s["total_response_chars"] += result.response_chars
+        s["total_elapsed"] += result.elapsed_seconds
+        return result
+
+    def log_summary(self) -> None:
+        """按模型分组输出 LLM 调用汇总。"""
+        if not self.logger or not self._stats:
+            return
+        for model, s in self._stats.items():
+            self.logger.info(
+                "[LLM汇总] %s: 调用 %s次, prompt %.1fk字, response %.1fk字, 耗时 %.1fs",
+                model,
+                int(s["call_count"]),
+                s["total_prompt_chars"] / 1000,
+                s["total_response_chars"] / 1000,
+                s["total_elapsed"],
+            )
 
     def call_chat(
         self,
@@ -182,7 +210,7 @@ class LLMClient:
                     if response.ok:
                         response_json = response.json()
                         response_text = extract_message_content(response_json)
-                        return LLMCallResult(
+                        return self._record_stats(LLMCallResult(
                             success=True,
                             model=model_name,
                             base_url=self.base_url,
@@ -196,7 +224,7 @@ class LLMClient:
                             system_chars=system_chars,
                             user_chars=user_chars,
                             prompt_preview=prompt_preview,
-                        )
+                        ))
 
                     error_text = response.text[:500]
                     raise requests.HTTPError(error_text, response=response)
@@ -219,7 +247,7 @@ class LLMClient:
 
                 elapsed = time.time() - started
                 response_text = "".join(chunks)
-                return LLMCallResult(
+                return self._record_stats(LLMCallResult(
                     success=True,
                     model=model_name,
                     base_url=self.base_url,
@@ -233,14 +261,14 @@ class LLMClient:
                     system_chars=system_chars,
                     user_chars=user_chars,
                     prompt_preview=prompt_preview,
-                )
+                ))
 
             except requests.exceptions.Timeout as exc:
                 if self.logger:
-                    self.logger.error("%s 超时: %s", log_label, exc)
+                    self.logger.error("[%s] LLM超时: model=%s, timeout=%ss, retry=%s/%s, %s", log_label, model_name, request_timeout, attempt, retries, exc)
                 # 仅在耗尽所有重试后才返回失败，否则继续下一次 attempt
                 if attempt == retries:
-                    return LLMCallResult(
+                    return self._record_stats(LLMCallResult(
                         success=False,
                         model=model_name,
                         base_url=self.base_url,
@@ -255,14 +283,14 @@ class LLMClient:
                         user_chars=user_chars,
                         prompt_preview=prompt_preview,
                         error=str(exc),
-                    )
+                    ))
             except requests.exceptions.RequestException as exc:
                 # 尝试提取 HTTP 状态码；网络层异常（如 ConnectionError）无响应对象时置 None
                 status_code = exc.response.status_code if getattr(exc, "response", None) is not None else None
                 if self.logger:
-                    self.logger.error("%s 请求失败: %s", log_label, exc)
+                    self.logger.error("[%s] 请求失败: status=%s, %s", log_label, status_code, exc)
                 if attempt == retries:
-                    return LLMCallResult(
+                    return self._record_stats(LLMCallResult(
                         success=False,
                         model=model_name,
                         base_url=self.base_url,
@@ -277,11 +305,11 @@ class LLMClient:
                         user_chars=user_chars,
                         prompt_preview=prompt_preview,
                         error=str(exc),
-                    )
+                    ))
             except Exception as exc:
                 if self.logger:
-                    self.logger.error("%s 执行失败: %s", log_label, exc)
-                return LLMCallResult(
+                    self.logger.error("[%s] 执行失败: %s", log_label, exc)
+                return self._record_stats(LLMCallResult(
                     success=False,
                     model=model_name,
                     base_url=self.base_url,
@@ -296,10 +324,10 @@ class LLMClient:
                     user_chars=user_chars,
                     prompt_preview=prompt_preview,
                     error=str(exc),
-                )
+                ))
 
         # 理论上不可达：重试循环内部已处理所有路径，此处作为防御性兜底返回
-        return LLMCallResult(
+        return self._record_stats(LLMCallResult(
             success=False,
             model=model_name,
             base_url=self.base_url,
@@ -314,4 +342,4 @@ class LLMClient:
             user_chars=user_chars,
             prompt_preview=prompt_preview,
             error="unexpected retry exit",
-        )
+        ))

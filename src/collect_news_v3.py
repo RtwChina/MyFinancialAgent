@@ -7,6 +7,7 @@
 import json
 import re
 import os
+import time
 from datetime import datetime
 from zoneinfo import ZoneInfo
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -108,11 +109,11 @@ def fetch_sina_finance() -> list:
                 'source': 'sina',
             })
 
-        logger.info(f"新浪财经: {len(news_list)} 条")
+        logger.info("新浪财经: %s 条", len(news_list))
         return news_list
 
     except Exception as e:
-        logger.error(f"新浪财经失败: {str(e)}")
+        logger.error("[采集] 新浪财经请求失败: %s", e)
         return []
 
 
@@ -147,11 +148,11 @@ def fetch_cls_cn() -> list:
                 'source': 'cls_cn',
             })
 
-        logger.info(f"财联社: {len(news_list)} 条")
+        logger.info("财联社: %s 条", len(news_list))
         return news_list
 
     except Exception as e:
-        logger.error(f"财联社失败: {str(e)}")
+        logger.error("[采集] 财联社请求失败: %s", e)
         return []
 
 
@@ -212,11 +213,11 @@ def fetch_jin10() -> list:
                 seen.add(key)
                 unique_list.append(item)
 
-        logger.info(f"金十数据: {len(unique_list)} 条")
+        logger.info("金十数据: %s 条", len(unique_list))
         return unique_list
 
     except Exception as e:
-        logger.error(f"金十数据失败: {str(e)}")
+        logger.error("[采集] 金十数据请求失败: %s", e)
         return []
 
 
@@ -277,7 +278,7 @@ def fetch_yahoo_finance_news() -> list:
                             'source': 'yahoo_finance',
                         })
         except Exception as e:
-            logger.error(f"Yahoo yfinance 获取失败: {str(e)}")
+            logger.error("[采集] Yahoo yfinance 获取失败: %s", e)
 
         # 去重
         seen = set()
@@ -288,11 +289,11 @@ def fetch_yahoo_finance_news() -> list:
                 seen.add(key)
                 unique_list.append(item)
 
-        logger.info(f"Yahoo财经: {len(unique_list)} 条")
+        logger.info("Yahoo财经: %s 条", len(unique_list))
         return unique_list
 
     except Exception as e:
-        logger.error(f"Yahoo财经失败: {str(e)}")
+        logger.error("[采集] Yahoo财经请求失败: %s", e)
         return []
 
 
@@ -535,19 +536,19 @@ def generate_dynamic_screening_profile(news_list: List[Dict[str, Any]], analysis
 
     llm_result = llm_client.call_chat(
         messages,
-        log_label=f"动态初筛规则 {analysis_date}",
+        log_label="动态初筛规则 %s" % analysis_date,
         model=LLM_RULES_MODEL_ID,
         max_tokens=1400,
         timeout=LLM_RULES_TIMEOUT,
     )
     if not llm_result.success:
-        logger.error("动态初筛规则生成失败，回退默认静态规则")
+        logger.error("[初筛] LLM失败: 动态初筛规则生成失败，回退默认静态规则")
         return _default_screening_profile()
 
     try:
         profile = _normalize_screening_profile(_extract_json_payload(llm_result.response_text))
         logger.info(
-            "动态初筛规则已生成: 宏观=%s, 市场=%s, 噪音=%s, 动态主题=%s",
+            "[初筛] 动态规则已生成: 宏观=%s, 市场=%s, 噪音=%s, 动态主题=%s",
             len(profile["macro_keywords"]),
             len(profile["market_keywords"]),
             len(profile["noise_keywords"]),
@@ -555,7 +556,7 @@ def generate_dynamic_screening_profile(news_list: List[Dict[str, Any]], analysis
         )
         return profile
     except Exception as exc:
-        logger.error("动态初筛规则 JSON 解析失败，回退默认静态规则: %s", exc)
+        logger.error("[初筛] JSON解析失败，回退默认静态规则: %s", exc)
         return _default_screening_profile()
 
 
@@ -639,6 +640,11 @@ def apply_rule_filter(news: Dict[str, Any], profile: Dict[str, Any]) -> Dict[str
     # 噪音命中且没有跟踪标的、宏观关键词不足时，强制过滤，避免软性噪音通过评分门槛
     if noise_hits and not related_symbols and len(macro_hits) < 2:
         keep = False
+
+    logger.debug(
+        "[初筛] 评分: score=%.1f, keep=%s, macro=%s, market=%s, noise=%s, symbols=%s, title=%s",
+        score, keep, macro_hits, market_hits, noise_hits, related_symbols, title[:40],
+    )
 
     if not keep:
         return None
@@ -802,13 +808,15 @@ def _call_batch_llm(news_batch: List[Dict[str, Any]], batch_id: str) -> Dict[str
 
     llm_result = llm_client.call_chat(
         messages,
-        log_label=f"新闻批次分析 {batch_id}",
+        log_label="新闻批次分析 %s" % batch_id,
         model=LLM_BATCH_MODEL_ID,
         max_tokens=1200,
         timeout=LLM_BATCH_TIMEOUT,
     )
     if not llm_result.success:
         return _fallback_batch_result(news_batch, batch_id)
+
+    logger.info("[批次分析] %s LLM原始返回(前200字): %s", batch_id, llm_result.response_text[:200])
 
     try:
         parsed = _extract_json_payload(llm_result.response_text)
@@ -818,7 +826,7 @@ def _call_batch_llm(news_batch: List[Dict[str, Any]], batch_id: str) -> Dict[str
         parsed["batch_id"] = batch_id
         return parsed
     except Exception as exc:
-        logger.error("批次 %s JSON 解析失败，回退规则结果: %s", batch_id, exc)
+        logger.error("[批次分析] %s JSON解析失败，回退规则结果: %s", batch_id, exc)
         return _fallback_batch_result(news_batch, batch_id)
 
 
@@ -1178,6 +1186,12 @@ def build_daily_summary_record(news_list: List[Dict[str, Any]], analysis_date: s
             "raw_summary": "",
         }
 
+    logger.info(
+        "[日总结] 候选新闻: %s条, news_hash=%s",
+        len(news_list),
+        [item.get("news_hash", "")[:8] for item in news_list[:20]],
+    )
+
     summary_news = sorted(
         news_list,
         key=lambda item: (
@@ -1243,7 +1257,7 @@ def build_daily_summary_record(news_list: List[Dict[str, Any]], analysis_date: s
         ]
         llm_result = llm_client.call_chat(
             messages,
-            log_label=f"日期级综合分析 {analysis_date}",
+            log_label="日期级综合分析 %s" % analysis_date,
             model=LLM_SUMMARY_MODEL_ID,
             max_tokens=1400,
             timeout=LLM_SUMMARY_TIMEOUT,
@@ -1375,38 +1389,45 @@ def _attach_remote_news_ids(items: List[Dict[str, Any]], result: Dict[str, Any] 
 def collect_all_news(context: ExecutionContext | None = None) -> Dict[str, Any]:
     """采集新闻 -> 动态规则初筛 -> 批量 LLM 结构化增强"""
     context = context or build_execution_context()
-    logger.info("=" * 60)
-    logger.info("开始采集新闻 (v5.0 - 动态规则初筛 + 状态机 + 批量 LLM)")
-    logger.info(
-        "配置: rules_model=%s, batch_model=%s, summary_model=%s, LLM_TIMEOUT=%ss, LLM_MAX_RETRIES=%s, LLM_MAX_WORKERS=%s, LLM_BATCH_SIZE=%s, LLM_CANDIDATE_LIMIT=%s, SKIP_LLM=%s",
-        LLM_RULES_MODEL_ID, LLM_BATCH_MODEL_ID, LLM_SUMMARY_MODEL_ID, LLM_TIMEOUT, LLM_MAX_RETRIES, LLM_MAX_WORKERS, LLM_BATCH_SIZE, LLM_CANDIDATE_LIMIT, EFFECTIVE_SKIP_LLM,
-    )
-    logger.info(
-        "阶段超时: rules_timeout=%ss, batch_timeout=%ss, summary_timeout=%ss",
-        LLM_RULES_TIMEOUT,
-        LLM_BATCH_TIMEOUT,
-        LLM_SUMMARY_TIMEOUT,
-    )
-    logger.info("=" * 60)
-
     all_news: List[Dict[str, Any]] = []
     analysis_date = get_latest_closed_trading_day(context)
-    logger.info("当前新闻分析目标日: %s", analysis_date)
 
-    print("\n正在采集新闻...")
+    logger.info("========== 新闻采集 v5.0 启动 ==========")
+    logger.info(
+        "分析日: %s | LLM: rules=%s, batch=%s, summary=%s",
+        analysis_date, LLM_RULES_MODEL_ID, LLM_BATCH_MODEL_ID, LLM_SUMMARY_MODEL_ID,
+    )
+    logger.info(
+        "超时: rules=%ss, batch=%ss, summary=%ss | 重试=%s | 并发=%s | 批量=%s | 候选上限=%s | SKIP_LLM=%s",
+        LLM_RULES_TIMEOUT, LLM_BATCH_TIMEOUT, LLM_SUMMARY_TIMEOUT,
+        LLM_MAX_RETRIES, LLM_MAX_WORKERS, LLM_BATCH_SIZE, LLM_CANDIDATE_LIMIT, EFFECTIVE_SKIP_LLM,
+    )
+    logger.info("==========================================")
+
+    # --- 采集阶段 ---
+    t0 = time.time()
     all_news.extend(fetch_source_news(context))
-    print(f"  ✓ merged-sources: {len(all_news)} 条")
-
     unique_news = merge_and_deduplicate(all_news)
-    logger.info("合并去重后: %s 条", len(unique_news))
+    logger.info("[采集] 完成: %s条 (去重后 %s条), 耗时 %.1fs", len(all_news), len(unique_news), time.time() - t0)
 
+    # --- 初筛阶段 ---
+    t0 = time.time()
     screening_profile = generate_dynamic_screening_profile(unique_news, analysis_date)
-    logger.info("动态初筛摘要: %s", screening_profile.get("reasoning_summary"))
+    logger.info(
+        "[初筛] 动态规则: 宏观词=%s, 市场词=%s, 噪音词=%s, 动态主题=%s, threshold=%s",
+        screening_profile.get("macro_keywords"),
+        screening_profile.get("market_keywords"),
+        screening_profile.get("noise_keywords"),
+        [t.get("label") for t in screening_profile.get("focus_topics", [])],
+        screening_profile.get("score_threshold"),
+    )
     filtered_news = filter_news_by_rules(unique_news, screening_profile)
-    print(f"\n规则初筛保留 {len(filtered_news)} / {len(unique_news)} 条新闻...")
+    logger.info("[初筛] 完成: 保留 %s/%s条, 耗时 %.1fs", len(filtered_news), len(unique_news), time.time() - t0)
 
+    # --- 批次分析阶段 ---
+    t0 = time.time()
     processed_news, final_news, batch_analysis_records = enhance_news_with_llm(filtered_news, analysis_date)
-    logger.info("LLM 精选后保留 %s 条新闻", len(final_news))
+    logger.info("[批次分析] 完成: 保留 %s条, 耗时 %.1fs", len(final_news), time.time() - t0)
     return {
         "analysis_date": analysis_date,
         "screening_profile": screening_profile,
@@ -1447,6 +1468,7 @@ def run_news_pipeline(
 
     inserted_count = 0
     if collect_fresh_news:
+        t0 = time.time()
         if use_remote:
             screened_result = send_news(screened_news) if screened_news else {"inserted": 0, "updated": 0, "ignored": 0}
             processed_result = send_news(processed_news) if processed_news else {"inserted": 0, "updated": 0, "ignored": 0}
@@ -1454,46 +1476,27 @@ def run_news_pipeline(
             _attach_remote_news_ids(processed_news, processed_result)
             _attach_remote_news_ids(news_list, processed_result)
             inserted_count = screened_result.get('inserted', 0) + processed_result.get('inserted', 0)
-            logger.info(
-                "Cloudflare D1 新闻写入完成: 初筛新增 %s / 更新 %s；LLM 阶段新增 %s / 更新 %s",
-                screened_result.get('inserted', 0),
-                screened_result.get('updated', 0),
-                processed_result.get('inserted', 0),
-                processed_result.get('updated', 0),
-            )
-            logger.info(
-                "Cloudflare D1 新闻去重统计: 初筛忽略 %s；LLM 阶段忽略 %s",
-                screened_result.get('ignored', 0),
-                processed_result.get('ignored', 0),
-            )
+            updated_count = screened_result.get('updated', 0) + processed_result.get('updated', 0)
         else:
             init_database()
             screened_stats = upsert_news_batch(screened_news)
             processed_stats = upsert_news_batch(processed_news)
             inserted_count = screened_stats["inserted"] + processed_stats["inserted"]
-            logger.info(
-                "数据库新闻写入完成: 初筛新增 %s / 更新 %s；LLM 阶段新增 %s / 更新 %s",
-                screened_stats["inserted"],
-                screened_stats["updated"],
-                processed_stats["inserted"],
-                processed_stats["updated"],
-            )
-            logger.info(
-                "数据库新闻去重统计: 初筛忽略 %s；LLM 阶段忽略 %s",
-                screened_stats["ignored"],
-                processed_stats["ignored"],
-            )
+            updated_count = screened_stats["updated"] + processed_stats["updated"]
+        logger.info("[写入D1] 完成: 新增 %s, 更新 %s, 耗时 %.1fs", inserted_count, updated_count, time.time() - t0)
+
     window_news = load_news_for_summary(analysis_date, use_remote, fallback_news=news_list)
     daily_record: Dict[str, Any] = {}
     if persist_summary and window_news:
+        t0 = time.time()
         daily_record = build_daily_summary_record(window_news, analysis_date)
         if use_remote:
             send_daily_news_ai_analysis(daily_record)
         else:
             save_daily_news_ai_analysis(daily_record)
-            logger.info("日期级综合分析已更新: %s", analysis_date)
+        logger.info("[日总结] 完成: 已更新, 耗时 %.1fs", time.time() - t0)
     elif persist_summary:
-        logger.info("交易日 %s 的分析窗口内暂无有效新闻，跳过 daily_summary 覆盖", analysis_date)
+        logger.info("[日总结] 跳过: 交易日 %s 窗口内暂无有效新闻", analysis_date)
         if not use_remote:
             daily_record = get_daily_news_ai_analysis_by_date(analysis_date) or {}
 
@@ -1507,6 +1510,9 @@ def run_news_pipeline(
     if not news_list:
         news_list = window_news
     summary_text = daily_record.get("raw_summary") or _generate_rule_based_summary(news_list[:10])
+
+    # LLM 调用汇总
+    llm_client.log_summary()
 
     return {
         "filepath": None,
@@ -1523,29 +1529,16 @@ def run_news_pipeline(
 
 def main():
     """主函数"""
-    logger.info("=" * 60)
-    logger.info("新闻采集脚本 v4.0 启动")
-    logger.info("=" * 60)
-
     try:
         result = run_news_pipeline()
-        print("\n" + "=" * 60)
-        print("采集完成!")
-        print("=" * 60)
-        print(f"新闻总数: {result['news_count']} 条")
-        print(f"数据库新增: {result['inserted_count']} 条")
-        print(f"输出文件: {result['filepath']}")
-        print(f"分析交易日: {result['analysis_date']}")
-        print(f"LLM 批次数: {result['batch_count']}")
-
-        if result.get("summary"):
-            print("\n【AI 分析摘要】")
-            print(result["summary"][:500] + "..." if len(result["summary"]) > 500 else result["summary"])
-
-        logger.info("新闻采集脚本执行完成")
+        logger.info(
+            "新闻采集完成: 总数 %s条, 新增 %s条, 批次 %s, 分析日 %s",
+            result["news_count"], result["inserted_count"],
+            result["batch_count"], result["analysis_date"],
+        )
         return 0
     except CloudflareIngestError as exc:
-        logger.error("Cloudflare 写入失败: %s", exc, exc_info=True)
+        logger.error("[写入D1] Cloudflare写入失败: %s", exc, exc_info=True)
         return 1
     except Exception as exc:
         logger.error("执行失败: %s", exc, exc_info=True)

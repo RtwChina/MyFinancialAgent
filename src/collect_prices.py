@@ -42,7 +42,8 @@ def collect_all_prices(context: ExecutionContext | None = None) -> pd.DataFrame:
 
     df = pd.DataFrame(all_data)
     # current_price 为 None 表示该标的当日无行情数据（停牌或接口异常）
-    logger.info(f"价格数据采集完成，共获取 {len([d for d in all_data if d['current_price'] is not None])} 条有效数据")
+    valid_count = len([d for d in all_data if d["current_price"] is not None])
+    logger.info("价格数据采集完成，共获取 %s 条有效数据", valid_count)
 
     return df
 
@@ -51,45 +52,33 @@ def collect_all_prices(context: ExecutionContext | None = None) -> pd.DataFrame:
 def main():
     """主函数"""
     context = build_execution_context()
-    logger.info("=" * 60)
-    logger.info("股票价格采集脚本启动")
-    logger.info("=" * 60)
+    logger.info("========== 价格采集启动 ==========")
 
     try:
-        # 收集价格数据
         prices_df = collect_all_prices(context)
 
         prices_list = prices_df.to_dict('records')
-        # 根据配置选择远程写入（Cloudflare D1）或本地 SQLite，二者均有去重逻辑
         if ENABLE_REMOTE_WRITE and is_remote_write_configured():
             remote_result = send_prices(prices_list)
             inserted_count = remote_result.get('inserted', 0)
             logger.info(
-                "Cloudflare D1 写入完成: 新增 %s 条，跳过重复 %s 条",
+                "Cloudflare D1 写入完成: 新增 %s 条, 跳过重复 %s 条",
                 inserted_count,
                 remote_result.get('ignored', 0),
             )
         else:
             init_database()
             inserted_count = batch_insert_prices(prices_list)
-            logger.info(f"数据库写入完成: 新增 {inserted_count} 条，跳过重复 {len(prices_list) - inserted_count} 条")
-
-        # 打印汇总
-        print("\n" + "=" * 60)
-        print("价格采集汇总:")
-        print("=" * 60)
-        print(prices_df.to_string(index=False))
-        print("=" * 60)
-        print(f"数据库新增: {inserted_count} 条")
+            logger.info("数据库写入完成: 新增 %s 条, 跳过重复 %s 条", inserted_count, len(prices_list) - inserted_count)
 
         logger.info("股票价格采集脚本执行完成")
         return 0
 
     except CloudflareIngestError as e:
-        logger.error(f"Cloudflare 写入失败: {str(e)}", exc_info=True)
+        logger.error("[写入D1] Cloudflare写入失败: %s", e, exc_info=True)
         return 1
     except Exception as e:
-        logger.error(f"脚本执行失败: {str(e)}", exc_info=True)
+        logger.error("脚本执行失败: %s", e, exc_info=True)
         return 1
 
 

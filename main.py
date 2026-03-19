@@ -35,11 +35,11 @@ def run_price_collector(context: ExecutionContext | None = None):
         else:
             init_database()
             inserted_count = batch_insert_prices(prices_list)
-            logger.info(f"价格数据库写入: 新增 {inserted_count} 条")
+            logger.info("价格数据库写入: 新增 %s 条", inserted_count)
 
         return True
     except Exception as e:
-        logger.error(f"价格采集失败: {str(e)}", exc_info=True)
+        logger.error("价格采集失败: %s", e, exc_info=True)
         return None
 
 
@@ -68,7 +68,7 @@ def run_news_collector(
         )
         return True
     except Exception as e:
-        logger.error(f"新闻采集失败: {str(e)}", exc_info=True)
+        logger.error("新闻采集失败: %s", e, exc_info=True)
         return None
 
 
@@ -77,28 +77,28 @@ def run_full_pipeline(context: ExecutionContext | None = None):
     context = context or build_execution_context()
     results = {}
 
-    print("\n[1/2] 正在采集股票价格数据...")
+    logger.info("[1/2] 正在采集股票价格数据...")
     prices_file = run_price_collector(context)
     results["prices"] = prices_file
     if prices_file:
-        print("      ✓ 价格采集完成")
+        logger.info("[1/2] 价格采集完成")
     else:
-        print("      ✗ 价格采集失败")
+        logger.error("[1/2] 价格采集失败")
 
-    print("\n[2/2] 正在采集新闻数据...")
+    logger.info("[2/2] 正在采集新闻数据...")
     news_file = run_news_collector(collect_fresh_news=True, persist_summary=True, context=context)
     results["news"] = news_file
     if news_file:
-        print("      ✓ 新闻采集完成")
+        logger.info("[2/2] 新闻采集完成")
     else:
-        print("      ✗ 新闻采集失败")
+        logger.error("[2/2] 新闻采集失败")
     return results
 
 
 def run_hourly_news_job(context: ExecutionContext | None = None):
     """每小时任务：只采集新闻，不写 daily_news_ai_analysis"""
     context = context or build_execution_context()
-    print("\n[Hourly] 正在执行小时新闻任务...")
+    logger.info("[Hourly] 正在执行小时新闻任务...")
     news_file = run_news_collector(collect_fresh_news=True, persist_summary=False, context=context)
     return {"news": news_file}
 
@@ -106,7 +106,7 @@ def run_hourly_news_job(context: ExecutionContext | None = None):
 def run_close_summary_job(context: ExecutionContext | None = None):
     """收盘后任务：补采最新新闻 + 存价格 + 汇总"""
     context = context or build_execution_context()
-    print("\n[Close] 正在执行收盘后汇总任务...")
+    logger.info("[Close] 正在执行收盘后汇总任务...")
     prices_file = run_price_collector(context)
     news_file = run_news_collector(collect_fresh_news=True, persist_summary=True, context=context)
     return {"prices": prices_file, "news": news_file}
@@ -129,11 +129,9 @@ def main():
     """主函数 - 运行所有采集任务"""
     args = parse_args()
     context = build_execution_context()
-    logger.info("=" * 60)
-    logger.info("股票数据自动化复盘系统 - 数据采集")
-    logger.info(f"启动时间: {context.clock.now().strftime('%Y-%m-%d %H:%M:%S')}")
-    logger.info("运行模式: %s", args.mode)
-    logger.info("=" * 60)
+    logger.info("========== 复盘系统启动 ==========")
+    logger.info("启动时间: %s | 模式: %s", context.clock.now().strftime("%Y-%m-%d %H:%M:%S"), args.mode)
+    logger.info("====================================")
 
     if args.mode == "hourly-news":
         results = run_hourly_news_job(context)
@@ -143,19 +141,15 @@ def main():
         results = run_full_pipeline(context)
 
     # 汇总
-    print("\n" + "=" * 60)
-    print("采集任务完成!")
-    print("=" * 60)
-
-    # 以 results 中非 None 的条目数衡量成功任务数
     success_count = sum(1 for v in results.values() if v is not None)
-    print(f"成功: {success_count}/2 项任务")
+    total_count = len(results)
+    logger.info("采集任务完成: 成功 %s/%s 项", success_count, total_count)
 
     # 所有任务均成功时返回 0，否则返回 1 供调用方或 cron 检测失败
     if all(v is not None for v in results.values()):
         return 0
     else:
-        print("\n部分任务失败，请检查日志获取详细信息。")
+        logger.error("部分任务失败，请检查日志获取详细信息")
         return 1
 
 

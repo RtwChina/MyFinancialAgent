@@ -74,7 +74,7 @@ def fetch_sina_finance() -> list[dict]:
         logger.info("新浪财经: %s 条", len(news_list))
         return news_list
     except Exception as exc:
-        logger.error("新浪财经失败: %s", exc)
+        logger.error("[采集] 新浪财经请求失败: %s", exc)
         return []
 
 
@@ -113,7 +113,7 @@ def fetch_cls_cn() -> list[dict]:
         logger.info("财联社: %s 条", len(news_list))
         return news_list
     except Exception as exc:
-        logger.error("财联社失败: %s", exc)
+        logger.error("[采集] 财联社请求失败: %s", exc)
         return []
 
 
@@ -178,7 +178,7 @@ def fetch_jin10(context: ExecutionContext) -> list[dict]:
         logger.info("金十数据: %s 条", len(unique_list))
         return unique_list
     except Exception as exc:
-        logger.error("金十数据失败: %s", exc)
+        logger.error("[采集] 金十数据请求失败: %s", exc)
         return []
 
 
@@ -234,7 +234,7 @@ def fetch_yahoo_finance_news() -> list[dict]:
                             }
                         )
         except Exception as exc:
-            logger.warning("Yahoo yfinance 获取失败: %s", exc)
+            logger.error("[采集] Yahoo yfinance获取失败: %s", exc)
 
         # 以标题前 50 字符去重，合并两个渠道的结果
         seen: set[str] = set()
@@ -248,7 +248,7 @@ def fetch_yahoo_finance_news() -> list[dict]:
         logger.info("Yahoo财经: %s 条", len(unique_list))
         return unique_list
     except Exception as exc:
-        logger.error("Yahoo财经失败: %s", exc)
+        logger.error("[采集] Yahoo财经请求失败: %s", exc)
         return []
 
 

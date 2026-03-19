@@ -153,10 +153,7 @@ def fetch_all_prices_live(context: ExecutionContext) -> list[dict]:
     """Fetch current prices for all tracked symbols from yfinance."""
     tracked = get_tracked_symbols()
     all_data: list[dict] = []
-    logger.info("=" * 50)
-    logger.info("开始采集股票价格数据（从标的表动态读取）")
-    logger.info("目标标的数量: %s", len(tracked))
-    logger.info("=" * 50)
+    logger.info("========== 价格采集: %s 个标的 ==========", len(tracked))
 
     for sym_record in tracked:
         data = fetch_stock_data_live(sym_record, context)

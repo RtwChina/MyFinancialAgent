@@ -32,7 +32,7 @@ def is_remote_write_configured() -> bool:
 
 def _headers() -> Dict[str, str]:
     return {
-        "Authorization": f"Bearer {INGEST_API_TOKEN}",
+        "Authorization": "Bearer %s" % INGEST_API_TOKEN,
         "Content-Type": "application/json",
     }
 
@@ -54,7 +54,7 @@ def _post(path: str, payload: Dict[str, Any]) -> Dict[str, Any]:
     if not is_remote_write_configured():
         raise CloudflareIngestError("未配置 INGEST_API_BASE_URL 或 INGEST_API_TOKEN")
 
-    url = f"{INGEST_API_BASE_URL}{path}"
+    url = "%s%s" % (INGEST_API_BASE_URL, path)
     sanitized_payload = _sanitize_payload(payload)
     last_error: Optional[Exception] = None
 
@@ -65,12 +65,12 @@ def _post(path: str, payload: Dict[str, Any]) -> Dict[str, Any]:
             return response.json()
         except requests.RequestException as exc:
             last_error = exc
-            logger.warning("调用 Workers API 失败，第 %s/%s 次重试: %s", attempt, DEFAULT_MAX_RETRIES, exc)
+            logger.error("[写入D1] API请求失败: path=%s, retry=%s/%s, %s", path, attempt, DEFAULT_MAX_RETRIES, exc)
             # 每次重试等待时间随次数线性递增，避免瞬时大量冲击
             if attempt < DEFAULT_MAX_RETRIES:
                 time.sleep(DEFAULT_RETRY_DELAY * attempt)
 
-    raise CloudflareIngestError(f"调用 Workers API 失败: {last_error}") from last_error
+    raise CloudflareIngestError("调用 Workers API 失败: %s" % last_error) from last_error
 
 
 def _get(path: str, query: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
@@ -78,8 +78,8 @@ def _get(path: str, query: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
     if not is_remote_write_configured():
         raise CloudflareIngestError("未配置 INGEST_API_BASE_URL 或 INGEST_API_TOKEN")
 
-    query_string = f"?{urlencode(query)}" if query else ""
-    url = f"{INGEST_API_BASE_URL}{path}{query_string}"
+    query_string = "?%s" % urlencode(query) if query else ""
+    url = "%s%s%s" % (INGEST_API_BASE_URL, path, query_string)
     last_error: Optional[Exception] = None
 
     for attempt in range(1, DEFAULT_MAX_RETRIES + 1):
@@ -89,11 +89,11 @@ def _get(path: str, query: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
             return response.json()
         except requests.RequestException as exc:
             last_error = exc
-            logger.warning("调用 Workers API 失败，第 %s/%s 次重试: %s", attempt, DEFAULT_MAX_RETRIES, exc)
+            logger.error("[写入D1] API请求失败: path=%s, retry=%s/%s, %s", path, attempt, DEFAULT_MAX_RETRIES, exc)
             if attempt < DEFAULT_MAX_RETRIES:
                 time.sleep(DEFAULT_RETRY_DELAY * attempt)
 
-    raise CloudflareIngestError(f"调用 Workers API 失败: {last_error}") from last_error
+    raise CloudflareIngestError("调用 Workers API 失败: %s" % last_error) from last_error
 
 
 def _send_in_batches(path: str, items: List[Dict[str, Any]], batch_size: int) -> Dict[str, Any]:
@@ -159,7 +159,7 @@ def initialize_review(archive_date: str) -> Optional[Dict[str, Any]]:
     if not archive_date:
         return None
 
-    result = _post(f"/api/reviews/{archive_date}/initialize", {})
+    result = _post("/api/reviews/%s/initialize" % archive_date, {})
     logger.info("Cloudflare 初始化复盘记录完成: %s", result)
     return result
 
