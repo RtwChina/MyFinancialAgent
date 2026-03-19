@@ -1,3 +1,18 @@
+// ===== snarkdown (inline, ~1KB) — Markdown → HTML =====
+const _sdTags={'':['\x3cem>','</em>'],_:['\x3cstrong>','</strong>'],'*':['\x3cstrong>','</strong>'],'~':['\x3cs>','</s>'],'\n':['\x3cbr />'],' ':['\x3cbr />'],'-':['\x3chr />']};
+function _sdOutdent(s){return s.replace(RegExp('^'+(s.match(/^(\t| )+/)||'')[0],'gm'),'');}
+function _sdEnc(s){return(s+'').replace(/"/g,'&quot;').replace(/</g,'&lt;').replace(/>/g,'&gt;');}
+function snarkdown(md,prevLinks){let tok=/((?:^|\n+)(?:\n---+|\* \*(?: \*)+)\n)|(?:^``` *(\w*)\n([\s\S]*?)\n```$)|((?:(?:^|\n+)(?:\t|  {2,}).+)+\n*)|((?:(?:^|\n)([>*+-]|\d+\.)\s+.*)+)|(?:!\[([^\]]*?)\]\(([^)]+?)\))|(\[)|(\](?:\(([^)]+?)\))?)|(?:(?:^|\n+)([^\s].*)\n(-{3,}|={3,})(?:\n+|$))|(?:(?:^|\n+)(#{1,6})\s*(.+)(?:\n+|$))|(?:`([^`].*?)`)|(  \n\n*|\n{2,}|__|\*\*|[_*]|~~)/gm,ctx=[],out='',links=prevLinks||{},last=0,chunk,prev,token,inner,t;function tag(tk){let d=_sdTags[tk[1]||''],e=ctx[ctx.length-1]==tk;if(!d)return tk;if(!d[1])return d[0];if(e)ctx.pop();else ctx.push(tk);return d[e|0];}function flush(){let s='';while(ctx.length)s+=tag(ctx[ctx.length-1]);return s;}md=md.replace(/^\[(.+?)\]:\s*(.+)$/gm,(s,n,u)=>{links[n.toLowerCase()]=u;return '';}).replace(/^\n+|\n+$/g,'');while((token=tok.exec(md))){prev=md.substring(last,token.index);last=tok.lastIndex;chunk=token[0];if(prev.match(/[^\\](\\\\)*\\$/)){}else if(t=(token[3]||token[4])){chunk='\x3cpre class="code '+(token[4]?'poetry':token[2].toLowerCase())+'">\x3ccode'+(token[2]?` class="language-${token[2].toLowerCase()}"`:'')+'>'+_sdOutdent(_sdEnc(t).replace(/^\n+|\n+$/g,''))+'</code></pre>';}else if(t=token[6]){if(t.match(/\./)){token[5]=token[5].replace(/^\d+/gm,'');}inner=snarkdown(_sdOutdent(token[5].replace(/^\s*[>*+.-]/gm,'')));if(t=='>')t='blockquote';else{t=t.match(/\./)?'ol':'ul';inner=inner.replace(/^(.*)(\n|$)/gm,'\x3cli>$1</li>');}chunk='\x3c'+t+'>'+inner+'</'+t+'>';}else if(token[8]){chunk=`\x3cimg src="${_sdEnc(token[8])}" alt="${_sdEnc(token[7])}">`;}else if(token[10]){out=out.replace('\x3ca>',`\x3ca href="${_sdEnc(token[11]||links[prev.toLowerCase()])}">`);chunk=flush()+'</a>';}else if(token[9]){chunk='\x3ca>';}else if(token[12]||token[14]){t='h'+(token[14]?token[14].length:(token[13]>'='?1:2));chunk='\x3c'+t+'>'+snarkdown(token[12]||token[15],links)+'</'+t+'>';}else if(token[16]){chunk='\x3ccode>'+_sdEnc(token[16])+'</code>';}else if(token[17]||token[1]){chunk=tag(token[17]||'--');}out+=prev;out+=chunk;}return(out+md.substring(last)+flush()).replace(/^\n+|\n+$/g,'');}
+// ===== end snarkdown =====
+// Pre-process user text before snarkdown to avoid misparse
+function mdEscape(text) {
+  return (text || "")
+    // Neutralize standalone [text] so snarkdown doesn't treat it as a link
+    .replace(/(?<!!)\[([^\]]+)\](?!\()/g, "⟦$1⟧")
+    // Prevent "## 1. text" from becoming h2>ol — escape the dot after number
+    .replace(/^(#{1,6}\s+\d+)\./gm, "$1．");
+}
+
 const NEWS_SOURCE_LABELS = {
   sina: "新浪",
   cls_cn: "财联社",
@@ -608,7 +623,6 @@ async function openReviewDrawer(archiveDate) {
   const reviewStatus = data.draft?.review_status || "initialized";
   state.editMode = reviewStatus !== "reviewed";
   setReviewStatus(reviewStatus);
-  setReviewMode(reviewStatus);
 
   const effectiveAnalysis = getEffectiveAnalysis(data.analysis, data.news);
   renderPrices(data.pricesByType || data.prices);
@@ -623,6 +637,8 @@ async function openReviewDrawer(archiveDate) {
     tradingSummary: data.draft?.trading_summary || "",
   });
 
+  initMdTabs();
+  setReviewMode(reviewStatus);
   setReviewStep("news");
   reviewDrawer.classList.remove("hidden");
 }
@@ -723,14 +739,26 @@ function buildNewsRow(item) {
   return row;
 }
 
+function renderMdCell(text, maxLen) {
+  const raw = (text || "").trim();
+  if (!raw) return "待补充";
+  // Only show # headings in list view, skip ## and deeper
+  const headings = raw.split("\n")
+    .filter(line => /^#\s+/.test(line.trim()))
+    .map(line => line.trim().replace(/^#\s+/, ""))
+    .filter(Boolean);
+  if (!headings.length) return escapeHtml(truncateText(raw, maxLen || 70));
+  return escapeHtml(truncateText(headings.join(" / "), maxLen || 70));
+}
+
 function buildReviewRow(item) {
   const cycle = buildReviewCycle(item.archive_date);
   const row = document.createElement("tr");
   row.innerHTML = `
     <td><strong>${item.archive_date}</strong><small>${formatReviewWindowLabel(cycle)}</small></td>
-    <td>${escapeHtml(truncateText(item.market_sentiment || "待补充", 70))}</td>
-    <td>${escapeHtml(truncateText(item.sector_rotation || "待补充", 70))}</td>
-    <td>${escapeHtml(truncateText(item.asset_plan || "待补充", 70))}</td>
+    <td class="md-cell">${renderMdCell(item.market_sentiment, 70)}</td>
+    <td class="md-cell">${renderMdCell(item.sector_rotation, 70)}</td>
+    <td class="md-cell">${renderMdCell(item.asset_plan, 70)}</td>
     <td></td>
     <td></td>
   `;
@@ -778,9 +806,70 @@ function applyFormValues(values) {
   }
 }
 
+function initMdTabs() {
+  reviewForm.querySelectorAll("textarea").forEach((ta) => {
+    if (ta.parentElement.querySelector(".md-tab-bar")) return;
+    const bar = document.createElement("div");
+    bar.className = "md-tab-bar";
+    const editBtn = document.createElement("button");
+    editBtn.type = "button";
+    editBtn.className = "md-tab active";
+    editBtn.textContent = "编辑";
+    const previewBtn = document.createElement("button");
+    previewBtn.type = "button";
+    previewBtn.className = "md-tab";
+    previewBtn.textContent = "预览";
+    bar.append(editBtn, previewBtn);
+
+    const preview = document.createElement("div");
+    preview.className = "md-preview hidden";
+
+    ta.parentElement.insertBefore(bar, ta);
+    ta.parentElement.insertBefore(preview, ta.nextSibling);
+
+    editBtn.addEventListener("click", () => {
+      editBtn.classList.add("active");
+      previewBtn.classList.remove("active");
+      ta.classList.remove("hidden");
+      preview.classList.add("hidden");
+    });
+    previewBtn.addEventListener("click", () => {
+      previewBtn.classList.add("active");
+      editBtn.classList.remove("active");
+      preview.innerHTML = snarkdown(mdEscape(ta.value)) || '<span class="muted">暂无内容</span>';
+      ta.classList.add("hidden");
+      preview.classList.remove("hidden");
+    });
+  });
+}
+
+function syncMdPreviews(readOnly) {
+  reviewForm.querySelectorAll("textarea").forEach((ta) => {
+    const preview = ta.parentElement.querySelector(".md-preview");
+    const bar = ta.parentElement.querySelector(".md-tab-bar");
+    if (!preview || !bar) return;
+    if (readOnly) {
+      preview.innerHTML = snarkdown(mdEscape(ta.value)) || '<span class="muted">暂无内容</span>';
+      ta.classList.add("hidden");
+      preview.classList.remove("hidden");
+      bar.classList.add("hidden");
+    } else {
+      const editBtn = bar.querySelector(".md-tab");
+      const previewBtn = bar.querySelectorAll(".md-tab")[1];
+      if (editBtn) editBtn.classList.add("active");
+      if (previewBtn) previewBtn.classList.remove("active");
+      ta.classList.remove("hidden");
+      preview.classList.add("hidden");
+      bar.classList.remove("hidden");
+    }
+  });
+}
+
 function buildPriceCard(item) {
   const card = document.createElement("article");
-  card.className = "price-card";
+  const raw = Number(item.change_percent ?? 0);
+  const dir = raw > 0 ? "up" : raw < 0 ? "down" : "";
+  card.className = `price-card ${dir}`.trim();
   const name = document.createElement("div");
   name.className = "price-card-name";
   const title = document.createElement("strong");
@@ -793,8 +882,7 @@ function buildPriceCard(item) {
   price.className = "price-value";
   price.textContent = formatPrice(item.current_price);
   const change = document.createElement("div");
-  const raw = Number(item.change_percent ?? 0);
-  change.className = `price-change ${raw > 0 ? "up" : raw < 0 ? "down" : ""}`.trim();
+  change.className = `price-change ${dir}`.trim();
   change.textContent = `${raw > 0 ? "+" : ""}${Number.isFinite(raw) ? raw.toFixed(2) : "-"}%`;
   card.append(name, price, change);
   return card;
@@ -817,6 +905,28 @@ function renderPrices(prices) {
   pricesBox.innerHTML = "";
   pricesBox.classList.remove("price-sections-compact");
   delete pricesBox.dataset.sectionCount;
+
+  // 方案 A: 点击「当日价格」标题区折叠/展开全部
+  const snapshotHead = pricesBox.closest(".review-snapshot-card")?.querySelector(".snapshot-head");
+  if (snapshotHead && !snapshotHead.dataset.collapseInit) {
+    snapshotHead.dataset.collapseInit = "1";
+    snapshotHead.style.cursor = "pointer";
+    snapshotHead.style.userSelect = "none";
+    const hint = document.createElement("span");
+    hint.className = "price-collapse-hint";
+    hint.textContent = "▾ 点击折叠";
+    snapshotHead.appendChild(hint);
+    snapshotHead.addEventListener("click", () => {
+      const allDetails = pricesBox.querySelectorAll("details.price-section");
+      if (!allDetails.length) return;
+      const anyOpen = [...allDetails].some((d) => d.open);
+      allDetails.forEach((d) => d.open = !anyOpen);
+      ["priceSectionIndex", "priceSectionSector", "priceSectionStock"].forEach(
+        (k) => localStorage.setItem(k, anyOpen ? "closed" : "open")
+      );
+      hint.textContent = anyOpen ? "▸ 点击展开" : "▾ 点击折叠";
+    });
+  }
 
   // Sectioned display: { index: [...], sector: [...], stock: [...] }
   if (prices && !Array.isArray(prices) && typeof prices === "object") {
@@ -1173,14 +1283,15 @@ function setReviewMode(status) {
   reviewModalFooter.classList.toggle("hidden", readOnly);
   prevStepBtn.disabled = readOnly || REVIEW_STEPS.findIndex((step) => step.key === state.reviewStep) <= 0;
   nextStepBtn.disabled = readOnly ? true : false;
+  syncMdPreviews(readOnly);
   Array.from(reviewForm.elements).forEach((field) => {
     if ("readOnly" in field) field.readOnly = readOnly;
     if ("disabled" in field && field.type !== "hidden") field.disabled = readOnly && field.type === "checkbox";
   });
   saveDraftBtn.disabled = readOnly;
   if (status === "reviewed") {
-    initializeBtn.textContent = state.editMode ? "编辑中" : "编辑";
-    initializeBtn.disabled = state.editMode;
+    initializeBtn.textContent = state.editMode ? "退出编辑" : "编辑";
+    initializeBtn.disabled = false;
   } else {
     initializeBtn.textContent = status === "initialized" ? "已初始化" : "重新初始化";
     initializeBtn.disabled = status === "initialized";

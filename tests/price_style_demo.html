@@ -1,0 +1,262 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>价格卡片样式方案</title>
+<style>
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background: #f4f6fb; color: #1e293b; padding: 20px; }
+h1 { font-size: 1.1rem; margin-bottom: 6px; }
+h2 { font-size: 0.9rem; color: #64748b; margin-bottom: 20px; font-weight: 400; }
+.demo-section { background: #fff; border-radius: 16px; padding: 20px; margin-bottom: 28px; box-shadow: 0 2px 8px rgba(0,0,0,0.06); }
+.demo-label { display: inline-block; background: #3b82f6; color: #fff; font-size: 0.72rem; padding: 2px 10px; border-radius: 99px; margin-bottom: 12px; }
+
+.price-sections-compact {
+  display: grid;
+  grid-template-columns: 1fr 1fr 1fr;
+  gap: 14px;
+  align-items: start;
+}
+.price-section {
+  border: 1px solid rgba(15,23,42,0.08);
+  border-radius: 14px;
+  padding: 10px 12px;
+  background: #fff;
+}
+.price-section-head {
+  display: flex; flex-direction: column; gap: 2px;
+  cursor: pointer; list-style: none; position: relative; padding-left: 16px;
+  user-select: none;
+}
+.price-section-head::-webkit-details-marker { display: none; }
+.price-section-head > span:first-child { font-size: 0.88rem; font-weight: 800; }
+.price-section-summary { color: #94a3b8; font-size: 0.78rem; }
+details[open] > summary > .price-section-summary { display: none; }
+.price-section-head::before {
+  content: "▸"; font-size: 0.7rem; position: absolute; left: 0; top: 4px;
+  transition: transform 0.2s;
+}
+details[open] > .price-section-head::before { transform: rotate(90deg); }
+.price-section-body { margin-top: 8px; }
+
+/* ===== 当前样式（对照组） ===== */
+.scheme-current .price-card {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 5px 0; border-bottom: 1px solid rgba(15,23,42,0.04); min-width: 0;
+}
+.scheme-current .price-card:last-child { border-bottom: none; }
+.scheme-current .price-card-name { display: flex; align-items: baseline; gap: 4px; }
+.scheme-current .price-card strong { color: #4f5d75; font-size: 0.8rem; font-weight: 600; }
+.scheme-current .price-card-symbol { color: #b0b8c8; font-size: 0.65rem; font-weight: 600; }
+.scheme-current .price-value { font-size: 0.78rem; font-weight: 600; color: #475569; margin-left: auto; padding-left: 6px; }
+.scheme-current .price-change { font-weight: 700; min-width: 52px; text-align: right; font-size: 0.76rem; padding-left: 6px; flex-shrink: 0; }
+.scheme-current .price-change.up { color: #157347; }
+.scheme-current .price-change.down { color: #b42318; }
+
+/* ===== 方案 A：加大名称 + 涨跌色覆盖名称 ===== */
+.scheme-a .price-card {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 6px 0; border-bottom: 1px solid rgba(15,23,42,0.05); min-width: 0;
+}
+.scheme-a .price-card:last-child { border-bottom: none; }
+.scheme-a .price-card-name { display: flex; align-items: baseline; gap: 5px; }
+.scheme-a .price-card strong { color: #1e293b; font-size: 0.9rem; font-weight: 700; }
+.scheme-a .price-card.up strong { color: #157347; }
+.scheme-a .price-card.down strong { color: #b42318; }
+.scheme-a .price-card-symbol { color: #94a3b8; font-size: 0.68rem; font-weight: 500; }
+.scheme-a .price-value { font-size: 0.82rem; font-weight: 600; color: #475569; margin-left: auto; padding-left: 6px; }
+.scheme-a .price-change { font-weight: 700; min-width: 52px; text-align: right; font-size: 0.78rem; padding-left: 6px; flex-shrink: 0; }
+.scheme-a .price-change.up { color: #157347; }
+.scheme-a .price-change.down { color: #b42318; }
+
+/* ===== 方案 B：名称加大 + 左侧涨跌色条 ===== */
+.scheme-b .price-card {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 6px 0 6px 8px; border-bottom: 1px solid rgba(15,23,42,0.05); min-width: 0;
+  border-left: 3px solid transparent;
+}
+.scheme-b .price-card:last-child { border-bottom: none; }
+.scheme-b .price-card.up { border-left-color: #22c55e; }
+.scheme-b .price-card.down { border-left-color: #ef4444; }
+.scheme-b .price-card-name { display: flex; align-items: baseline; gap: 5px; }
+.scheme-b .price-card strong { color: #1e293b; font-size: 0.9rem; font-weight: 700; }
+.scheme-b .price-card-symbol { color: #94a3b8; font-size: 0.68rem; font-weight: 500; }
+.scheme-b .price-value { font-size: 0.82rem; font-weight: 600; color: #475569; margin-left: auto; padding-left: 6px; }
+.scheme-b .price-change { font-weight: 700; min-width: 52px; text-align: right; font-size: 0.78rem; padding-left: 6px; flex-shrink: 0; }
+.scheme-b .price-change.up { color: #157347; }
+.scheme-b .price-change.down { color: #b42318; }
+
+/* ===== 方案 C：名称加大 + 涨跌底色背景 ===== */
+.scheme-c .price-card {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 5px 8px; border-radius: 6px; min-width: 0;
+  margin-bottom: 3px;
+}
+.scheme-c .price-card.up { background: rgba(34,197,94,0.06); }
+.scheme-c .price-card.down { background: rgba(239,68,68,0.06); }
+.scheme-c .price-card-name { display: flex; align-items: baseline; gap: 5px; }
+.scheme-c .price-card strong { color: #1e293b; font-size: 0.9rem; font-weight: 700; }
+.scheme-c .price-card.up strong { color: #15803d; }
+.scheme-c .price-card.down strong { color: #b91c1c; }
+.scheme-c .price-card-symbol { color: #94a3b8; font-size: 0.68rem; font-weight: 500; }
+.scheme-c .price-value { font-size: 0.82rem; font-weight: 600; color: #475569; margin-left: auto; padding-left: 6px; }
+.scheme-c .price-change { font-weight: 700; min-width: 52px; text-align: right; font-size: 0.78rem; padding-left: 6px; flex-shrink: 0; }
+.scheme-c .price-change.up { color: #157347; }
+.scheme-c .price-change.down { color: #b42318; }
+
+/* ===== 方案 D：名称加大变深 + 名称前涨跌圆点 ===== */
+.scheme-d .price-card {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 6px 0; border-bottom: 1px solid rgba(15,23,42,0.05); min-width: 0;
+}
+.scheme-d .price-card:last-child { border-bottom: none; }
+.scheme-d .price-card-name { display: flex; align-items: baseline; gap: 5px; }
+.scheme-d .price-card-name::before {
+  content: ""; width: 6px; height: 6px; border-radius: 50%; flex-shrink: 0;
+  background: #cbd5e1; position: relative; top: -1px;
+}
+.scheme-d .price-card.up .price-card-name::before { background: #22c55e; }
+.scheme-d .price-card.down .price-card-name::before { background: #ef4444; }
+.scheme-d .price-card strong { color: #0f172a; font-size: 0.9rem; font-weight: 700; }
+.scheme-d .price-card-symbol { color: #94a3b8; font-size: 0.68rem; font-weight: 500; }
+.scheme-d .price-value { font-size: 0.82rem; font-weight: 600; color: #475569; margin-left: auto; padding-left: 6px; }
+.scheme-d .price-change { font-weight: 700; min-width: 52px; text-align: right; font-size: 0.78rem; padding-left: 6px; flex-shrink: 0; }
+.scheme-d .price-change.up { color: #157347; }
+.scheme-d .price-change.down { color: #b42318; }
+
+/* ===== 方案 E：名称大+深 + 涨跌色名称 + 淡色底 ===== */
+.scheme-e .price-card {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 5px 8px; border-radius: 6px; min-width: 0;
+  margin-bottom: 2px;
+  background: rgba(15,23,42,0.015);
+}
+.scheme-e .price-card-name { display: flex; align-items: baseline; gap: 5px; }
+.scheme-e .price-card strong { color: #0f172a; font-size: 0.92rem; font-weight: 700; }
+.scheme-e .price-card.up strong { color: #15803d; }
+.scheme-e .price-card.down strong { color: #b91c1c; }
+.scheme-e .price-card-symbol { color: #94a3b8; font-size: 0.68rem; font-weight: 500; }
+.scheme-e .price-value { font-size: 0.82rem; font-weight: 600; color: #475569; margin-left: auto; padding-left: 6px; }
+.scheme-e .price-change { font-weight: 800; min-width: 52px; text-align: right; font-size: 0.8rem; padding-left: 6px; flex-shrink: 0; }
+.scheme-e .price-change.up { color: #157347; }
+.scheme-e .price-change.down { color: #b42318; }
+
+@media (max-width: 700px) {
+  .price-sections-compact { grid-template-columns: 1fr; }
+}
+</style>
+</head>
+<body>
+
+<h1>价格卡片样式方案</h1>
+<h2>名称字号加大、颜色加深，用涨跌色区分标的</h2>
+
+<script>
+const mockData = {
+  index: [
+    { name: "标普500", symbol: "SPX", price: 6488.31, pct: -1.36 },
+    { name: "纳斯达克", symbol: "IXIC", price: 18344.87, pct: -1.46 },
+    { name: "道琼斯", symbol: "DJI", price: 41245.20, pct: -1.63 },
+    { name: "恐慌指数", symbol: "VIX", price: 22.43, pct: 12.16 },
+    { name: "上证指数", symbol: "000001.SS", price: 3419.56, pct: 0.23 },
+    { name: "恒生指数", symbol: "HSI", price: 23231.88, pct: -0.89 },
+    { name: "美元指数", symbol: "DXY", price: 103.45, pct: 0.15 },
+    { name: "黄金期货", symbol: "GC=F", price: 3021.40, pct: 1.02 },
+  ],
+  sector: [
+    { name: "科技板块", symbol: "XLK", price: 198.45, pct: -2.1 },
+    { name: "半导体", symbol: "SOXX", price: 187.32, pct: -3.2 },
+    { name: "能源板块", symbol: "XLE", price: 87.66, pct: 0.8 },
+    { name: "金融板块", symbol: "XLF", price: 43.12, pct: -1.1 },
+    { name: "可选消费", symbol: "XLY", price: 178.90, pct: -0.6 },
+    { name: "通信服务", symbol: "XLC", price: 89.54, pct: -1.8 },
+  ],
+  stock: [
+    { name: "微软", symbol: "MSFT", price: 384.12, pct: -1.5 },
+    { name: "谷歌", symbol: "GOOGL", price: 158.76, pct: -2.3 },
+    { name: "美光科技", symbol: "MU", price: 89.34, pct: -4.1 },
+    { name: "阿里巴巴", symbol: "BABA", price: 98.45, pct: 0.7 },
+    { name: "紫金矿业", symbol: "601899.SS", price: 18.32, pct: 1.2 },
+  ],
+};
+
+const sectionMeta = [
+  { key: "index", label: "大盘分析" },
+  { key: "sector", label: "板块分析" },
+  { key: "stock", label: "个股深度研究" },
+];
+
+function buildCard(item, scheme) {
+  const dir = item.pct > 0 ? "up" : item.pct < 0 ? "down" : "";
+  const sign = item.pct > 0 ? "+" : "";
+  return `<div class="price-card ${dir}">
+    <div class="price-card-name">
+      <strong>${item.name}</strong>
+      <span class="price-card-symbol">${item.symbol}</span>
+    </div>
+    <span class="price-value">${item.price.toLocaleString()}</span>
+    <span class="price-change ${dir}">${sign}${item.pct.toFixed(2)}%</span>
+  </div>`;
+}
+
+function renderScheme(containerId, schemeClass) {
+  const container = document.getElementById(containerId);
+  sectionMeta.forEach(({ key, label }) => {
+    const items = mockData[key];
+    const details = document.createElement("details");
+    details.className = "price-section";
+    details.open = true;
+    details.innerHTML = `
+      <summary class="price-section-head"><span>${label}</span></summary>
+      <div class="price-section-body">${items.map(i => buildCard(i, schemeClass)).join("")}</div>
+    `;
+    container.appendChild(details);
+  });
+}
+</script>
+
+<!-- 当前样式 -->
+<div class="demo-section scheme-current">
+  <span class="demo-label">当前样式（对照）</span>
+  <div id="current" class="price-sections-compact"></div>
+</div>
+<script>renderScheme("current", "current");</script>
+
+<!-- 方案 A -->
+<div class="demo-section scheme-a">
+  <span class="demo-label">方案 A：名称加大变深 + 涨跌色覆盖名称文字</span>
+  <div id="schemeA" class="price-sections-compact"></div>
+</div>
+<script>renderScheme("schemeA", "a");</script>
+
+<!-- 方案 B -->
+<div class="demo-section scheme-b">
+  <span class="demo-label">方案 B：名称加大变深 + 左侧涨跌色条</span>
+  <div id="schemeB" class="price-sections-compact"></div>
+</div>
+<script>renderScheme("schemeB", "b");</script>
+
+<!-- 方案 C -->
+<div class="demo-section scheme-c">
+  <span class="demo-label">方案 C：涨跌色背景底色 + 名称涨跌色</span>
+  <div id="schemeC" class="price-sections-compact"></div>
+</div>
+<script>renderScheme("schemeC", "c");</script>
+
+<!-- 方案 D -->
+<div class="demo-section scheme-d">
+  <span class="demo-label">方案 D：名称加大变深 + 名称前涨跌圆点</span>
+  <div id="schemeD" class="price-sections-compact"></div>
+</div>
+<script>renderScheme("schemeD", "d");</script>
+
+<!-- 方案 E -->
+<div class="demo-section scheme-e">
+  <span class="demo-label">方案 E：名称涨跌色 + 淡灰底 + 涨跌百分比加粗</span>
+  <div id="schemeE" class="price-sections-compact"></div>
+</div>
+<script>renderScheme("schemeE", "e");</script>
+
+</body>
+</html>

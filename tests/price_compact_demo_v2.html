@@ -1,0 +1,968 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>当日价格紧凑方案对比 V2 — 10种设计</title>
+<style>
+/* ====== RESET & BASE ====== */
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body {
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "PingFang SC", "Microsoft YaHei", sans-serif;
+  background: #f0f2f7; color: #1e293b; padding: 24px; line-height: 1.5;
+}
+h1 { font-size: 1.3rem; margin-bottom: 4px; color: #0f172a; }
+.page-subtitle { font-size: 0.88rem; color: #64748b; margin-bottom: 28px; font-weight: 400; }
+
+/* ====== DEMO SECTION WRAPPER ====== */
+.demo-section {
+  background: #fff; border-radius: 16px; padding: 28px; margin-bottom: 36px;
+  box-shadow: 0 1px 4px rgba(0,0,0,0.06), 0 4px 16px rgba(0,0,0,0.04);
+}
+.demo-label {
+  display: inline-block; font-size: 0.72rem; font-weight: 700; padding: 3px 12px;
+  border-radius: 99px; margin-bottom: 6px; letter-spacing: 0.02em;
+}
+.demo-label.ref { background: #64748b; color: #fff; }
+.demo-label.v1 { background: #3b82f6; color: #fff; }
+.demo-label.v2 { background: #8b5cf6; color: #fff; }
+.demo-label.v3 { background: #06b6d4; color: #fff; }
+.demo-label.v4 { background: #f59e0b; color: #fff; }
+.demo-label.v5 { background: #ec4899; color: #fff; }
+.demo-label.v6 { background: #10b981; color: #fff; }
+.demo-label.v7 { background: #f97316; color: #fff; }
+.demo-label.v8 { background: #6366f1; color: #fff; }
+.demo-label.v9 { background: #14b8a6; color: #fff; }
+.demo-label.v10 { background: #e11d48; color: #fff; }
+.demo-title { font-size: 1.05rem; font-weight: 700; margin-bottom: 16px; color: #334155; }
+
+/* ====== SHARED LAYOUT ====== */
+.price-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 14px; align-items: start;
+}
+.price-section {
+  border: 1px solid rgba(15,23,42,0.08);
+  border-radius: 14px; background: rgba(248,250,252,0.7);
+  overflow: hidden;
+}
+.price-section.full-width { grid-column: 1 / -1; }
+.section-summary {
+  cursor: pointer; list-style: none; padding: 10px 14px;
+  user-select: none; position: relative; padding-left: 26px;
+}
+.section-summary::-webkit-details-marker { display: none; }
+.section-summary::before {
+  content: "▸"; font-size: 0.68rem; position: absolute; left: 10px; top: 12px;
+  transition: transform 0.2s; color: #94a3b8;
+}
+details[open] > .section-summary::before { transform: rotate(90deg); }
+.section-summary .sec-title { font-size: 0.88rem; font-weight: 700; color: #475569; }
+.section-summary .sec-hint { font-size: 0.72rem; color: #94a3b8; margin-left: 6px; }
+details[open] > .section-summary .sec-hint { display: none; }
+.section-body { padding: 0 10px 10px; }
+
+/* Color utilities */
+.up { color: #157347 !important; }
+.down { color: #b42318 !important; }
+.bg-up { background: rgba(21,115,71,0.08); }
+.bg-down { background: rgba(180,35,24,0.08); }
+.bg-up-solid { background: #157347; color: #fff !important; }
+.bg-down-solid { background: #b42318; color: #fff !important; }
+
+/* ============================================================
+   当前样式 (对照组)
+   ============================================================ */
+.current .price-list { display: grid; gap: 8px; }
+.current .price-card {
+  display: grid; grid-template-columns: minmax(0,1fr) auto auto;
+  align-items: center; gap: 10px; padding: 10px 12px; border-radius: 14px;
+  background: #fff; border: 1px solid rgba(15,23,42,0.06);
+}
+.current .pc-name { display: flex; align-items: baseline; gap: 6px; }
+.current .pc-name strong { color: #4f5d75; font-size: 0.98rem; }
+.current .pc-symbol { color: #94a3b8; font-size: 0.82rem; font-weight: 600; }
+.current .pc-price { font-size: 1.25rem; font-weight: 800; text-align: right; letter-spacing: -0.03em; }
+.current .pc-change { font-weight: 800; min-width: 74px; text-align: right; font-size: 0.98rem; color: #94a3b8; }
+
+/* ============================================================
+   方案1: 极简密集行 (Dense Row)
+   ============================================================ */
+.s1 .price-list { display: flex; flex-direction: column; gap: 1px; background: rgba(0,0,0,0.04); border-radius: 8px; overflow: hidden; }
+.s1 .price-card {
+  display: grid; grid-template-columns: minmax(0,1fr) auto auto;
+  align-items: center; gap: 6px; padding: 5px 10px; background: #fff;
+}
+.s1 .pc-name { font-size: 0.78rem; font-weight: 600; color: #475569; white-space: nowrap; }
+.s1 .pc-symbol { font-size: 0.66rem; color: #94a3b8; margin-left: 4px; }
+.s1 .pc-price { font-size: 0.82rem; font-weight: 700; text-align: right; font-variant-numeric: tabular-nums; }
+.s1 .pc-change { font-size: 0.75rem; font-weight: 700; text-align: right; min-width: 54px; font-variant-numeric: tabular-nums; }
+
+/* ============================================================
+   方案2: 药丸标签 (Pill Tags)
+   ============================================================ */
+.s2 .price-list { display: flex; flex-wrap: wrap; gap: 6px; }
+.s2 .price-card {
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 4px 10px 4px 8px; border-radius: 99px; font-size: 0.76rem;
+  border: 1px solid rgba(15,23,42,0.1); background: #fff;
+}
+.s2 .pc-name { font-weight: 600; color: #475569; }
+.s2 .pc-symbol { font-size: 0.64rem; color: #94a3b8; }
+.s2 .pc-price { font-weight: 700; font-variant-numeric: tabular-nums; }
+.s2 .pc-change {
+  font-weight: 700; font-size: 0.7rem; padding: 1px 6px; border-radius: 99px;
+  font-variant-numeric: tabular-nums;
+}
+.s2 .pc-change.up { background: rgba(21,115,71,0.1); }
+.s2 .pc-change.down { background: rgba(180,35,24,0.1); }
+
+/* ============================================================
+   方案3: 热力网格 (Heat Map Grid)
+   ============================================================ */
+.s3 .price-list {
+  display: grid; grid-template-columns: repeat(auto-fill, minmax(105px, 1fr)); gap: 4px;
+}
+.s3 .price-card {
+  padding: 6px 8px; border-radius: 6px; text-align: center; position: relative;
+  min-height: 52px; display: flex; flex-direction: column; justify-content: center;
+}
+.s3 .price-card.up { background: rgba(21,115,71,0.08); border: 1px solid rgba(21,115,71,0.15); }
+.s3 .price-card.down { background: rgba(180,35,24,0.08); border: 1px solid rgba(180,35,24,0.15); }
+.s3 .pc-name { font-size: 0.72rem; font-weight: 700; color: #475569; }
+.s3 .pc-price { font-size: 0.82rem; font-weight: 800; margin: 1px 0; font-variant-numeric: tabular-nums; }
+.s3 .pc-change { font-size: 0.68rem; font-weight: 700; font-variant-numeric: tabular-nums; }
+
+/* ============================================================
+   方案4: Bloomberg 终端 (Terminal Mono)
+   ============================================================ */
+.s4 { background: #0a0e17; border-radius: 8px; padding: 10px; }
+.s4 .price-section { background: rgba(255,255,255,0.03); border-color: rgba(255,255,255,0.08); }
+.s4 .section-summary .sec-title { color: #f59e0b; }
+.s4 .section-summary .sec-hint { color: #475569; }
+.s4 .section-summary::before { color: #475569; }
+.s4 .price-list { font-family: "SF Mono", "Fira Code", "Cascadia Code", Consolas, monospace; }
+.s4 .price-card {
+  display: grid; grid-template-columns: 80px minmax(0,1fr) 90px 70px;
+  align-items: center; padding: 3px 8px; font-size: 0.74rem;
+  border-bottom: 1px solid rgba(255,255,255,0.04);
+}
+.s4 .price-card:last-child { border-bottom: none; }
+.s4 .pc-symbol { color: #60a5fa; font-weight: 600; }
+.s4 .pc-name { color: #64748b; font-size: 0.68rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.s4 .pc-price { color: #e2e8f0; font-weight: 600; text-align: right; font-variant-numeric: tabular-nums; }
+.s4 .pc-change { text-align: right; font-weight: 700; font-variant-numeric: tabular-nums; }
+.s4 .pc-change.up { color: #4ade80; }
+.s4 .pc-change.down { color: #f87171; }
+
+/* ============================================================
+   方案5: 卡片网格 (Mini Card Grid 3-col)
+   ============================================================ */
+.s5 .price-list { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; }
+.s5 .price-card {
+  padding: 8px 10px; border-radius: 10px; background: #fff;
+  border: 1px solid rgba(15,23,42,0.06); position: relative;
+  border-left: 3px solid transparent;
+}
+.s5 .price-card.up { border-left-color: #157347; }
+.s5 .price-card.down { border-left-color: #b42318; }
+.s5 .pc-top { display: flex; justify-content: space-between; align-items: center; margin-bottom: 2px; }
+.s5 .pc-name { font-size: 0.76rem; font-weight: 700; color: #334155; }
+.s5 .pc-symbol { font-size: 0.62rem; color: #94a3b8; font-weight: 500; }
+.s5 .pc-bottom { display: flex; justify-content: space-between; align-items: baseline; }
+.s5 .pc-price { font-size: 0.88rem; font-weight: 800; font-variant-numeric: tabular-nums; }
+.s5 .pc-change { font-size: 0.72rem; font-weight: 700; font-variant-numeric: tabular-nums; }
+
+/* ============================================================
+   方案6: 紧凑表格 (Striped Table)
+   ============================================================ */
+.s6 .price-list { border-radius: 8px; overflow: hidden; border: 1px solid rgba(15,23,42,0.08); }
+.s6 .price-header, .s6 .price-card {
+  display: grid; grid-template-columns: minmax(0,1.2fr) 0.5fr 0.7fr 0.5fr;
+  align-items: center; padding: 4px 10px; font-size: 0.74rem;
+}
+.s6 .price-header {
+  background: #f1f5f9; font-weight: 700; color: #64748b; font-size: 0.66rem;
+  text-transform: uppercase; letter-spacing: 0.05em; padding: 5px 10px;
+}
+.s6 .price-card:nth-child(odd) { background: rgba(248,250,252,0.6); }
+.s6 .price-card:nth-child(even) { background: #fff; }
+.s6 .pc-name { font-weight: 600; color: #334155; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.s6 .pc-symbol { color: #94a3b8; font-size: 0.68rem; }
+.s6 .pc-price { font-weight: 700; text-align: right; font-variant-numeric: tabular-nums; }
+.s6 .pc-change { font-weight: 700; text-align: right; font-variant-numeric: tabular-nums; }
+
+/* ============================================================
+   方案7: 滚动横条 (Ticker Tape)
+   ============================================================ */
+.s7 .price-list {
+  display: flex; gap: 0; overflow-x: auto; scrollbar-width: thin;
+  border-radius: 8px; border: 1px solid rgba(15,23,42,0.06);
+  background: #fafbfc;
+}
+.s7 .price-list::-webkit-scrollbar { height: 4px; }
+.s7 .price-list::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 4px; }
+.s7 .price-card {
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  padding: 6px 14px; min-width: 90px; white-space: nowrap;
+  border-right: 1px solid rgba(15,23,42,0.05); flex-shrink: 0;
+}
+.s7 .price-card:last-child { border-right: none; }
+.s7 .pc-name { font-size: 0.7rem; font-weight: 700; color: #475569; }
+.s7 .pc-row { display: flex; align-items: baseline; gap: 4px; margin-top: 1px; }
+.s7 .pc-price { font-size: 0.78rem; font-weight: 700; font-variant-numeric: tabular-nums; }
+.s7 .pc-change { font-size: 0.66rem; font-weight: 700; font-variant-numeric: tabular-nums; }
+.s7 .pc-symbol { font-size: 0.58rem; color: #b0b8c4; margin-top: 1px; }
+
+/* ============================================================
+   方案8: 徽章芯片 (Chip / Badge)
+   ============================================================ */
+.s8 .price-list { display: flex; flex-wrap: wrap; gap: 5px; }
+.s8 .price-card {
+  display: inline-flex; align-items: center; gap: 0;
+  border-radius: 6px; overflow: hidden; font-size: 0.74rem;
+  border: 1px solid rgba(15,23,42,0.08); background: #fff;
+}
+.s8 .pc-left {
+  padding: 3px 8px; background: #f8fafc;
+  border-right: 1px solid rgba(15,23,42,0.06);
+}
+.s8 .pc-name { font-weight: 700; color: #475569; font-size: 0.72rem; }
+.s8 .pc-symbol { font-size: 0.58rem; color: #94a3b8; display: block; line-height: 1.2; }
+.s8 .pc-right { display: flex; align-items: center; gap: 6px; padding: 3px 8px; }
+.s8 .pc-price { font-weight: 700; font-variant-numeric: tabular-nums; color: #334155; }
+.s8 .pc-change {
+  font-weight: 700; font-size: 0.66rem; padding: 1px 5px; border-radius: 4px;
+  font-variant-numeric: tabular-nums;
+}
+.s8 .pc-change.up { background: #157347; color: #fff; }
+.s8 .pc-change.down { background: #b42318; color: #fff; }
+
+/* ============================================================
+   方案9: 双列紧凑行 (Two-Column Dense)
+   ============================================================ */
+.s9 .price-list { display: grid; grid-template-columns: 1fr 1fr; gap: 2px 12px; }
+.s9 .price-card {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 4px 0; border-bottom: 1px solid rgba(15,23,42,0.05);
+  font-size: 0.76rem;
+}
+.s9 .pc-left { display: flex; align-items: baseline; gap: 4px; min-width: 0; }
+.s9 .pc-name { font-weight: 600; color: #475569; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.s9 .pc-symbol { font-size: 0.62rem; color: #b0b8c4; flex-shrink: 0; }
+.s9 .pc-right { display: flex; align-items: baseline; gap: 6px; flex-shrink: 0; }
+.s9 .pc-price { font-weight: 700; font-variant-numeric: tabular-nums; }
+.s9 .pc-change { font-weight: 700; font-size: 0.7rem; font-variant-numeric: tabular-nums; min-width: 46px; text-align: right; }
+
+/* ============================================================
+   方案10: 仪表盘指标 (Dashboard KPI)
+   ============================================================ */
+.s10 .price-list { display: grid; grid-template-columns: repeat(auto-fill, minmax(130px, 1fr)); gap: 6px; }
+.s10 .price-card {
+  padding: 8px 10px; border-radius: 10px; background: #fff;
+  border: 1px solid rgba(15,23,42,0.06); text-align: left;
+  position: relative; overflow: hidden;
+}
+.s10 .price-card::after {
+  content: ""; position: absolute; bottom: 0; left: 0; right: 0; height: 3px;
+}
+.s10 .price-card.up::after { background: linear-gradient(90deg, rgba(21,115,71,0.3), rgba(21,115,71,0.05)); }
+.s10 .price-card.down::after { background: linear-gradient(90deg, rgba(180,35,24,0.3), rgba(180,35,24,0.05)); }
+.s10 .pc-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px; }
+.s10 .pc-name { font-size: 0.72rem; font-weight: 700; color: #475569; }
+.s10 .pc-symbol { font-size: 0.58rem; color: #b0b8c4; background: #f1f5f9; padding: 1px 5px; border-radius: 4px; }
+.s10 .pc-price { font-size: 1rem; font-weight: 800; font-variant-numeric: tabular-nums; line-height: 1.1; }
+.s10 .pc-change {
+  font-size: 0.68rem; font-weight: 700; margin-top: 2px; display: inline-block;
+  font-variant-numeric: tabular-nums;
+}
+
+/* ====== TOC ====== */
+.toc { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 28px; }
+.toc a {
+  font-size: 0.78rem; padding: 4px 12px; border-radius: 8px; text-decoration: none;
+  background: #fff; border: 1px solid rgba(15,23,42,0.1); color: #475569;
+  font-weight: 600; transition: all 0.15s;
+}
+.toc a:hover { background: #3b82f6; color: #fff; border-color: #3b82f6; }
+</style>
+</head>
+<body>
+
+<h1>当日价格 — 紧凑卡片设计对比 V2</h1>
+<p class="page-subtitle">10种视觉方案 + 当前样式对照，供选型参考</p>
+
+<nav class="toc">
+  <a href="#ref">当前样式</a>
+  <a href="#s1">方案1 极简密集行</a>
+  <a href="#s2">方案2 药丸标签</a>
+  <a href="#s3">方案3 热力网格</a>
+  <a href="#s4">方案4 终端风格</a>
+  <a href="#s5">方案5 迷你卡片</a>
+  <a href="#s6">方案6 紧凑表格</a>
+  <a href="#s7">方案7 滚动横条</a>
+  <a href="#s8">方案8 徽章芯片</a>
+  <a href="#s9">方案9 双列紧凑</a>
+  <a href="#s10">方案10 仪表盘指标</a>
+</nav>
+
+<!-- ============================================================
+     当前样式 (对照组)
+     ============================================================ -->
+<div class="demo-section current" id="ref">
+  <span class="demo-label ref">对照组</span>
+  <div class="demo-title">当前样式 — 宽松行布局</div>
+  <div class="price-grid">
+    <!-- 大盘 -->
+    <div class="price-section">
+      <details open>
+        <summary class="section-summary">
+          <span class="sec-title">大盘分析</span>
+          <span class="sec-hint">10项</span>
+        </summary>
+        <div class="section-body">
+          <div class="price-list">
+            <div class="price-card"><div class="pc-name"><strong>标普500</strong><span class="pc-symbol">GSPC</span></div><span class="pc-price">6624.70</span><span class="pc-change down">-1.36%</span></div>
+            <div class="price-card"><div class="pc-name"><strong>纳斯达克</strong><span class="pc-symbol">IXIC</span></div><span class="pc-price">22152.42</span><span class="pc-change down">-1.46%</span></div>
+            <div class="price-card"><div class="pc-name"><strong>道琼斯</strong><span class="pc-symbol">DJI</span></div><span class="pc-price">46225.15</span><span class="pc-change down">-1.63%</span></div>
+            <div class="price-card"><div class="pc-name"><strong>恐慌指数</strong><span class="pc-symbol">VIX</span></div><span class="pc-price">25.09</span><span class="pc-change up">+12.16%</span></div>
+            <div class="price-card"><div class="pc-name"><strong>上证指数</strong><span class="pc-symbol">SSE</span></div><span class="pc-price">3426.43</span><span class="pc-change up">+0.23%</span></div>
+            <div class="price-card"><div class="pc-name"><strong>恒生指数</strong><span class="pc-symbol">HSI</span></div><span class="pc-price">24218.56</span><span class="pc-change down">-0.89%</span></div>
+            <div class="price-card"><div class="pc-name"><strong>美元指数</strong><span class="pc-symbol">DXY</span></div><span class="pc-price">103.42</span><span class="pc-change up">+0.15%</span></div>
+            <div class="price-card"><div class="pc-name"><strong>黄金期货</strong><span class="pc-symbol">GOLD</span></div><span class="pc-price">3045.60</span><span class="pc-change up">+1.02%</span></div>
+            <div class="price-card"><div class="pc-name"><strong>布伦特原油</strong><span class="pc-symbol">BZ=F</span></div><span class="pc-price">70.82</span><span class="pc-change down">-0.54%</span></div>
+            <div class="price-card"><div class="pc-name"><strong>十年期国债</strong><span class="pc-symbol">TNX</span></div><span class="pc-price">4.287</span><span class="pc-change down">-0.12%</span></div>
+          </div>
+        </div>
+      </details>
+    </div>
+    <!-- 板块 -->
+    <div class="price-section">
+      <details open>
+        <summary class="section-summary">
+          <span class="sec-title">板块分析</span>
+          <span class="sec-hint">6项</span>
+        </summary>
+        <div class="section-body">
+          <div class="price-list">
+            <div class="price-card"><div class="pc-name"><strong>科技板块</strong><span class="pc-symbol">XLK</span></div><span class="pc-price">218.34</span><span class="pc-change down">-2.10%</span></div>
+            <div class="price-card"><div class="pc-name"><strong>半导体</strong><span class="pc-symbol">SOXX</span></div><span class="pc-price">198.76</span><span class="pc-change down">-3.20%</span></div>
+            <div class="price-card"><div class="pc-name"><strong>能源板块</strong><span class="pc-symbol">XLE</span></div><span class="pc-price">87.42</span><span class="pc-change up">+0.80%</span></div>
+            <div class="price-card"><div class="pc-name"><strong>金融板块</strong><span class="pc-symbol">XLF</span></div><span class="pc-price">47.89</span><span class="pc-change down">-1.10%</span></div>
+            <div class="price-card"><div class="pc-name"><strong>可选消费</strong><span class="pc-symbol">XLY</span></div><span class="pc-price">196.23</span><span class="pc-change down">-0.60%</span></div>
+            <div class="price-card"><div class="pc-name"><strong>通信服务</strong><span class="pc-symbol">XLC</span></div><span class="pc-price">102.15</span><span class="pc-change down">-1.80%</span></div>
+          </div>
+        </div>
+      </details>
+    </div>
+    <!-- 个股 -->
+    <div class="price-section full-width">
+      <details open>
+        <summary class="section-summary">
+          <span class="sec-title">个股深度研究</span>
+          <span class="sec-hint">5项</span>
+        </summary>
+        <div class="section-body">
+          <div class="price-list">
+            <div class="price-card"><div class="pc-name"><strong>微软</strong><span class="pc-symbol">MSFT</span></div><span class="pc-price">412.35</span><span class="pc-change down">-1.50%</span></div>
+            <div class="price-card"><div class="pc-name"><strong>谷歌</strong><span class="pc-symbol">GOOGL</span></div><span class="pc-price">168.92</span><span class="pc-change down">-2.30%</span></div>
+            <div class="price-card"><div class="pc-name"><strong>美光科技</strong><span class="pc-symbol">MU</span></div><span class="pc-price">94.18</span><span class="pc-change down">-4.10%</span></div>
+            <div class="price-card"><div class="pc-name"><strong>阿里巴巴</strong><span class="pc-symbol">9988.HK</span></div><span class="pc-price">134.80</span><span class="pc-change up">+0.70%</span></div>
+            <div class="price-card"><div class="pc-name"><strong>紫金矿业</strong><span class="pc-symbol">601899.SS</span></div><span class="pc-price">18.56</span><span class="pc-change up">+1.20%</span></div>
+          </div>
+        </div>
+      </details>
+    </div>
+  </div>
+</div>
+
+<!-- ============================================================
+     方案1: 极简密集行
+     ============================================================ -->
+<div class="demo-section s1" id="s1">
+  <span class="demo-label v1">方案1</span>
+  <div class="demo-title">极简密集行 — 1px分隔、超紧凑间距</div>
+  <div class="price-grid">
+    <div class="price-section">
+      <details open>
+        <summary class="section-summary"><span class="sec-title">大盘分析</span><span class="sec-hint">10项</span></summary>
+        <div class="section-body">
+          <div class="price-list">
+            <div class="price-card"><span class="pc-name">标普500<span class="pc-symbol">GSPC</span></span><span class="pc-price">6624.70</span><span class="pc-change down">-1.36%</span></div>
+            <div class="price-card"><span class="pc-name">纳斯达克<span class="pc-symbol">IXIC</span></span><span class="pc-price">22152.42</span><span class="pc-change down">-1.46%</span></div>
+            <div class="price-card"><span class="pc-name">道琼斯<span class="pc-symbol">DJI</span></span><span class="pc-price">46225.15</span><span class="pc-change down">-1.63%</span></div>
+            <div class="price-card"><span class="pc-name">恐慌指数<span class="pc-symbol">VIX</span></span><span class="pc-price">25.09</span><span class="pc-change up">+12.16%</span></div>
+            <div class="price-card"><span class="pc-name">上证指数<span class="pc-symbol">SSE</span></span><span class="pc-price">3426.43</span><span class="pc-change up">+0.23%</span></div>
+            <div class="price-card"><span class="pc-name">恒生指数<span class="pc-symbol">HSI</span></span><span class="pc-price">24218.56</span><span class="pc-change down">-0.89%</span></div>
+            <div class="price-card"><span class="pc-name">美元指数<span class="pc-symbol">DXY</span></span><span class="pc-price">103.42</span><span class="pc-change up">+0.15%</span></div>
+            <div class="price-card"><span class="pc-name">黄金期货<span class="pc-symbol">GOLD</span></span><span class="pc-price">3045.60</span><span class="pc-change up">+1.02%</span></div>
+            <div class="price-card"><span class="pc-name">布伦特原油<span class="pc-symbol">BZ=F</span></span><span class="pc-price">70.82</span><span class="pc-change down">-0.54%</span></div>
+            <div class="price-card"><span class="pc-name">十年期国债<span class="pc-symbol">TNX</span></span><span class="pc-price">4.287</span><span class="pc-change down">-0.12%</span></div>
+          </div>
+        </div>
+      </details>
+    </div>
+    <div class="price-section">
+      <details open>
+        <summary class="section-summary"><span class="sec-title">板块分析</span><span class="sec-hint">6项</span></summary>
+        <div class="section-body">
+          <div class="price-list">
+            <div class="price-card"><span class="pc-name">科技板块<span class="pc-symbol">XLK</span></span><span class="pc-price">218.34</span><span class="pc-change down">-2.10%</span></div>
+            <div class="price-card"><span class="pc-name">半导体<span class="pc-symbol">SOXX</span></span><span class="pc-price">198.76</span><span class="pc-change down">-3.20%</span></div>
+            <div class="price-card"><span class="pc-name">能源板块<span class="pc-symbol">XLE</span></span><span class="pc-price">87.42</span><span class="pc-change up">+0.80%</span></div>
+            <div class="price-card"><span class="pc-name">金融板块<span class="pc-symbol">XLF</span></span><span class="pc-price">47.89</span><span class="pc-change down">-1.10%</span></div>
+            <div class="price-card"><span class="pc-name">可选消费<span class="pc-symbol">XLY</span></span><span class="pc-price">196.23</span><span class="pc-change down">-0.60%</span></div>
+            <div class="price-card"><span class="pc-name">通信服务<span class="pc-symbol">XLC</span></span><span class="pc-price">102.15</span><span class="pc-change down">-1.80%</span></div>
+          </div>
+        </div>
+      </details>
+    </div>
+    <div class="price-section full-width">
+      <details open>
+        <summary class="section-summary"><span class="sec-title">个股深度研究</span><span class="sec-hint">5项</span></summary>
+        <div class="section-body">
+          <div class="price-list">
+            <div class="price-card"><span class="pc-name">微软<span class="pc-symbol">MSFT</span></span><span class="pc-price">412.35</span><span class="pc-change down">-1.50%</span></div>
+            <div class="price-card"><span class="pc-name">谷歌<span class="pc-symbol">GOOGL</span></span><span class="pc-price">168.92</span><span class="pc-change down">-2.30%</span></div>
+            <div class="price-card"><span class="pc-name">美光科技<span class="pc-symbol">MU</span></span><span class="pc-price">94.18</span><span class="pc-change down">-4.10%</span></div>
+            <div class="price-card"><span class="pc-name">阿里巴巴<span class="pc-symbol">9988.HK</span></span><span class="pc-price">134.80</span><span class="pc-change up">+0.70%</span></div>
+            <div class="price-card"><span class="pc-name">紫金矿业<span class="pc-symbol">601899.SS</span></span><span class="pc-price">18.56</span><span class="pc-change up">+1.20%</span></div>
+          </div>
+        </div>
+      </details>
+    </div>
+  </div>
+</div>
+
+<!-- ============================================================
+     方案2: 药丸标签
+     ============================================================ -->
+<div class="demo-section s2" id="s2">
+  <span class="demo-label v2">方案2</span>
+  <div class="demo-title">药丸标签 — 流式排列、自动换行</div>
+  <div class="price-grid">
+    <div class="price-section">
+      <details open>
+        <summary class="section-summary"><span class="sec-title">大盘分析</span><span class="sec-hint">10项</span></summary>
+        <div class="section-body">
+          <div class="price-list">
+            <div class="price-card"><span class="pc-name">标普500</span><span class="pc-symbol">GSPC</span><span class="pc-price">6624.70</span><span class="pc-change down">-1.36%</span></div>
+            <div class="price-card"><span class="pc-name">纳斯达克</span><span class="pc-symbol">IXIC</span><span class="pc-price">22152.42</span><span class="pc-change down">-1.46%</span></div>
+            <div class="price-card"><span class="pc-name">道琼斯</span><span class="pc-symbol">DJI</span><span class="pc-price">46225.15</span><span class="pc-change down">-1.63%</span></div>
+            <div class="price-card"><span class="pc-name">恐慌指数</span><span class="pc-symbol">VIX</span><span class="pc-price">25.09</span><span class="pc-change up">+12.16%</span></div>
+            <div class="price-card"><span class="pc-name">上证指数</span><span class="pc-symbol">SSE</span><span class="pc-price">3426.43</span><span class="pc-change up">+0.23%</span></div>
+            <div class="price-card"><span class="pc-name">恒生指数</span><span class="pc-symbol">HSI</span><span class="pc-price">24218.56</span><span class="pc-change down">-0.89%</span></div>
+            <div class="price-card"><span class="pc-name">美元指数</span><span class="pc-symbol">DXY</span><span class="pc-price">103.42</span><span class="pc-change up">+0.15%</span></div>
+            <div class="price-card"><span class="pc-name">黄金期货</span><span class="pc-symbol">GOLD</span><span class="pc-price">3045.60</span><span class="pc-change up">+1.02%</span></div>
+            <div class="price-card"><span class="pc-name">布伦特原油</span><span class="pc-symbol">BZ=F</span><span class="pc-price">70.82</span><span class="pc-change down">-0.54%</span></div>
+            <div class="price-card"><span class="pc-name">十年期国债</span><span class="pc-symbol">TNX</span><span class="pc-price">4.287</span><span class="pc-change down">-0.12%</span></div>
+          </div>
+        </div>
+      </details>
+    </div>
+    <div class="price-section">
+      <details open>
+        <summary class="section-summary"><span class="sec-title">板块分析</span><span class="sec-hint">6项</span></summary>
+        <div class="section-body">
+          <div class="price-list">
+            <div class="price-card"><span class="pc-name">科技板块</span><span class="pc-symbol">XLK</span><span class="pc-price">218.34</span><span class="pc-change down">-2.10%</span></div>
+            <div class="price-card"><span class="pc-name">半导体</span><span class="pc-symbol">SOXX</span><span class="pc-price">198.76</span><span class="pc-change down">-3.20%</span></div>
+            <div class="price-card"><span class="pc-name">能源板块</span><span class="pc-symbol">XLE</span><span class="pc-price">87.42</span><span class="pc-change up">+0.80%</span></div>
+            <div class="price-card"><span class="pc-name">金融板块</span><span class="pc-symbol">XLF</span><span class="pc-price">47.89</span><span class="pc-change down">-1.10%</span></div>
+            <div class="price-card"><span class="pc-name">可选消费</span><span class="pc-symbol">XLY</span><span class="pc-price">196.23</span><span class="pc-change down">-0.60%</span></div>
+            <div class="price-card"><span class="pc-name">通信服务</span><span class="pc-symbol">XLC</span><span class="pc-price">102.15</span><span class="pc-change down">-1.80%</span></div>
+          </div>
+        </div>
+      </details>
+    </div>
+    <div class="price-section full-width">
+      <details open>
+        <summary class="section-summary"><span class="sec-title">个股深度研究</span><span class="sec-hint">5项</span></summary>
+        <div class="section-body">
+          <div class="price-list">
+            <div class="price-card"><span class="pc-name">微软</span><span class="pc-symbol">MSFT</span><span class="pc-price">412.35</span><span class="pc-change down">-1.50%</span></div>
+            <div class="price-card"><span class="pc-name">谷歌</span><span class="pc-symbol">GOOGL</span><span class="pc-price">168.92</span><span class="pc-change down">-2.30%</span></div>
+            <div class="price-card"><span class="pc-name">美光科技</span><span class="pc-symbol">MU</span><span class="pc-price">94.18</span><span class="pc-change down">-4.10%</span></div>
+            <div class="price-card"><span class="pc-name">阿里巴巴</span><span class="pc-symbol">9988.HK</span><span class="pc-price">134.80</span><span class="pc-change up">+0.70%</span></div>
+            <div class="price-card"><span class="pc-name">紫金矿业</span><span class="pc-symbol">601899.SS</span><span class="pc-price">18.56</span><span class="pc-change up">+1.20%</span></div>
+          </div>
+        </div>
+      </details>
+    </div>
+  </div>
+</div>
+
+<!-- ============================================================
+     方案3: 热力网格
+     ============================================================ -->
+<div class="demo-section s3" id="s3">
+  <span class="demo-label v3">方案3</span>
+  <div class="demo-title">热力网格 — 涨跌色块、一目了然</div>
+  <div class="price-grid">
+    <div class="price-section">
+      <details open>
+        <summary class="section-summary"><span class="sec-title">大盘分析</span><span class="sec-hint">10项</span></summary>
+        <div class="section-body">
+          <div class="price-list">
+            <div class="price-card down"><span class="pc-name">标普500</span><span class="pc-price down">6624.70</span><span class="pc-change down">-1.36%</span></div>
+            <div class="price-card down"><span class="pc-name">纳斯达克</span><span class="pc-price down">22152.42</span><span class="pc-change down">-1.46%</span></div>
+            <div class="price-card down"><span class="pc-name">道琼斯</span><span class="pc-price down">46225.15</span><span class="pc-change down">-1.63%</span></div>
+            <div class="price-card up"><span class="pc-name">恐慌指数</span><span class="pc-price up">25.09</span><span class="pc-change up">+12.16%</span></div>
+            <div class="price-card up"><span class="pc-name">上证指数</span><span class="pc-price up">3426.43</span><span class="pc-change up">+0.23%</span></div>
+            <div class="price-card down"><span class="pc-name">恒生指数</span><span class="pc-price down">24218.56</span><span class="pc-change down">-0.89%</span></div>
+            <div class="price-card up"><span class="pc-name">美元指数</span><span class="pc-price up">103.42</span><span class="pc-change up">+0.15%</span></div>
+            <div class="price-card up"><span class="pc-name">黄金期货</span><span class="pc-price up">3045.60</span><span class="pc-change up">+1.02%</span></div>
+            <div class="price-card down"><span class="pc-name">布伦特原油</span><span class="pc-price down">70.82</span><span class="pc-change down">-0.54%</span></div>
+            <div class="price-card down"><span class="pc-name">十年期国债</span><span class="pc-price down">4.287</span><span class="pc-change down">-0.12%</span></div>
+          </div>
+        </div>
+      </details>
+    </div>
+    <div class="price-section">
+      <details open>
+        <summary class="section-summary"><span class="sec-title">板块分析</span><span class="sec-hint">6项</span></summary>
+        <div class="section-body">
+          <div class="price-list">
+            <div class="price-card down"><span class="pc-name">科技板块</span><span class="pc-price down">218.34</span><span class="pc-change down">-2.10%</span></div>
+            <div class="price-card down"><span class="pc-name">半导体</span><span class="pc-price down">198.76</span><span class="pc-change down">-3.20%</span></div>
+            <div class="price-card up"><span class="pc-name">能源板块</span><span class="pc-price up">87.42</span><span class="pc-change up">+0.80%</span></div>
+            <div class="price-card down"><span class="pc-name">金融板块</span><span class="pc-price down">47.89</span><span class="pc-change down">-1.10%</span></div>
+            <div class="price-card down"><span class="pc-name">可选消费</span><span class="pc-price down">196.23</span><span class="pc-change down">-0.60%</span></div>
+            <div class="price-card down"><span class="pc-name">通信服务</span><span class="pc-price down">102.15</span><span class="pc-change down">-1.80%</span></div>
+          </div>
+        </div>
+      </details>
+    </div>
+    <div class="price-section full-width">
+      <details open>
+        <summary class="section-summary"><span class="sec-title">个股深度研究</span><span class="sec-hint">5项</span></summary>
+        <div class="section-body">
+          <div class="price-list">
+            <div class="price-card down"><span class="pc-name">微软</span><span class="pc-price down">412.35</span><span class="pc-change down">-1.50%</span></div>
+            <div class="price-card down"><span class="pc-name">谷歌</span><span class="pc-price down">168.92</span><span class="pc-change down">-2.30%</span></div>
+            <div class="price-card down"><span class="pc-name">美光科技</span><span class="pc-price down">94.18</span><span class="pc-change down">-4.10%</span></div>
+            <div class="price-card up"><span class="pc-name">阿里巴巴</span><span class="pc-price up">134.80</span><span class="pc-change up">+0.70%</span></div>
+            <div class="price-card up"><span class="pc-name">紫金矿业</span><span class="pc-price up">18.56</span><span class="pc-change up">+1.20%</span></div>
+          </div>
+        </div>
+      </details>
+    </div>
+  </div>
+</div>
+
+<!-- ============================================================
+     方案4: Bloomberg 终端
+     ============================================================ -->
+<div class="demo-section s4" id="s4">
+  <span class="demo-label v4">方案4</span>
+  <div class="demo-title" style="color:#94a3b8;">Bloomberg 终端风格 — 等宽字体、深色背景</div>
+  <div class="price-grid">
+    <div class="price-section">
+      <details open>
+        <summary class="section-summary"><span class="sec-title">大盘分析</span><span class="sec-hint">10项</span></summary>
+        <div class="section-body">
+          <div class="price-list">
+            <div class="price-card"><span class="pc-symbol">GSPC</span><span class="pc-name">标普500</span><span class="pc-price">6624.70</span><span class="pc-change down">-1.36%</span></div>
+            <div class="price-card"><span class="pc-symbol">IXIC</span><span class="pc-name">纳斯达克</span><span class="pc-price">22152.42</span><span class="pc-change down">-1.46%</span></div>
+            <div class="price-card"><span class="pc-symbol">DJI</span><span class="pc-name">道琼斯</span><span class="pc-price">46225.15</span><span class="pc-change down">-1.63%</span></div>
+            <div class="price-card"><span class="pc-symbol">VIX</span><span class="pc-name">恐慌指数</span><span class="pc-price">25.09</span><span class="pc-change up">+12.16%</span></div>
+            <div class="price-card"><span class="pc-symbol">SSE</span><span class="pc-name">上证指数</span><span class="pc-price">3426.43</span><span class="pc-change up">+0.23%</span></div>
+            <div class="price-card"><span class="pc-symbol">HSI</span><span class="pc-name">恒生指数</span><span class="pc-price">24218.56</span><span class="pc-change down">-0.89%</span></div>
+            <div class="price-card"><span class="pc-symbol">DXY</span><span class="pc-name">美元指数</span><span class="pc-price">103.42</span><span class="pc-change up">+0.15%</span></div>
+            <div class="price-card"><span class="pc-symbol">GOLD</span><span class="pc-name">黄金期货</span><span class="pc-price">3045.60</span><span class="pc-change up">+1.02%</span></div>
+            <div class="price-card"><span class="pc-symbol">BZ=F</span><span class="pc-name">布伦特原油</span><span class="pc-price">70.82</span><span class="pc-change down">-0.54%</span></div>
+            <div class="price-card"><span class="pc-symbol">TNX</span><span class="pc-name">十年期国债</span><span class="pc-price">4.287</span><span class="pc-change down">-0.12%</span></div>
+          </div>
+        </div>
+      </details>
+    </div>
+    <div class="price-section">
+      <details open>
+        <summary class="section-summary"><span class="sec-title">板块分析</span><span class="sec-hint">6项</span></summary>
+        <div class="section-body">
+          <div class="price-list">
+            <div class="price-card"><span class="pc-symbol">XLK</span><span class="pc-name">科技板块</span><span class="pc-price">218.34</span><span class="pc-change down">-2.10%</span></div>
+            <div class="price-card"><span class="pc-symbol">SOXX</span><span class="pc-name">半导体</span><span class="pc-price">198.76</span><span class="pc-change down">-3.20%</span></div>
+            <div class="price-card"><span class="pc-symbol">XLE</span><span class="pc-name">能源板块</span><span class="pc-price">87.42</span><span class="pc-change up">+0.80%</span></div>
+            <div class="price-card"><span class="pc-symbol">XLF</span><span class="pc-name">金融板块</span><span class="pc-price">47.89</span><span class="pc-change down">-1.10%</span></div>
+            <div class="price-card"><span class="pc-symbol">XLY</span><span class="pc-name">可选消费</span><span class="pc-price">196.23</span><span class="pc-change down">-0.60%</span></div>
+            <div class="price-card"><span class="pc-symbol">XLC</span><span class="pc-name">通信服务</span><span class="pc-price">102.15</span><span class="pc-change down">-1.80%</span></div>
+          </div>
+        </div>
+      </details>
+    </div>
+    <div class="price-section full-width">
+      <details open>
+        <summary class="section-summary"><span class="sec-title">个股深度研究</span><span class="sec-hint">5项</span></summary>
+        <div class="section-body">
+          <div class="price-list">
+            <div class="price-card"><span class="pc-symbol">MSFT</span><span class="pc-name">微软</span><span class="pc-price">412.35</span><span class="pc-change down">-1.50%</span></div>
+            <div class="price-card"><span class="pc-symbol">GOOGL</span><span class="pc-name">谷歌</span><span class="pc-price">168.92</span><span class="pc-change down">-2.30%</span></div>
+            <div class="price-card"><span class="pc-symbol">MU</span><span class="pc-name">美光科技</span><span class="pc-price">94.18</span><span class="pc-change down">-4.10%</span></div>
+            <div class="price-card"><span class="pc-symbol">9988.HK</span><span class="pc-name">阿里巴巴</span><span class="pc-price">134.80</span><span class="pc-change up">+0.70%</span></div>
+            <div class="price-card"><span class="pc-symbol">601899.SS</span><span class="pc-name">紫金矿业</span><span class="pc-price">18.56</span><span class="pc-change up">+1.20%</span></div>
+          </div>
+        </div>
+      </details>
+    </div>
+  </div>
+</div>
+
+<!-- ============================================================
+     方案5: 迷你卡片网格
+     ============================================================ -->
+<div class="demo-section s5" id="s5">
+  <span class="demo-label v5">方案5</span>
+  <div class="demo-title">迷你卡片网格 — 3列布局、左色条指示涨跌</div>
+  <div class="price-grid">
+    <div class="price-section">
+      <details open>
+        <summary class="section-summary"><span class="sec-title">大盘分析</span><span class="sec-hint">10项</span></summary>
+        <div class="section-body">
+          <div class="price-list">
+            <div class="price-card down"><div class="pc-top"><span class="pc-name">标普500</span><span class="pc-symbol">GSPC</span></div><div class="pc-bottom"><span class="pc-price">6624.70</span><span class="pc-change down">-1.36%</span></div></div>
+            <div class="price-card down"><div class="pc-top"><span class="pc-name">纳斯达克</span><span class="pc-symbol">IXIC</span></div><div class="pc-bottom"><span class="pc-price">22152.42</span><span class="pc-change down">-1.46%</span></div></div>
+            <div class="price-card down"><div class="pc-top"><span class="pc-name">道琼斯</span><span class="pc-symbol">DJI</span></div><div class="pc-bottom"><span class="pc-price">46225.15</span><span class="pc-change down">-1.63%</span></div></div>
+            <div class="price-card up"><div class="pc-top"><span class="pc-name">恐慌指数</span><span class="pc-symbol">VIX</span></div><div class="pc-bottom"><span class="pc-price">25.09</span><span class="pc-change up">+12.16%</span></div></div>
+            <div class="price-card up"><div class="pc-top"><span class="pc-name">上证指数</span><span class="pc-symbol">SSE</span></div><div class="pc-bottom"><span class="pc-price">3426.43</span><span class="pc-change up">+0.23%</span></div></div>
+            <div class="price-card down"><div class="pc-top"><span class="pc-name">恒生指数</span><span class="pc-symbol">HSI</span></div><div class="pc-bottom"><span class="pc-price">24218.56</span><span class="pc-change down">-0.89%</span></div></div>
+            <div class="price-card up"><div class="pc-top"><span class="pc-name">美元指数</span><span class="pc-symbol">DXY</span></div><div class="pc-bottom"><span class="pc-price">103.42</span><span class="pc-change up">+0.15%</span></div></div>
+            <div class="price-card up"><div class="pc-top"><span class="pc-name">黄金期货</span><span class="pc-symbol">GOLD</span></div><div class="pc-bottom"><span class="pc-price">3045.60</span><span class="pc-change up">+1.02%</span></div></div>
+            <div class="price-card down"><div class="pc-top"><span class="pc-name">布伦特原油</span><span class="pc-symbol">BZ=F</span></div><div class="pc-bottom"><span class="pc-price">70.82</span><span class="pc-change down">-0.54%</span></div></div>
+            <div class="price-card down"><div class="pc-top"><span class="pc-name">十年期国债</span><span class="pc-symbol">TNX</span></div><div class="pc-bottom"><span class="pc-price">4.287</span><span class="pc-change down">-0.12%</span></div></div>
+          </div>
+        </div>
+      </details>
+    </div>
+    <div class="price-section">
+      <details open>
+        <summary class="section-summary"><span class="sec-title">板块分析</span><span class="sec-hint">6项</span></summary>
+        <div class="section-body">
+          <div class="price-list">
+            <div class="price-card down"><div class="pc-top"><span class="pc-name">科技板块</span><span class="pc-symbol">XLK</span></div><div class="pc-bottom"><span class="pc-price">218.34</span><span class="pc-change down">-2.10%</span></div></div>
+            <div class="price-card down"><div class="pc-top"><span class="pc-name">半导体</span><span class="pc-symbol">SOXX</span></div><div class="pc-bottom"><span class="pc-price">198.76</span><span class="pc-change down">-3.20%</span></div></div>
+            <div class="price-card up"><div class="pc-top"><span class="pc-name">能源板块</span><span class="pc-symbol">XLE</span></div><div class="pc-bottom"><span class="pc-price">87.42</span><span class="pc-change up">+0.80%</span></div></div>
+            <div class="price-card down"><div class="pc-top"><span class="pc-name">金融板块</span><span class="pc-symbol">XLF</span></div><div class="pc-bottom"><span class="pc-price">47.89</span><span class="pc-change down">-1.10%</span></div></div>
+            <div class="price-card down"><div class="pc-top"><span class="pc-name">可选消费</span><span class="pc-symbol">XLY</span></div><div class="pc-bottom"><span class="pc-price">196.23</span><span class="pc-change down">-0.60%</span></div></div>
+            <div class="price-card down"><div class="pc-top"><span class="pc-name">通信服务</span><span class="pc-symbol">XLC</span></div><div class="pc-bottom"><span class="pc-price">102.15</span><span class="pc-change down">-1.80%</span></div></div>
+          </div>
+        </div>
+      </details>
+    </div>
+    <div class="price-section full-width">
+      <details open>
+        <summary class="section-summary"><span class="sec-title">个股深度研究</span><span class="sec-hint">5项</span></summary>
+        <div class="section-body">
+          <div class="price-list">
+            <div class="price-card down"><div class="pc-top"><span class="pc-name">微软</span><span class="pc-symbol">MSFT</span></div><div class="pc-bottom"><span class="pc-price">412.35</span><span class="pc-change down">-1.50%</span></div></div>
+            <div class="price-card down"><div class="pc-top"><span class="pc-name">谷歌</span><span class="pc-symbol">GOOGL</span></div><div class="pc-bottom"><span class="pc-price">168.92</span><span class="pc-change down">-2.30%</span></div></div>
+            <div class="price-card down"><div class="pc-top"><span class="pc-name">美光科技</span><span class="pc-symbol">MU</span></div><div class="pc-bottom"><span class="pc-price">94.18</span><span class="pc-change down">-4.10%</span></div></div>
+            <div class="price-card up"><div class="pc-top"><span class="pc-name">阿里巴巴</span><span class="pc-symbol">9988.HK</span></div><div class="pc-bottom"><span class="pc-price">134.80</span><span class="pc-change up">+0.70%</span></div></div>
+            <div class="price-card up"><div class="pc-top"><span class="pc-name">紫金矿业</span><span class="pc-symbol">601899.SS</span></div><div class="pc-bottom"><span class="pc-price">18.56</span><span class="pc-change up">+1.20%</span></div></div>
+          </div>
+        </div>
+      </details>
+    </div>
+  </div>
+</div>
+
+<!-- ============================================================
+     方案6: 紧凑表格
+     ============================================================ -->
+<div class="demo-section s6" id="s6">
+  <span class="demo-label v6">方案6</span>
+  <div class="demo-title">紧凑表格 — 斑马纹、表头分列</div>
+  <div class="price-grid">
+    <div class="price-section">
+      <details open>
+        <summary class="section-summary"><span class="sec-title">大盘分析</span><span class="sec-hint">10项</span></summary>
+        <div class="section-body">
+          <div class="price-list">
+            <div class="price-header"><span>名称</span><span>代码</span><span>价格</span><span>涨跌</span></div>
+            <div class="price-card"><span class="pc-name">标普500</span><span class="pc-symbol">GSPC</span><span class="pc-price">6624.70</span><span class="pc-change down">-1.36%</span></div>
+            <div class="price-card"><span class="pc-name">纳斯达克</span><span class="pc-symbol">IXIC</span><span class="pc-price">22152.42</span><span class="pc-change down">-1.46%</span></div>
+            <div class="price-card"><span class="pc-name">道琼斯</span><span class="pc-symbol">DJI</span><span class="pc-price">46225.15</span><span class="pc-change down">-1.63%</span></div>
+            <div class="price-card"><span class="pc-name">恐慌指数</span><span class="pc-symbol">VIX</span><span class="pc-price">25.09</span><span class="pc-change up">+12.16%</span></div>
+            <div class="price-card"><span class="pc-name">上证指数</span><span class="pc-symbol">SSE</span><span class="pc-price">3426.43</span><span class="pc-change up">+0.23%</span></div>
+            <div class="price-card"><span class="pc-name">恒生指数</span><span class="pc-symbol">HSI</span><span class="pc-price">24218.56</span><span class="pc-change down">-0.89%</span></div>
+            <div class="price-card"><span class="pc-name">美元指数</span><span class="pc-symbol">DXY</span><span class="pc-price">103.42</span><span class="pc-change up">+0.15%</span></div>
+            <div class="price-card"><span class="pc-name">黄金期货</span><span class="pc-symbol">GOLD</span><span class="pc-price">3045.60</span><span class="pc-change up">+1.02%</span></div>
+            <div class="price-card"><span class="pc-name">布伦特原油</span><span class="pc-symbol">BZ=F</span><span class="pc-price">70.82</span><span class="pc-change down">-0.54%</span></div>
+            <div class="price-card"><span class="pc-name">十年期国债</span><span class="pc-symbol">TNX</span><span class="pc-price">4.287</span><span class="pc-change down">-0.12%</span></div>
+          </div>
+        </div>
+      </details>
+    </div>
+    <div class="price-section">
+      <details open>
+        <summary class="section-summary"><span class="sec-title">板块分析</span><span class="sec-hint">6项</span></summary>
+        <div class="section-body">
+          <div class="price-list">
+            <div class="price-header"><span>名称</span><span>代码</span><span>价格</span><span>涨跌</span></div>
+            <div class="price-card"><span class="pc-name">科技板块</span><span class="pc-symbol">XLK</span><span class="pc-price">218.34</span><span class="pc-change down">-2.10%</span></div>
+            <div class="price-card"><span class="pc-name">半导体</span><span class="pc-symbol">SOXX</span><span class="pc-price">198.76</span><span class="pc-change down">-3.20%</span></div>
+            <div class="price-card"><span class="pc-name">能源板块</span><span class="pc-symbol">XLE</span><span class="pc-price">87.42</span><span class="pc-change up">+0.80%</span></div>
+            <div class="price-card"><span class="pc-name">金融板块</span><span class="pc-symbol">XLF</span><span class="pc-price">47.89</span><span class="pc-change down">-1.10%</span></div>
+            <div class="price-card"><span class="pc-name">可选消费</span><span class="pc-symbol">XLY</span><span class="pc-price">196.23</span><span class="pc-change down">-0.60%</span></div>
+            <div class="price-card"><span class="pc-name">通信服务</span><span class="pc-symbol">XLC</span><span class="pc-price">102.15</span><span class="pc-change down">-1.80%</span></div>
+          </div>
+        </div>
+      </details>
+    </div>
+    <div class="price-section full-width">
+      <details open>
+        <summary class="section-summary"><span class="sec-title">个股深度研究</span><span class="sec-hint">5项</span></summary>
+        <div class="section-body">
+          <div class="price-list">
+            <div class="price-header"><span>名称</span><span>代码</span><span>价格</span><span>涨跌</span></div>
+            <div class="price-card"><span class="pc-name">微软</span><span class="pc-symbol">MSFT</span><span class="pc-price">412.35</span><span class="pc-change down">-1.50%</span></div>
+            <div class="price-card"><span class="pc-name">谷歌</span><span class="pc-symbol">GOOGL</span><span class="pc-price">168.92</span><span class="pc-change down">-2.30%</span></div>
+            <div class="price-card"><span class="pc-name">美光科技</span><span class="pc-symbol">MU</span><span class="pc-price">94.18</span><span class="pc-change down">-4.10%</span></div>
+            <div class="price-card"><span class="pc-name">阿里巴巴</span><span class="pc-symbol">9988.HK</span><span class="pc-price">134.80</span><span class="pc-change up">+0.70%</span></div>
+            <div class="price-card"><span class="pc-name">紫金矿业</span><span class="pc-symbol">601899.SS</span><span class="pc-price">18.56</span><span class="pc-change up">+1.20%</span></div>
+          </div>
+        </div>
+      </details>
+    </div>
+  </div>
+</div>
+
+<!-- ============================================================
+     方案7: 滚动横条
+     ============================================================ -->
+<div class="demo-section s7" id="s7">
+  <span class="demo-label v7">方案7</span>
+  <div class="demo-title">滚动横条 — 横向滚动、Ticker Tape 风格</div>
+  <div class="price-grid">
+    <div class="price-section">
+      <details open>
+        <summary class="section-summary"><span class="sec-title">大盘分析</span><span class="sec-hint">10项 (可横滑)</span></summary>
+        <div class="section-body">
+          <div class="price-list">
+            <div class="price-card"><span class="pc-name">标普500</span><div class="pc-row"><span class="pc-price">6624.70</span><span class="pc-change down">-1.36%</span></div><span class="pc-symbol">GSPC</span></div>
+            <div class="price-card"><span class="pc-name">纳斯达克</span><div class="pc-row"><span class="pc-price">22152.42</span><span class="pc-change down">-1.46%</span></div><span class="pc-symbol">IXIC</span></div>
+            <div class="price-card"><span class="pc-name">道琼斯</span><div class="pc-row"><span class="pc-price">46225.15</span><span class="pc-change down">-1.63%</span></div><span class="pc-symbol">DJI</span></div>
+            <div class="price-card"><span class="pc-name">恐慌指数</span><div class="pc-row"><span class="pc-price">25.09</span><span class="pc-change up">+12.16%</span></div><span class="pc-symbol">VIX</span></div>
+            <div class="price-card"><span class="pc-name">上证指数</span><div class="pc-row"><span class="pc-price">3426.43</span><span class="pc-change up">+0.23%</span></div><span class="pc-symbol">SSE</span></div>
+            <div class="price-card"><span class="pc-name">恒生指数</span><div class="pc-row"><span class="pc-price">24218.56</span><span class="pc-change down">-0.89%</span></div><span class="pc-symbol">HSI</span></div>
+            <div class="price-card"><span class="pc-name">美元指数</span><div class="pc-row"><span class="pc-price">103.42</span><span class="pc-change up">+0.15%</span></div><span class="pc-symbol">DXY</span></div>
+            <div class="price-card"><span class="pc-name">黄金期货</span><div class="pc-row"><span class="pc-price">3045.60</span><span class="pc-change up">+1.02%</span></div><span class="pc-symbol">GOLD</span></div>
+            <div class="price-card"><span class="pc-name">布伦特原油</span><div class="pc-row"><span class="pc-price">70.82</span><span class="pc-change down">-0.54%</span></div><span class="pc-symbol">BZ=F</span></div>
+            <div class="price-card"><span class="pc-name">十年期国债</span><div class="pc-row"><span class="pc-price">4.287</span><span class="pc-change down">-0.12%</span></div><span class="pc-symbol">TNX</span></div>
+          </div>
+        </div>
+      </details>
+    </div>
+    <div class="price-section">
+      <details open>
+        <summary class="section-summary"><span class="sec-title">板块分析</span><span class="sec-hint">6项</span></summary>
+        <div class="section-body">
+          <div class="price-list">
+            <div class="price-card"><span class="pc-name">科技板块</span><div class="pc-row"><span class="pc-price">218.34</span><span class="pc-change down">-2.10%</span></div><span class="pc-symbol">XLK</span></div>
+            <div class="price-card"><span class="pc-name">半导体</span><div class="pc-row"><span class="pc-price">198.76</span><span class="pc-change down">-3.20%</span></div><span class="pc-symbol">SOXX</span></div>
+            <div class="price-card"><span class="pc-name">能源板块</span><div class="pc-row"><span class="pc-price">87.42</span><span class="pc-change up">+0.80%</span></div><span class="pc-symbol">XLE</span></div>
+            <div class="price-card"><span class="pc-name">金融板块</span><div class="pc-row"><span class="pc-price">47.89</span><span class="pc-change down">-1.10%</span></div><span class="pc-symbol">XLF</span></div>
+            <div class="price-card"><span class="pc-name">可选消费</span><div class="pc-row"><span class="pc-price">196.23</span><span class="pc-change down">-0.60%</span></div><span class="pc-symbol">XLY</span></div>
+            <div class="price-card"><span class="pc-name">通信服务</span><div class="pc-row"><span class="pc-price">102.15</span><span class="pc-change down">-1.80%</span></div><span class="pc-symbol">XLC</span></div>
+          </div>
+        </div>
+      </details>
+    </div>
+    <div class="price-section full-width">
+      <details open>
+        <summary class="section-summary"><span class="sec-title">个股深度研究</span><span class="sec-hint">5项</span></summary>
+        <div class="section-body">
+          <div class="price-list">
+            <div class="price-card"><span class="pc-name">微软</span><div class="pc-row"><span class="pc-price">412.35</span><span class="pc-change down">-1.50%</span></div><span class="pc-symbol">MSFT</span></div>
+            <div class="price-card"><span class="pc-name">谷歌</span><div class="pc-row"><span class="pc-price">168.92</span><span class="pc-change down">-2.30%</span></div><span class="pc-symbol">GOOGL</span></div>
+            <div class="price-card"><span class="pc-name">美光科技</span><div class="pc-row"><span class="pc-price">94.18</span><span class="pc-change down">-4.10%</span></div><span class="pc-symbol">MU</span></div>
+            <div class="price-card"><span class="pc-name">阿里巴巴</span><div class="pc-row"><span class="pc-price">134.80</span><span class="pc-change up">+0.70%</span></div><span class="pc-symbol">9988.HK</span></div>
+            <div class="price-card"><span class="pc-name">紫金矿业</span><div class="pc-row"><span class="pc-price">18.56</span><span class="pc-change up">+1.20%</span></div><span class="pc-symbol">601899.SS</span></div>
+          </div>
+        </div>
+      </details>
+    </div>
+  </div>
+</div>
+
+<!-- ============================================================
+     方案8: 徽章芯片
+     ============================================================ -->
+<div class="demo-section s8" id="s8">
+  <span class="demo-label v8">方案8</span>
+  <div class="demo-title">徽章芯片 — 左名称右数值、涨跌实色标签</div>
+  <div class="price-grid">
+    <div class="price-section">
+      <details open>
+        <summary class="section-summary"><span class="sec-title">大盘分析</span><span class="sec-hint">10项</span></summary>
+        <div class="section-body">
+          <div class="price-list">
+            <div class="price-card"><div class="pc-left"><span class="pc-name">标普500</span><span class="pc-symbol">GSPC</span></div><div class="pc-right"><span class="pc-price">6624.70</span><span class="pc-change down">-1.36%</span></div></div>
+            <div class="price-card"><div class="pc-left"><span class="pc-name">纳斯达克</span><span class="pc-symbol">IXIC</span></div><div class="pc-right"><span class="pc-price">22152.42</span><span class="pc-change down">-1.46%</span></div></div>
+            <div class="price-card"><div class="pc-left"><span class="pc-name">道琼斯</span><span class="pc-symbol">DJI</span></div><div class="pc-right"><span class="pc-price">46225.15</span><span class="pc-change down">-1.63%</span></div></div>
+            <div class="price-card"><div class="pc-left"><span class="pc-name">恐慌指数</span><span class="pc-symbol">VIX</span></div><div class="pc-right"><span class="pc-price">25.09</span><span class="pc-change up">+12.16%</span></div></div>
+            <div class="price-card"><div class="pc-left"><span class="pc-name">上证指数</span><span class="pc-symbol">SSE</span></div><div class="pc-right"><span class="pc-price">3426.43</span><span class="pc-change up">+0.23%</span></div></div>
+            <div class="price-card"><div class="pc-left"><span class="pc-name">恒生指数</span><span class="pc-symbol">HSI</span></div><div class="pc-right"><span class="pc-price">24218.56</span><span class="pc-change down">-0.89%</span></div></div>
+            <div class="price-card"><div class="pc-left"><span class="pc-name">美元指数</span><span class="pc-symbol">DXY</span></div><div class="pc-right"><span class="pc-price">103.42</span><span class="pc-change up">+0.15%</span></div></div>
+            <div class="price-card"><div class="pc-left"><span class="pc-name">黄金期货</span><span class="pc-symbol">GOLD</span></div><div class="pc-right"><span class="pc-price">3045.60</span><span class="pc-change up">+1.02%</span></div></div>
+            <div class="price-card"><div class="pc-left"><span class="pc-name">布伦特原油</span><span class="pc-symbol">BZ=F</span></div><div class="pc-right"><span class="pc-price">70.82</span><span class="pc-change down">-0.54%</span></div></div>
+            <div class="price-card"><div class="pc-left"><span class="pc-name">十年期国债</span><span class="pc-symbol">TNX</span></div><div class="pc-right"><span class="pc-price">4.287</span><span class="pc-change down">-0.12%</span></div></div>
+          </div>
+        </div>
+      </details>
+    </div>
+    <div class="price-section">
+      <details open>
+        <summary class="section-summary"><span class="sec-title">板块分析</span><span class="sec-hint">6项</span></summary>
+        <div class="section-body">
+          <div class="price-list">
+            <div class="price-card"><div class="pc-left"><span class="pc-name">科技板块</span><span class="pc-symbol">XLK</span></div><div class="pc-right"><span class="pc-price">218.34</span><span class="pc-change down">-2.10%</span></div></div>
+            <div class="price-card"><div class="pc-left"><span class="pc-name">半导体</span><span class="pc-symbol">SOXX</span></div><div class="pc-right"><span class="pc-price">198.76</span><span class="pc-change down">-3.20%</span></div></div>
+            <div class="price-card"><div class="pc-left"><span class="pc-name">能源板块</span><span class="pc-symbol">XLE</span></div><div class="pc-right"><span class="pc-price">87.42</span><span class="pc-change up">+0.80%</span></div></div>
+            <div class="price-card"><div class="pc-left"><span class="pc-name">金融板块</span><span class="pc-symbol">XLF</span></div><div class="pc-right"><span class="pc-price">47.89</span><span class="pc-change down">-1.10%</span></div></div>
+            <div class="price-card"><div class="pc-left"><span class="pc-name">可选消费</span><span class="pc-symbol">XLY</span></div><div class="pc-right"><span class="pc-price">196.23</span><span class="pc-change down">-0.60%</span></div></div>
+            <div class="price-card"><div class="pc-left"><span class="pc-name">通信服务</span><span class="pc-symbol">XLC</span></div><div class="pc-right"><span class="pc-price">102.15</span><span class="pc-change down">-1.80%</span></div></div>
+          </div>
+        </div>
+      </details>
+    </div>
+    <div class="price-section full-width">
+      <details open>
+        <summary class="section-summary"><span class="sec-title">个股深度研究</span><span class="sec-hint">5项</span></summary>
+        <div class="section-body">
+          <div class="price-list">
+            <div class="price-card"><div class="pc-left"><span class="pc-name">微软</span><span class="pc-symbol">MSFT</span></div><div class="pc-right"><span class="pc-price">412.35</span><span class="pc-change down">-1.50%</span></div></div>
+            <div class="price-card"><div class="pc-left"><span class="pc-name">谷歌</span><span class="pc-symbol">GOOGL</span></div><div class="pc-right"><span class="pc-price">168.92</span><span class="pc-change down">-2.30%</span></div></div>
+            <div class="price-card"><div class="pc-left"><span class="pc-name">美光科技</span><span class="pc-symbol">MU</span></div><div class="pc-right"><span class="pc-price">94.18</span><span class="pc-change down">-4.10%</span></div></div>
+            <div class="price-card"><div class="pc-left"><span class="pc-name">阿里巴巴</span><span class="pc-symbol">9988.HK</span></div><div class="pc-right"><span class="pc-price">134.80</span><span class="pc-change up">+0.70%</span></div></div>
+            <div class="price-card"><div class="pc-left"><span class="pc-name">紫金矿业</span><span class="pc-symbol">601899.SS</span></div><div class="pc-right"><span class="pc-price">18.56</span><span class="pc-change up">+1.20%</span></div></div>
+          </div>
+        </div>
+      </details>
+    </div>
+  </div>
+</div>
+
+<!-- ============================================================
+     方案9: 双列紧凑行
+     ============================================================ -->
+<div class="demo-section s9" id="s9">
+  <span class="demo-label v9">方案9</span>
+  <div class="demo-title">双列紧凑行 — 两列排列、下划线分隔、最省空间</div>
+  <div class="price-grid">
+    <div class="price-section">
+      <details open>
+        <summary class="section-summary"><span class="sec-title">大盘分析</span><span class="sec-hint">10项</span></summary>
+        <div class="section-body">
+          <div class="price-list">
+            <div class="price-card"><div class="pc-left"><span class="pc-name">标普500</span><span class="pc-symbol">GSPC</span></div><div class="pc-right"><span class="pc-price">6624.70</span><span class="pc-change down">-1.36%</span></div></div>
+            <div class="price-card"><div class="pc-left"><span class="pc-name">纳斯达克</span><span class="pc-symbol">IXIC</span></div><div class="pc-right"><span class="pc-price">22152.42</span><span class="pc-change down">-1.46%</span></div></div>
+            <div class="price-card"><div class="pc-left"><span class="pc-name">道琼斯</span><span class="pc-symbol">DJI</span></div><div class="pc-right"><span class="pc-price">46225.15</span><span class="pc-change down">-1.63%</span></div></div>
+            <div class="price-card"><div class="pc-left"><span class="pc-name">恐慌指数</span><span class="pc-symbol">VIX</span></div><div class="pc-right"><span class="pc-price">25.09</span><span class="pc-change up">+12.16%</span></div></div>
+            <div class="price-card"><div class="pc-left"><span class="pc-name">上证指数</span><span class="pc-symbol">SSE</span></div><div class="pc-right"><span class="pc-price">3426.43</span><span class="pc-change up">+0.23%</span></div></div>
+            <div class="price-card"><div class="pc-left"><span class="pc-name">恒生指数</span><span class="pc-symbol">HSI</span></div><div class="pc-right"><span class="pc-price">24218.56</span><span class="pc-change down">-0.89%</span></div></div>
+            <div class="price-card"><div class="pc-left"><span class="pc-name">美元指数</span><span class="pc-symbol">DXY</span></div><div class="pc-right"><span class="pc-price">103.42</span><span class="pc-change up">+0.15%</span></div></div>
+            <div class="price-card"><div class="pc-left"><span class="pc-name">黄金期货</span><span class="pc-symbol">GOLD</span></div><div class="pc-right"><span class="pc-price">3045.60</span><span class="pc-change up">+1.02%</span></div></div>
+            <div class="price-card"><div class="pc-left"><span class="pc-name">布伦特原油</span><span class="pc-symbol">BZ=F</span></div><div class="pc-right"><span class="pc-price">70.82</span><span class="pc-change down">-0.54%</span></div></div>
+            <div class="price-card"><div class="pc-left"><span class="pc-name">十年期国债</span><span class="pc-symbol">TNX</span></div><div class="pc-right"><span class="pc-price">4.287</span><span class="pc-change down">-0.12%</span></div></div>
+          </div>
+        </div>
+      </details>
+    </div>
+    <div class="price-section">
+      <details open>
+        <summary class="section-summary"><span class="sec-title">板块分析</span><span class="sec-hint">6项</span></summary>
+        <div class="section-body">
+          <div class="price-list">
+            <div class="price-card"><div class="pc-left"><span class="pc-name">科技板块</span><span class="pc-symbol">XLK</span></div><div class="pc-right"><span class="pc-price">218.34</span><span class="pc-change down">-2.10%</span></div></div>
+            <div class="price-card"><div class="pc-left"><span class="pc-name">半导体</span><span class="pc-symbol">SOXX</span></div><div class="pc-right"><span class="pc-price">198.76</span><span class="pc-change down">-3.20%</span></div></div>
+            <div class="price-card"><div class="pc-left"><span class="pc-name">能源板块</span><span class="pc-symbol">XLE</span></div><div class="pc-right"><span class="pc-price">87.42</span><span class="pc-change up">+0.80%</span></div></div>
+            <div class="price-card"><div class="pc-left"><span class="pc-name">金融板块</span><span class="pc-symbol">XLF</span></div><div class="pc-right"><span class="pc-price">47.89</span><span class="pc-change down">-1.10%</span></div></div>
+            <div class="price-card"><div class="pc-left"><span class="pc-name">可选消费</span><span class="pc-symbol">XLY</span></div><div class="pc-right"><span class="pc-price">196.23</span><span class="pc-change down">-0.60%</span></div></div>
+            <div class="price-card"><div class="pc-left"><span class="pc-name">通信服务</span><span class="pc-symbol">XLC</span></div><div class="pc-right"><span class="pc-price">102.15</span><span class="pc-change down">-1.80%</span></div></div>
+          </div>
+        </div>
+      </details>
+    </div>
+    <div class="price-section full-width">
+      <details open>
+        <summary class="section-summary"><span class="sec-title">个股深度研究</span><span class="sec-hint">5项</span></summary>
+        <div class="section-body">
+          <div class="price-list">
+            <div class="price-card"><div class="pc-left"><span class="pc-name">微软</span><span class="pc-symbol">MSFT</span></div><div class="pc-right"><span class="pc-price">412.35</span><span class="pc-change down">-1.50%</span></div></div>
+            <div class="price-card"><div class="pc-left"><span class="pc-name">谷歌</span><span class="pc-symbol">GOOGL</span></div><div class="pc-right"><span class="pc-price">168.92</span><span class="pc-change down">-2.30%</span></div></div>
+            <div class="price-card"><div class="pc-left"><span class="pc-name">美光科技</span><span class="pc-symbol">MU</span></div><div class="pc-right"><span class="pc-price">94.18</span><span class="pc-change down">-4.10%</span></div></div>
+            <div class="price-card"><div class="pc-left"><span class="pc-name">阿里巴巴</span><span class="pc-symbol">9988.HK</span></div><div class="pc-right"><span class="pc-price">134.80</span><span class="pc-change up">+0.70%</span></div></div>
+            <div class="price-card"><div class="pc-left"><span class="pc-name">紫金矿业</span><span class="pc-symbol">601899.SS</span></div><div class="pc-right"><span class="pc-price">18.56</span><span class="pc-change up">+1.20%</span></div></div>
+          </div>
+        </div>
+      </details>
+    </div>
+  </div>
+</div>
+
+<!-- ============================================================
+     方案10: 仪表盘指标
+     ============================================================ -->
+<div class="demo-section s10" id="s10">
+  <span class="demo-label v10">方案10</span>
+  <div class="demo-title">仪表盘指标 — KPI风格、底部渐变条</div>
+  <div class="price-grid">
+    <div class="price-section">
+      <details open>
+        <summary class="section-summary"><span class="sec-title">大盘分析</span><span class="sec-hint">10项</span></summary>
+        <div class="section-body">
+          <div class="price-list">
+            <div class="price-card down"><div class="pc-header"><span class="pc-name">标普500</span><span class="pc-symbol">GSPC</span></div><div class="pc-price">6624.70</div><div class="pc-change down">-1.36%</div></div>
+            <div class="price-card down"><div class="pc-header"><span class="pc-name">纳斯达克</span><span class="pc-symbol">IXIC</span></div><div class="pc-price">22152.42</div><div class="pc-change down">-1.46%</div></div>
+            <div class="price-card down"><div class="pc-header"><span class="pc-name">道琼斯</span><span class="pc-symbol">DJI</span></div><div class="pc-price">46225.15</div><div class="pc-change down">-1.63%</div></div>
+            <div class="price-card up"><div class="pc-header"><span class="pc-name">恐慌指数</span><span class="pc-symbol">VIX</span></div><div class="pc-price">25.09</div><div class="pc-change up">+12.16%</div></div>
+            <div class="price-card up"><div class="pc-header"><span class="pc-name">上证指数</span><span class="pc-symbol">SSE</span></div><div class="pc-price">3426.43</div><div class="pc-change up">+0.23%</div></div>
+            <div class="price-card down"><div class="pc-header"><span class="pc-name">恒生指数</span><span class="pc-symbol">HSI</span></div><div class="pc-price">24218.56</div><div class="pc-change down">-0.89%</div></div>
+            <div class="price-card up"><div class="pc-header"><span class="pc-name">美元指数</span><span class="pc-symbol">DXY</span></div><div class="pc-price">103.42</div><div class="pc-change up">+0.15%</div></div>
+            <div class="price-card up"><div class="pc-header"><span class="pc-name">黄金期货</span><span class="pc-symbol">GOLD</span></div><div class="pc-price">3045.60</div><div class="pc-change up">+1.02%</div></div>
+            <div class="price-card down"><div class="pc-header"><span class="pc-name">布伦特原油</span><span class="pc-symbol">BZ=F</span></div><div class="pc-price">70.82</div><div class="pc-change down">-0.54%</div></div>
+            <div class="price-card down"><div class="pc-header"><span class="pc-name">十年期国债</span><span class="pc-symbol">TNX</span></div><div class="pc-price">4.287</div><div class="pc-change down">-0.12%</div></div>
+          </div>
+        </div>
+      </details>
+    </div>
+    <div class="price-section">
+      <details open>
+        <summary class="section-summary"><span class="sec-title">板块分析</span><span class="sec-hint">6项</span></summary>
+        <div class="section-body">
+          <div class="price-list">
+            <div class="price-card down"><div class="pc-header"><span class="pc-name">科技板块</span><span class="pc-symbol">XLK</span></div><div class="pc-price">218.34</div><div class="pc-change down">-2.10%</div></div>
+            <div class="price-card down"><div class="pc-header"><span class="pc-name">半导体</span><span class="pc-symbol">SOXX</span></div><div class="pc-price">198.76</div><div class="pc-change down">-3.20%</div></div>
+            <div class="price-card up"><div class="pc-header"><span class="pc-name">能源板块</span><span class="pc-symbol">XLE</span></div><div class="pc-price">87.42</div><div class="pc-change up">+0.80%</div></div>
+            <div class="price-card down"><div class="pc-header"><span class="pc-name">金融板块</span><span class="pc-symbol">XLF</span></div><div class="pc-price">47.89</div><div class="pc-change down">-1.10%</div></div>
+            <div class="price-card down"><div class="pc-header"><span class="pc-name">可选消费</span><span class="pc-symbol">XLY</span></div><div class="pc-price">196.23</div><div class="pc-change down">-0.60%</div></div>
+            <div class="price-card down"><div class="pc-header"><span class="pc-name">通信服务</span><span class="pc-symbol">XLC</span></div><div class="pc-price">102.15</div><div class="pc-change down">-1.80%</div></div>
+          </div>
+        </div>
+      </details>
+    </div>
+    <div class="price-section full-width">
+      <details open>
+        <summary class="section-summary"><span class="sec-title">个股深度研究</span><span class="sec-hint">5项</span></summary>
+        <div class="section-body">
+          <div class="price-list">
+            <div class="price-card down"><div class="pc-header"><span class="pc-name">微软</span><span class="pc-symbol">MSFT</span></div><div class="pc-price">412.35</div><div class="pc-change down">-1.50%</div></div>
+            <div class="price-card down"><div class="pc-header"><span class="pc-name">谷歌</span><span class="pc-symbol">GOOGL</span></div><div class="pc-price">168.92</div><div class="pc-change down">-2.30%</div></div>
+            <div class="price-card down"><div class="pc-header"><span class="pc-name">美光科技</span><span class="pc-symbol">MU</span></div><div class="pc-price">94.18</div><div class="pc-change down">-4.10%</div></div>
+            <div class="price-card up"><div class="pc-header"><span class="pc-name">阿里巴巴</span><span class="pc-symbol">9988.HK</span></div><div class="pc-price">134.80</div><div class="pc-change up">+0.70%</div></div>
+            <div class="price-card up"><div class="pc-header"><span class="pc-name">紫金矿业</span><span class="pc-symbol">601899.SS</span></div><div class="pc-price">18.56</div><div class="pc-change up">+1.20%</div></div>
+          </div>
+        </div>
+      </details>
+    </div>
+  </div>
+</div>
+
+<div style="text-align:center; padding: 20px 0 40px; color: #94a3b8; font-size: 0.78rem;">
+  当日价格紧凑方案对比 V2 — 共 10 种设计 + 当前样式对照
+</div>
+
+</body>
+</html>

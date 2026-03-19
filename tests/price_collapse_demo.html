@@ -1,0 +1,248 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>价格折叠方案对比</title>
+<style>
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background: #f4f6fb; color: #1e293b; padding: 20px; }
+
+h1 { font-size: 1.2rem; margin-bottom: 8px; }
+h2 { font-size: 1rem; margin-bottom: 16px; color: #64748b; font-weight: 500; }
+.demo-section { background: #fff; border-radius: 16px; padding: 24px; margin-bottom: 32px; box-shadow: 0 2px 8px rgba(0,0,0,0.06); }
+.demo-label { display: inline-block; background: #3b82f6; color: #fff; font-size: 0.75rem; padding: 2px 10px; border-radius: 99px; margin-bottom: 12px; }
+
+/* 共用样式 */
+.snapshot-head { margin-bottom: 12px; }
+.snapshot-head h3 { font-size: 1.05rem; font-weight: 700; }
+.snapshot-head small { color: #94a3b8; font-size: 0.82rem; }
+
+.price-grid {
+  display: grid;
+  grid-template-columns: minmax(260px, 0.9fr) minmax(320px, 1.1fr);
+  gap: 14px;
+  align-items: start;
+}
+
+.price-section {
+  border: 1px solid rgba(15,23,42,0.08);
+  border-radius: 14px;
+  padding: 14px 16px;
+  background: #fff;
+}
+
+.price-section-head {
+  display: flex; flex-direction: column; gap: 2px;
+  cursor: pointer; list-style: none; position: relative; padding-left: 16px;
+  user-select: none;
+}
+.price-section-head::-webkit-details-marker { display: none; }
+.price-section-head > span:first-child { font-size: 1rem; font-weight: 800; }
+.price-section-summary { color: #94a3b8; font-size: 0.82rem; }
+details[open] > summary > .price-section-summary { display: none; }
+
+.price-section-head::before {
+  content: "▸"; font-size: 0.7rem; position: absolute; left: 0; top: 4px;
+  transition: transform 0.2s;
+}
+details[open] > .price-section-head::before { transform: rotate(90deg); }
+
+.price-section-body { margin-top: 10px; }
+
+.price-list {
+  display: grid; grid-template-columns: repeat(auto-fill, minmax(100px, 1fr)); gap: 8px;
+}
+.price-card {
+  background: #f8fafc; border-radius: 10px; padding: 8px 10px; text-align: center;
+}
+.price-card .name { font-size: 0.78rem; color: #64748b; margin-bottom: 2px; }
+.price-card .pct { font-size: 0.88rem; font-weight: 700; }
+.price-card .pct.up { color: #ef4444; }
+.price-card .pct.down { color: #22c55e; }
+
+.price-section.full-width { grid-column: 1 / -1; }
+
+/* ===== 方案 A: 标题区可点击折叠 ===== */
+.scheme-a .snapshot-head {
+  cursor: pointer; user-select: none; display: flex; align-items: center; gap: 8px;
+}
+.scheme-a .snapshot-head .collapse-hint {
+  font-size: 0.72rem; color: #94a3b8; transition: opacity 0.2s;
+}
+.scheme-a .snapshot-head:hover .collapse-hint { opacity: 1; }
+
+/* ===== 方案 B: 右上角小按钮 ===== */
+.scheme-b .snapshot-head {
+  display: flex; align-items: flex-start; justify-content: space-between;
+}
+.scheme-b .toggle-btn {
+  font-size: 0.75rem; padding: 3px 12px; border-radius: 6px;
+  border: 1px solid #e2e8f0; background: #f8fafc; color: #64748b;
+  cursor: pointer; white-space: nowrap;
+}
+.scheme-b .toggle-btn:hover { background: #e2e8f0; }
+
+/* ===== 方案 C: 双击空白区域 ===== */
+.scheme-c .price-grid { cursor: default; }
+.scheme-c .dblclick-hint {
+  text-align: center; font-size: 0.72rem; color: #cbd5e1; padding: 4px 0 0;
+  grid-column: 1 / -1;
+}
+
+@media (max-width: 700px) {
+  .price-grid { grid-template-columns: 1fr; }
+  .price-section.full-width { grid-column: auto; }
+}
+</style>
+</head>
+<body>
+
+<h1>价格区域折叠交互方案对比</h1>
+<h2>请体验三种方案，选择你喜欢的</h2>
+
+<!-- ===== 方案 A ===== -->
+<div class="demo-section scheme-a">
+  <span class="demo-label">方案 A：点击「当日价格」标题区折叠/展开全部</span>
+  <section class="review-snapshot-card">
+    <div class="snapshot-head" id="schemeAHead">
+      <div>
+        <h3>当日价格</h3>
+        <small>最近一个美股收盘日的核心标的与指数</small>
+      </div>
+      <span class="collapse-hint">▾ 点击折叠</span>
+    </div>
+    <div id="schemeAPrices" class="price-grid"></div>
+  </section>
+</div>
+
+<!-- ===== 方案 B ===== -->
+<div class="demo-section scheme-b">
+  <span class="demo-label">方案 B：右上角按钮切换折叠/展开</span>
+  <section class="review-snapshot-card">
+    <div class="snapshot-head">
+      <div>
+        <h3>当日价格</h3>
+        <small>最近一个美股收盘日的核心标的与指数</small>
+      </div>
+      <button class="toggle-btn" id="schemeBBtn">全部折叠</button>
+    </div>
+    <div id="schemeBPrices" class="price-grid"></div>
+  </section>
+</div>
+
+<!-- ===== 方案 C ===== -->
+<div class="demo-section scheme-c">
+  <span class="demo-label">方案 C：双击价格区域空白处折叠/展开</span>
+  <section class="review-snapshot-card">
+    <div class="snapshot-head">
+      <div>
+        <h3>当日价格</h3>
+        <small>最近一个美股收盘日的核心标的与指数</small>
+      </div>
+    </div>
+    <div id="schemeCPrices" class="price-grid"></div>
+  </section>
+</div>
+
+<script>
+// Mock data
+const mockPrices = {
+  index: [
+    { name: "标普500", pct: -1.36 }, { name: "纳斯达克", pct: -1.46 },
+    { name: "道琼斯", pct: -1.63 }, { name: "恐慌指数", pct: 12.16 },
+    { name: "上证指数", pct: 0.23 }, { name: "恒生指数", pct: -0.89 },
+    { name: "美元指数", pct: 0.15 }, { name: "黄金期货", pct: 1.02 },
+  ],
+  sector: [
+    { name: "科技板块", pct: -2.1 }, { name: "半导体", pct: -3.2 },
+    { name: "能源板块", pct: 0.8 }, { name: "金融板块", pct: -1.1 },
+    { name: "可选消费", pct: -0.6 }, { name: "通信服务", pct: -1.8 },
+  ],
+  stock: [
+    { name: "微软", pct: -1.5 }, { name: "谷歌", pct: -2.3 },
+    { name: "美光科技", pct: -4.1 }, { name: "阿里巴巴", pct: 0.7 },
+    { name: "紫金矿业", pct: 1.2 },
+  ],
+};
+
+const sectionMeta = [
+  { key: "index", label: "大盘分析" },
+  { key: "sector", label: "板块分析" },
+  { key: "stock", label: "个股深度研究" },
+];
+
+function buildPriceCard(item) {
+  const cls = item.pct > 0 ? "up" : item.pct < 0 ? "down" : "";
+  const sign = item.pct > 0 ? "+" : "";
+  return `<div class="price-card"><div class="name">${item.name}</div><div class="pct ${cls}">${sign}${item.pct.toFixed(1)}%</div></div>`;
+}
+
+function buildSummaryLine(items) {
+  return items.slice(0, 4).map(i => {
+    const sign = i.pct > 0 ? "+" : "";
+    return `${i.name} ${sign}${i.pct.toFixed(1)}%`;
+  }).join("  ·  ");
+}
+
+function renderSections(container) {
+  sectionMeta.forEach(({ key, label }, idx) => {
+    const items = mockPrices[key];
+    if (!items.length) return;
+    const details = document.createElement("details");
+    details.className = "price-section" + (idx === 2 ? " full-width" : "");
+    details.open = true;
+    const summary = document.createElement("summary");
+    summary.className = "price-section-head";
+    summary.innerHTML = `<span>${label}</span><span class="price-section-summary">${buildSummaryLine(items)}</span>`;
+    const body = document.createElement("div");
+    body.className = "price-section-body";
+    body.innerHTML = `<div class="price-list">${items.map(buildPriceCard).join("")}</div>`;
+    details.append(summary, body);
+    container.appendChild(details);
+  });
+}
+
+// Render all three
+["schemeAPrices", "schemeBPrices", "schemeCPrices"].forEach(id => {
+  renderSections(document.getElementById(id));
+});
+
+// ===== 方案 A: 点击标题 =====
+const headA = document.getElementById("schemeAHead");
+const hintA = headA.querySelector(".collapse-hint");
+headA.addEventListener("click", () => {
+  const grid = document.getElementById("schemeAPrices");
+  const allDetails = grid.querySelectorAll("details.price-section");
+  const anyOpen = [...allDetails].some(d => d.open);
+  allDetails.forEach(d => d.open = !anyOpen);
+  hintA.textContent = anyOpen ? "▸ 点击展开" : "▾ 点击折叠";
+});
+
+// ===== 方案 B: 右上角按钮 =====
+const btnB = document.getElementById("schemeBBtn");
+btnB.addEventListener("click", () => {
+  const grid = document.getElementById("schemeBPrices");
+  const allDetails = grid.querySelectorAll("details.price-section");
+  const anyOpen = [...allDetails].some(d => d.open);
+  allDetails.forEach(d => d.open = !anyOpen);
+  btnB.textContent = anyOpen ? "全部展开" : "全部折叠";
+});
+
+// ===== 方案 C: 双击空白 =====
+const gridC = document.getElementById("schemeCPrices");
+// 添加提示
+const hint = document.createElement("div");
+hint.className = "dblclick-hint";
+hint.textContent = "双击空白处可折叠/展开全部";
+gridC.appendChild(hint);
+gridC.addEventListener("dblclick", (e) => {
+  // 只在空白区域响应（不在 price-card 或 summary 上）
+  if (e.target.closest(".price-card, summary")) return;
+  const allDetails = gridC.querySelectorAll("details.price-section");
+  const anyOpen = [...allDetails].some(d => d.open);
+  allDetails.forEach(d => d.open = !anyOpen);
+});
+</script>
+</body>
+</html>
