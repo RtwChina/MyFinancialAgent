@@ -343,9 +343,9 @@ class PriceSource:
 价格字段建议：
 
 - `k_date`
-- `stock_code`
+- `symbol`（系统标识）
+- `yahoo_symbol`（Yahoo Finance 代码）
 - `stock_name`
-- `symbol`
 - `current_price`
 - `change_percent`
 - `volume`

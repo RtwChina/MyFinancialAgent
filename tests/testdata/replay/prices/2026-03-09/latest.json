@@ -3,103 +3,103 @@
   "items": [
     {
       "k_date": "2026-03-09",
-      "stock_code": "SSE",
       "stock_name": "SSE Composite Index",
       "symbol": "SSE",
       "current_price": 3342.0708,
       "change_percent": 0.2,
       "volume": 1760000000,
-      "captured_at": "2026-03-09 18:00:00"
+      "captured_at": "2026-03-09 18:00:00",
+      "yahoo_symbol": "000001.SS"
     },
     {
       "k_date": "2026-03-09",
-      "stock_code": "DXY",
       "stock_name": "Dollar Index",
       "symbol": "DXY",
       "current_price": 102.8938,
       "change_percent": -0.2,
       "volume": 0,
-      "captured_at": "2026-03-09 18:00:00"
+      "captured_at": "2026-03-09 18:00:00",
+      "yahoo_symbol": "DX-Y.NYB"
     },
     {
       "k_date": "2026-03-09",
-      "stock_code": "GOLD",
       "stock_name": "Gold Futures",
       "symbol": "GOLD",
       "current_price": 2951.928,
       "change_percent": 0.8,
       "volume": 162000,
-      "captured_at": "2026-03-09 18:00:00"
+      "captured_at": "2026-03-09 18:00:00",
+      "yahoo_symbol": "GC=F"
     },
     {
       "k_date": "2026-03-09",
-      "stock_code": "GOOGL",
       "stock_name": "Alphabet",
       "symbol": "GOOGL",
       "current_price": 188.9559,
       "change_percent": 1.1,
       "volume": 21800000,
-      "captured_at": "2026-03-09 18:00:00"
+      "captured_at": "2026-03-09 18:00:00",
+      "yahoo_symbol": "GOOGL"
     },
     {
       "k_date": "2026-03-09",
-      "stock_code": "LITE",
       "stock_name": "Lumentum",
       "symbol": "LITE",
       "current_price": 58.1468,
       "change_percent": 0.6,
       "volume": 3210000,
-      "captured_at": "2026-03-09 18:00:00"
+      "captured_at": "2026-03-09 18:00:00",
+      "yahoo_symbol": "LITE"
     },
     {
       "k_date": "2026-03-09",
-      "stock_code": "MSFT",
       "stock_name": "Microsoft",
       "symbol": "MSFT",
       "current_price": 418.2305,
       "change_percent": 0.9,
       "volume": 25400000,
-      "captured_at": "2026-03-09 18:00:00"
+      "captured_at": "2026-03-09 18:00:00",
+      "yahoo_symbol": "MSFT"
     },
     {
       "k_date": "2026-03-09",
-      "stock_code": "MU",
       "stock_name": "Micron Technology",
       "symbol": "MU",
       "current_price": 110.5104,
       "change_percent": 1.2,
       "volume": 38210000,
-      "captured_at": "2026-03-09 18:00:00"
+      "captured_at": "2026-03-09 18:00:00",
+      "yahoo_symbol": "MU"
     },
     {
       "k_date": "2026-03-09",
-      "stock_code": "GSPC",
       "stock_name": "S&P 500",
       "symbol": "GSPC",
       "current_price": 5889.501,
       "change_percent": 0.5,
       "volume": 2850000000,
-      "captured_at": "2026-03-09 18:00:00"
+      "captured_at": "2026-03-09 18:00:00",
+      "yahoo_symbol": "^GSPC"
     },
     {
       "k_date": "2026-03-09",
-      "stock_code": "HSI",
       "stock_name": "HANG SENG INDEX",
       "symbol": "HSI",
       "current_price": 24224.48,
       "change_percent": 0.6,
       "volume": 0,
-      "captured_at": "2026-03-09 18:00:00"
+      "captured_at": "2026-03-09 18:00:00",
+      "yahoo_symbol": "^HSI"
     },
     {
       "k_date": "2026-03-09",
-      "stock_code": "VIX",
       "stock_name": "CBOE Volatility Index",
       "symbol": "VIX",
       "current_price": 19.503,
       "change_percent": -1.5,
       "volume": 0,
-      "captured_at": "2026-03-09 18:00:00"
+      "captured_at": "2026-03-09 18:00:00",
+      "yahoo_symbol": "^VIX"
     }
   ]
 }

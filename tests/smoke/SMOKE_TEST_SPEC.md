@@ -237,28 +237,28 @@ npx playwright test tests/cases/smoke/review_edit_cycle.spec.js --reporter=line
   - 点击 `保存` 后会更新当前数据并回到只读查看态
 - 阻断级别：阻断
 
-### `SMK-010` 复盘候选日来自 ^GSPC（不受跨市场日期影响）
+### `SMK-010` 复盘候选日来自 GSPC（不受跨市场日期影响）
 
 - 前提：本地 D1 已导入 seed，本地 Worker 已启动
 - 验证命令：
 
 ```bash
-# 注入未来日期行（^HSI 2099-12-31），再查复盘列表
+# 注入未来日期行（HSI 2099-12-31），再查复盘列表
 npx wrangler d1 execute my-financial-agent-test \
   --local --config tests/cases/config/wrangler.test.toml \
-  --command "INSERT OR IGNORE INTO stock_raw (k_date, stock_code, stock_name, symbol, current_price, change_percent, volume, captured_at) VALUES ('2099-12-31', '^HSI', '恒生指数', '^HSI', 99999.0, 0.0, 0, datetime('now'));"
+  --command "INSERT OR IGNORE INTO stock_raw (k_date, stock_code, stock_name, symbol, yahoo_symbol, current_price, change_percent, volume, captured_at) VALUES ('2099-12-31', 'HSI', '恒生指数', 'HSI', '^HSI', 99999.0, 0.0, 0, datetime('now'));"
 
 curl -sS http://127.0.0.1:8787/api/reviews | python3 -c "import sys,json; r=json.load(sys.stdin); d=r.get('latestClosedDate'); print('latestClosedDate:', d); assert d != '2099-12-31', 'BUG: latestClosedDate 受跨市场日期影响！'; print('PASS')"
 
 # 清理注入行
 npx wrangler d1 execute my-financial-agent-test \
   --local --config tests/cases/config/wrangler.test.toml \
-  --command "DELETE FROM stock_raw WHERE k_date='2099-12-31' AND symbol='^HSI';"
+  --command "DELETE FROM stock_raw WHERE k_date='2099-12-31' AND symbol='HSI';"
 ```
 
 - 预期结果：
   - `latestClosedDate` 不等于 `2099-12-31`
-  - 来自 `^GSPC` 的最大 `k_date`（即 seed 中的最近日期）
+  - 来自 `GSPC` 的最大 `k_date`（即 seed 中的最近日期）
 - 阻断级别：阻断（主链路修复核心验证）
 
 ### `SMK-011` 跨市场日期混合时美股个股价格仍展示
@@ -270,10 +270,10 @@ npx wrangler d1 execute my-financial-agent-test \
 LAST_SEED_DATE=2026-03-13
 NEXT_DAY=2026-03-14
 
-# 注入 ^HSI 在 NEXT_DAY 的行
+# 注入 HSI 在 NEXT_DAY 的行
 npx wrangler d1 execute my-financial-agent-test \
   --local --config tests/cases/config/wrangler.test.toml \
-  --command "INSERT OR IGNORE INTO stock_raw (k_date, stock_code, stock_name, symbol, current_price, change_percent, volume, captured_at) VALUES ('$NEXT_DAY', '^HSI', '恒生指数', '^HSI', 20000.0, 0.5, 100000, datetime('now'));"
+  --command "INSERT OR IGNORE INTO stock_raw (k_date, stock_code, stock_name, symbol, yahoo_symbol, current_price, change_percent, volume, captured_at) VALUES ('$NEXT_DAY', 'HSI', '恒生指数', 'HSI', '^HSI', 20000.0, 0.5, 100000, datetime('now'));"
 
 # 查询 archive_date=LAST_SEED_DATE 的 bootstrap，期望含美股个股
 curl -sS "http://127.0.0.1:8787/api/reviews/$LAST_SEED_DATE/bootstrap" | python3 -c "
@@ -290,7 +290,7 @@ print('PASS')
 # 清理注入行
 npx wrangler d1 execute my-financial-agent-test \
   --local --config tests/cases/config/wrangler.test.toml \
-  --command "DELETE FROM stock_raw WHERE k_date='$NEXT_DAY' AND symbol='^HSI';"
+  --command "DELETE FROM stock_raw WHERE k_date='$NEXT_DAY' AND symbol='HSI';"
 ```
 
 - 预期结果：

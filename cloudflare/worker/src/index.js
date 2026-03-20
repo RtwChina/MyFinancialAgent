@@ -200,14 +200,15 @@ async function ingestPrices(env, items) {
   for (const item of items) {
     const result = await env.DB.prepare(
       `INSERT OR IGNORE INTO stock_raw
-      (k_date, stock_code, stock_name, symbol, current_price, change_percent, volume, captured_at, created_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      (k_date, stock_code, stock_name, symbol, yahoo_symbol, current_price, change_percent, volume, captured_at, created_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     )
       .bind(
         item.k_date,
         item.stock_code || item.symbol,
         item.stock_name || item.symbol,
         item.symbol,
+        item.yahoo_symbol || null,
         item.current_price,
         item.change_percent,
         item.volume,
@@ -1020,11 +1021,11 @@ async function initializeReview(env, archiveDate) {
   return { ok: true, archiveDate, reviewStatus: "initialized" };
 }
 
-// 以 ^GSPC（S&P 500）作为 NYSE 收盘日代理：当 ^GSPC 有价格记录时，说明 NYSE 当天已收盘。
+// 以 GSPC（S&P 500）作为 NYSE 收盘日代理：当 GSPC 有价格记录时，说明 NYSE 当天已收盘。
 // 这样可以避免亚洲指数/汇率/商品先进入下一自然日时把复盘候选日错误推进。
 async function getLatestClosedNyseTradingDay(env) {
   const row = await env.DB.prepare(
-    `SELECT MAX(k_date) AS latest FROM stock_raw WHERE symbol = '^GSPC'`,
+    `SELECT MAX(k_date) AS latest FROM stock_raw WHERE symbol = 'GSPC'`,
   ).first();
   return row?.latest || null;
 }

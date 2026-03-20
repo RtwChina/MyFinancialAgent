@@ -46,11 +46,29 @@ def build_price_fixtures(conn: sqlite3.Connection, output_root: Path) -> list[st
         """
     ).fetchall()
 
+    # symbol -> yahoo_symbol mapping
+    yahoo_map = {
+        'SSE': '000001.SS', 'DXY': 'DX-Y.NYB', 'GOLD': 'GC=F', 'GOOGL': 'GOOGL',
+        'LITE': 'LITE', 'MSFT': 'MSFT', 'MU': 'MU', 'GSPC': '^GSPC',
+        'HSI': '^HSI', 'VIX': '^VIX', 'IXIC': '^IXIC', 'DJI': '^DJI',
+        'STOXX50E': '^STOXX50E', 'TNX': '^TNX', 'USDJPY': 'JPY=X',
+        'USDCNY': 'CNY=X', 'SILVER': 'SI=F', 'COPPER': 'HG=F',
+        'SOYBEAN': 'ZS=F', 'BTCUSD': 'BTC-USD', 'BZ=F': 'BZ=F',
+        'XLK': 'XLK', 'SOXX': 'SOXX', 'EWY': 'EWY', 'XLE': 'XLE',
+        'XLF': 'XLF', 'XLY': 'XLY', 'XLC': 'XLC', 'XLI': 'XLI',
+        'XLP': 'XLP', 'XLB': 'XLB', 'XLU': 'XLU', 'XLV': 'XLV',
+        'IYR': 'IYR', 'VIG': 'VIG', 'AGG': 'AGG',
+        'SNDK': 'SNDK', '通信ETF': '515880.SS', '机器人ETF': '562500.SS',
+        '胜宏科技': '300476.SZ', '润泽科技': '300442.SZ', '阿里巴巴': '9988.HK', '紫金矿业': '601899.SS',
+    }
+
     grouped: dict[str, list[dict]] = {}
     for row in rows:
         item = dict(row)
         item["symbol"] = normalize_symbol(item["symbol"])
-        item["stock_code"] = normalize_symbol(item["stock_code"]) or item["symbol"]
+        # stock_code -> yahoo_symbol
+        del item["stock_code"]
+        item["yahoo_symbol"] = yahoo_map.get(item["symbol"])
         grouped.setdefault(item["k_date"], []).append(item)
 
     dates = sorted(grouped.keys())

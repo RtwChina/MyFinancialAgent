@@ -14,7 +14,7 @@ os.environ.setdefault("SKIP_LLM", "true")
 
 from collect_news_v3 import build_daily_summary_record, get_analysis_window, get_latest_closed_trading_day, load_news_for_summary, subtract_trading_days
 from db_utils import batch_insert_prices, initialize_archive_record, rebuild_database, save_news_analysis, upsert_news_batch
-from demo_data import SYMBOL_META, TRACKED_ORDER
+from demo_data import SYMBOL_META, TRACKED_ORDER, YAHOO_SYMBOL_MAP
 
 OUTPUT_DIR = Path("output")
 
@@ -186,9 +186,10 @@ def build_prices_for_trade_dates(trade_dates: List[str]) -> List[Dict[str, Any]]
             current = round(previous_close * (1 + move / 100), 4)
             rows.append({
                 "k_date": trade_date,
-                "stock_code": symbol,
+                "stock_code": symbol,  # 兼容字段
                 "stock_name": meta["name"],
                 "symbol": symbol,
+                "yahoo_symbol": YAHOO_SYMBOL_MAP.get(symbol),
                 "current_price": current,
                 "change_percent": round(move, 2),
                 "volume": meta["volume"] + index * 17000 if meta["volume"] else 0,

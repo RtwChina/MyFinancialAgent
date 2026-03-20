@@ -96,6 +96,7 @@ def create_legacy_temp_schema(conn: sqlite3.Connection) -> None:
             stock_code TEXT,
             stock_name TEXT,
             symbol TEXT,
+            yahoo_symbol TEXT,
             current_price REAL,
             change_percent REAL,
             volume INTEGER,
@@ -184,15 +185,31 @@ def render_stock_rows(conn: sqlite3.Connection) -> list[str]:
         """
     ).fetchall()
 
+    # symbol -> yahoo_symbol mapping
+    yahoo_map = {
+        'SSE': '000001.SS', 'DXY': 'DX-Y.NYB', 'GOLD': 'GC=F', 'GOOGL': 'GOOGL',
+        'LITE': 'LITE', 'MSFT': 'MSFT', 'MU': 'MU', 'GSPC': '^GSPC',
+        'HSI': '^HSI', 'VIX': '^VIX', 'IXIC': '^IXIC', 'DJI': '^DJI',
+        'STOXX50E': '^STOXX50E', 'TNX': '^TNX', 'USDJPY': 'JPY=X',
+        'USDCNY': 'CNY=X', 'SILVER': 'SI=F', 'COPPER': 'HG=F',
+        'SOYBEAN': 'ZS=F', 'BTCUSD': 'BTC-USD', 'BZ=F': 'BZ=F',
+        'XLK': 'XLK', 'SOXX': 'SOXX', 'EWY': 'EWY', 'XLE': 'XLE',
+        'XLF': 'XLF', 'XLY': 'XLY', 'XLC': 'XLC', 'XLI': 'XLI',
+        'XLP': 'XLP', 'XLB': 'XLB', 'XLU': 'XLU', 'XLV': 'XLV',
+        'IYR': 'IYR', 'VIG': 'VIG', 'AGG': 'AGG',
+        'SNDK': 'SNDK', '通信ETF': '515880.SS', '机器人ETF': '562500.SS',
+        '胜宏科技': '300476.SZ', '润泽科技': '300442.SZ', '阿里巴巴': '9988.HK', '紫金矿业': '601899.SS',
+    }
+
     statements: list[str] = []
     for row in rows:
         system_symbol = normalize_symbol(row["symbol"])
-        stock_code = normalize_symbol(row["stock_code"]) or system_symbol
+        yahoo_symbol = yahoo_map.get(system_symbol)
         statements.append(
             "INSERT OR IGNORE INTO stock_raw "
-            "(k_date, stock_code, stock_name, symbol, current_price, change_percent, volume, captured_at) "
-            f"VALUES ({sql_value(row['k_date'])}, {sql_value(stock_code)}, {sql_value(row['stock_name'])}, "
-            f"{sql_value(system_symbol)}, {sql_value(row['current_price'])}, {sql_value(row['change_percent'])}, "
+            "(k_date, stock_code, stock_name, symbol, yahoo_symbol, current_price, change_percent, volume, captured_at) "
+            f"VALUES ({sql_value(row['k_date'])}, {sql_value(system_symbol)}, {sql_value(row['stock_name'])}, "
+            f"{sql_value(system_symbol)}, {sql_value(yahoo_symbol)}, {sql_value(row['current_price'])}, {sql_value(row['change_percent'])}, "
             f"{sql_value(row['volume'])}, {sql_value(row['captured_at'])});"
         )
     return statements

@@ -318,29 +318,29 @@ def resolve_live_review_date(explicit_live_date: str | None) -> str:
 
 
 def validate_nyse_closed_trading_day(db_name: str, worker_base: str) -> dict[str, Any]:
-    """INT-010: 验证复盘候选日来自 ^GSPC 而非跨市场最大日期。
+    """INT-010: 验证复盘候选日来自 GSPC 而非跨市场最大日期。
 
     步骤：
-    1. 向 stock_raw 注入一条 ^HSI 的未来日期行（2099-12-31）
-    2. 调用 GET /api/reviews，断言 latestClosedDate 仍为 ^GSPC 的最大 k_date（不是 2099-12-31）
+    1. 向 stock_raw 注入一条 HSI 的未来日期行（2099-12-31）
+    2. 调用 GET /api/reviews，断言 latestClosedDate 仍为 GSPC 的最大 k_date（不是 2099-12-31）
     3. 清理注入行
     """
     inject_sql = (
         "INSERT OR IGNORE INTO stock_raw "
-        "(k_date, stock_code, stock_name, symbol, current_price, change_percent, volume, captured_at) "
-        "VALUES ('2099-12-31', '^HSI', '恒生指数', '^HSI', 99999.0, 0.0, 0, datetime('now'));"
+        "(k_date, stock_code, stock_name, symbol, yahoo_symbol, current_price, change_percent, volume, captured_at) "
+        "VALUES ('2099-12-31', 'HSI', '恒生指数', 'HSI', '^HSI', 99999.0, 0.0, 0, datetime('now'));"
     )
     d1_execute_sql(db_name, inject_sql)
 
     reviews = http_get_json(f"{worker_base}/api/reviews")
     latest_closed_date = reviews.get("latestClosedDate")
 
-    cleanup_sql = "DELETE FROM stock_raw WHERE k_date = '2099-12-31' AND symbol = '^HSI';"
+    cleanup_sql = "DELETE FROM stock_raw WHERE k_date = '2099-12-31' AND symbol = 'HSI';"
     d1_execute_sql(db_name, cleanup_sql)
 
     if latest_closed_date == "2099-12-31":
         raise IntegrationError(
-            f"INT-010 FAILED: latestClosedDate='2099-12-31' — Worker is still using MAX(k_date) across all symbols instead of ^GSPC"
+            f"INT-010 FAILED: latestClosedDate='2099-12-31' — Worker is still using MAX(k_date) across all symbols instead of GSPC"
         )
     return {"latestClosedDate": latest_closed_date, "injected_date": "2099-12-31", "ok": True}
 
@@ -349,7 +349,7 @@ def validate_cross_market_price_query(db_name: str, worker_base: str, gspc_date:
     """INT-011: 验证跨市场价格查询——archive_date 后一天有亚洲指数数据时，美股个股仍能展示。
 
     步骤：
-    1. 向 stock_raw 注入 ^HSI 在 gspc_date+1 的一条价格行
+    1. 向 stock_raw 注入 HSI 在 gspc_date+1 的一条价格行
     2. 调用 GET /api/reviews/{gspc_date}/bootstrap
     3. 断言 prices 中存在 US 股票（symbol_type=stock）
     4. 清理注入行
@@ -358,8 +358,8 @@ def validate_cross_market_price_query(db_name: str, worker_base: str, gspc_date:
     next_day = (_dt.date.fromisoformat(gspc_date) + _dt.timedelta(days=1)).isoformat()
     inject_sql = (
         f"INSERT OR IGNORE INTO stock_raw "
-        f"(k_date, stock_code, stock_name, symbol, current_price, change_percent, volume, captured_at) "
-        f"VALUES ('{next_day}', '^HSI', '恒生指数', '^HSI', 20000.0, 0.5, 100000, datetime('now'));"
+        f"(k_date, stock_code, stock_name, symbol, yahoo_symbol, current_price, change_percent, volume, captured_at) "
+        f"VALUES ('{next_day}', 'HSI', '恒生指数', 'HSI', '^HSI', 20000.0, 0.5, 100000, datetime('now'));"
     )
     d1_execute_sql(db_name, inject_sql)
 
@@ -368,13 +368,13 @@ def validate_cross_market_price_query(db_name: str, worker_base: str, gspc_date:
     stock_prices = prices.get("stock") or []
     stock_symbols = [p["symbol"] for p in stock_prices]
 
-    cleanup_sql = f"DELETE FROM stock_raw WHERE k_date = '{next_day}' AND symbol = '^HSI';"
+    cleanup_sql = f"DELETE FROM stock_raw WHERE k_date = '{next_day}' AND symbol = 'HSI';"
     d1_execute_sql(db_name, cleanup_sql)
 
     if not stock_prices:
         raise IntegrationError(
             f"INT-011 FAILED: bootstrap for {gspc_date} returned no stock prices "
-            f"even though ^HSI has k_date={next_day}. Per-symbol price query may be broken."
+            f"even though HSI has k_date={next_day}. Per-symbol price query may be broken."
         )
     return {
         "archive_date": gspc_date,

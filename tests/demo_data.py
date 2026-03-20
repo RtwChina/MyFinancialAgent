@@ -10,25 +10,39 @@ TRACKED_ORDER = [
     "LITE",
     "MSFT",
     "GOOGL",
-    "^VIX",
-    "^HSI",
-    "^GSPC",
-    "000001.SS",
-    "DX-Y.NYB",
-    "GC=F",
+    "VIX",
+    "HSI",
+    "GSPC",
+    "SSE",
+    "DXY",
+    "GOLD",
 ]
+
+# symbol -> yahoo_symbol mapping
+YAHOO_SYMBOL_MAP = {
+    "MU": "MU",
+    "LITE": "LITE",
+    "MSFT": "MSFT",
+    "GOOGL": "GOOGL",
+    "VIX": "^VIX",
+    "HSI": "^HSI",
+    "GSPC": "^GSPC",
+    "SSE": "000001.SS",
+    "DXY": "DX-Y.NYB",
+    "GOLD": "GC=F",
+}
 
 SYMBOL_META = {
     "MU": {"name": "Micron Technology", "start": 109.2, "moves": [1.2, 2.4, -0.8, 3.1, 2.5], "volume": 38210000},
     "LITE": {"name": "Lumentum", "start": 57.8, "moves": [0.6, -0.4, 1.5, 0.8, 1.1], "volume": 3210000},
     "MSFT": {"name": "Microsoft", "start": 414.5, "moves": [0.9, 1.2, -0.7, -1.1, 0.4], "volume": 25400000},
     "GOOGL": {"name": "Alphabet", "start": 186.9, "moves": [1.1, 0.7, -0.6, 0.5, 0.8], "volume": 21800000},
-    "^VIX": {"name": "CBOE Volatility Index", "start": 19.8, "moves": [-1.5, 0.8, 1.1, 2.6, -0.4], "volume": 0},
-    "^HSI": {"name": "HANG SENG INDEX", "start": 24080.0, "moves": [0.6, -0.3, 0.9, 1.4, -0.7], "volume": 0},
-    "^GSPC": {"name": "S&P 500", "start": 5860.2, "moves": [0.5, 0.7, -0.4, -0.9, 0.2], "volume": 2850000000},
-    "000001.SS": {"name": "SSE Composite Index", "start": 3335.4, "moves": [0.2, 0.4, -0.1, 0.3, 0.5], "volume": 1760000000},
-    "DX-Y.NYB": {"name": "Dollar Index", "start": 103.1, "moves": [-0.2, -0.3, 0.4, 0.6, 0.3], "volume": 0},
-    "GC=F": {"name": "Gold Futures", "start": 2928.5, "moves": [0.8, 0.6, 1.1, 0.7, -0.2], "volume": 162000},
+    "VIX": {"name": "CBOE Volatility Index", "start": 19.8, "moves": [-1.5, 0.8, 1.1, 2.6, -0.4], "volume": 0},
+    "HSI": {"name": "HANG SENG INDEX", "start": 24080.0, "moves": [0.6, -0.3, 0.9, 1.4, -0.7], "volume": 0},
+    "GSPC": {"name": "S&P 500", "start": 5860.2, "moves": [0.5, 0.7, -0.4, -0.9, 0.2], "volume": 2850000000},
+    "SSE": {"name": "SSE Composite Index", "start": 3335.4, "moves": [0.2, 0.4, -0.1, 0.3, 0.5], "volume": 1760000000},
+    "DXY": {"name": "Dollar Index", "start": 103.1, "moves": [-0.2, -0.3, 0.4, 0.6, 0.3], "volume": 0},
+    "GOLD": {"name": "Gold Futures", "start": 2928.5, "moves": [0.8, 0.6, 1.1, 0.7, -0.2], "volume": 162000},
 }
 
 DEMO_DATES = ["2026-03-09", "2026-03-10", "2026-03-11", "2026-03-12", "2026-03-13"]
@@ -45,9 +59,10 @@ def build_demo_prices_dataframe() -> pd.DataFrame:
             current = round(previous_close * (1 + move / 100), 4)
             rows.append({
                 "k_date": k_date,
-                "stock_code": symbol,
+                "stock_code": symbol,  # 兼容字段
                 "stock_name": meta["name"],
                 "symbol": symbol,
+                "yahoo_symbol": YAHOO_SYMBOL_MAP.get(symbol),
                 "current_price": current,
                 "change_percent": round(move, 2),
                 "volume": meta["volume"] + index * 17000 if meta["volume"] else 0,

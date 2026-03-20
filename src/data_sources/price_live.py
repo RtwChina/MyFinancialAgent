@@ -125,9 +125,10 @@ def fetch_stock_data_live(symbol_record: dict, context: ExecutionContext) -> dic
 
             data = {
                 "k_date": k_date,
-                "stock_code": system_symbol,   # 系统标识（非 yahoo code）
+                "stock_code": system_symbol,   # 兼容字段，后续删除
                 "stock_name": stock_name,
                 "symbol": system_symbol,        # stock_raw.symbol 存系统标识
+                "yahoo_symbol": yahoo_code,     # Yahoo Finance 代码
                 "current_price": round(last_row["Close"], 4) if pd.notna(last_row["Close"]) else None,
                 "change_percent": change_percent,
                 "volume": int(last_row["Volume"]) if pd.notna(last_row["Volume"]) else None,
@@ -163,9 +164,10 @@ def fetch_all_prices_live(context: ExecutionContext) -> list[dict]:
             # 采集失败时仍插入占位记录，保证下游能感知到该标的本次无数据
             all_data.append({
                 "k_date": None,
-                "stock_code": sym_record["symbol"],
+                "stock_code": sym_record["symbol"],  # 兼容字段
                 "stock_name": sym_record.get("display_name"),
                 "symbol": sym_record["symbol"],
+                "yahoo_symbol": sym_record.get("yahoo_symbol"),
                 "current_price": None,
                 "change_percent": None,
                 "volume": None,
