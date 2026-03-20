@@ -1411,10 +1411,10 @@ textarea {
 }
 
 .review-hero-bottom {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  gap: 12px 16px;
+  display: flex;
+  justify-content: space-between;
   align-items: end;
+  gap: 12px;
 }
 
 .review-summary-line {
