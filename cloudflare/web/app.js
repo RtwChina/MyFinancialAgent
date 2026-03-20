@@ -616,10 +616,8 @@ async function openReviewDrawer(archiveDate) {
   const cycle = buildReviewCycle(archiveDate);
   archiveDateLabel.textContent = `${archiveDate} · 美股交易日`;
   document.querySelector("#priceSnapshotLabel").textContent = `${archiveDate} 核心标的与指数`;
-  drawerSubtitle.textContent = `${cycle.beijingLabel} · 新闻窗口（北京时间） ${formatNewsWindowBoundaryBeijing(data.newsWindow.start)} → ${formatNewsWindowBoundaryBeijing(data.newsWindow.end)}`;
-  carryForwardLabel.textContent = data.carryForward?.archive_date
-    ? `参考上一已复盘日 ${data.carryForward.archive_date}`
-    : "无上一复盘日参考";
+  drawerSubtitle.textContent = `${cycle.beijingLabel} ｜ 新闻窗口（北京时间） ${formatNewsWindowBoundaryBeijing(data.newsWindow.start)} → ${formatNewsWindowBoundaryBeijing(data.newsWindow.end)}`;
+  carryForwardLabel.textContent = "";
 
   const reviewStatus = data.draft?.review_status || "initialized";
   state.editMode = reviewStatus !== "reviewed";
