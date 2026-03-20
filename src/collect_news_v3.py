@@ -39,6 +39,7 @@ from db_utils import (
     get_news_by_date_range,
     initialize_archive_record,
     init_database,
+    LOCAL_DB_PATH,
     save_daily_news_ai_analysis,
     upsert_news_batch,
 )
@@ -312,21 +313,39 @@ EQUITY_TRACKED_SYMBOLS = STOCK_TRACKED_SYMBOLS
 MARKET_REFERENCE_SYMBOLS = INDEX_TRACKED_SYMBOLS | SECTOR_TRACKED_SYMBOLS
 
 BASE_MACRO_KEYWORDS = [
-    "美联储", "fed", "利率", "降息", "加息", "通胀", "cpi", "ppi", "非农", "就业",
+    # 中文
+    "美联储", "利率", "降息", "加息", "通胀", "非农", "就业",
     "关税", "制裁", "贸易", "财政刺激", "流动性", "衰退", "债务上限",
     "战争", "冲突", "霍尔木兹", "中东", "俄乌", "伊朗", "以色列", "原油", "油价",
+    # 英文
+    "fed", "federal reserve", "interest rate", "rate cut", "rate hike",
+    "inflation", "cpi", "ppi", "nonfarm", "employment", "unemployment",
+    "tariff", "sanctions", "trade war", "fiscal", "liquidity", "recession", "debt ceiling",
+    "war", "conflict", "middle east", "iran", "israel", "crude oil", "oil price",
 ]
 BASE_MARKET_KEYWORDS = [
-    "标普", "纳指", "道指", "s&p", "nasdaq", "dow",
-    "财报", "盈利", "业绩", "回购", "分红", "ipo", "并购", "收购", "监管",
-    "芯片", "半导体", "ai", "人工智能", "nvidia", "英伟达", "微软", "谷歌",
+    # 中文
+    "标普", "纳指", "道指", "财报", "盈利", "业绩", "回购", "分红",
+    "并购", "收购", "监管", "芯片", "半导体", "人工智能", "英伟达", "微软", "谷歌",
+    # 英文
+    "s&p", "nasdaq", "dow", "earnings", "revenue", "buyback", "dividend",
+    "ipo", "merger", "acquisition", "regulation", "chip", "semiconductor",
+    "ai", "artificial intelligence", "nvidia", "microsoft", "google", "apple",
 ]
 BASE_NOISE_KEYWORDS = [
+    # 中文
     "分析师", "评级", "目标价", "看涨", "看跌", "买入评级", "卖出评级",
     "技术面", "盘前异动", "盘后异动", "短线", "传闻",
+    # 英文
+    "analyst", "rating", "price target", "bullish", "bearish",
+    "buy rating", "sell rating", "technical analysis", "premarket", "afterhours", "rumor",
 ]
 BASE_SYMBOL_CONTEXT_KEYWORDS = [
+    # 中文
     "财报", "指引", "监管", "诉讼", "产品", "合作", "订单", "收购", "回购", "盈利",
+    # 英文
+    "earnings", "guidance", "regulation", "lawsuit", "product", "partnership",
+    "order", "acquisition", "buyback", "revenue",
 ]
 
 
@@ -577,6 +596,7 @@ def generate_dynamic_screening_profile(news_list: List[Dict[str, Any]], analysis
             "content": (
                 "你是金融新闻初筛规则生成器。"
                 "你要根据当前新闻样本，动态给出本轮应重点关注和应排除的关键词与主题。"
+                "新闻样本可能包含中文和英文，keywords 支持中英文短词，根据样本语言产出对应语言的关键词。"
                 "只输出 JSON，不要输出解释。"
             ),
         },
@@ -586,7 +606,8 @@ def generate_dynamic_screening_profile(news_list: List[Dict[str, Any]], analysis
                 "返回一个 JSON 对象，字段必须包含："
                 "macro_keywords, market_keywords, noise_keywords, symbol_context_keywords, "
                 "focus_topics, include_rules, exclude_rules, score_threshold, reasoning_summary。\n"
-                "要求：keywords 用短词数组；focus_topics 每项含 label/keywords/weight(1-5)；"
+                "要求：keywords 支持中英文短词数组，若样本含英文新闻需同时给出英文关键词；"
+                "focus_topics 每项含 label/keywords/weight(1-5)；"
                 "noise_keywords 优先覆盖与全球经济或股市无关的主题；"
                 f"跟踪标的：个股={list(STOCK_TRACKED_SYMBOLS)}，板块={list(SECTOR_TRACKED_SYMBOLS)}，大盘={list(INDEX_TRACKED_SYMBOLS)}；"
                 "score_threshold 取 3.5-7.5；只输出 JSON。\n\n"
@@ -641,13 +662,41 @@ def generate_dynamic_screening_profile(news_list: List[Dict[str, Any]], analysis
         return static_base
 
 
-def apply_rule_filter(news: Dict[str, Any], profile: Dict[str, Any]) -> Dict[str, Any] | None:
-    """动态初筛，只保留真正影响宏观/大盘/标的的新闻"""
+def apply_rule_filter(news: Dict[str, Any], profile: Dict[str, Any]) -> Dict[str, Any]:
+    """动态初筛，只保留真正影响宏观/大盘/标的的新闻
+
+    返回 dict。rule_passed=1 表示通过，rule_passed=0 表示被过滤（含 rule_reason 说明原因）。
+    """
     pub_date = _normalize_text(news.get('time') or news.get('pub_date') or '')
     title = _normalize_text(news.get('title') or '')
     content = _normalize_text(news.get('content') or '')
+
+    def _make_rejected(reason: str) -> Dict[str, Any]:
+        fallback_title = title or content[:36] or "未命名新闻"
+        item = {
+            'pub_date': pub_date or '',
+            'title': fallback_title,
+            'content': content[:500],
+            'url': news.get('url', ''),
+            'source': news.get('source', ''),
+            'sub_source': news.get('sub_source', ''),
+            'language': news.get('language', 'zh'),
+            'type': 'index',
+            'rule_passed': 0,
+            'rule_reason': reason,
+            'processing_status': 'rule_filtered',
+            'ai_summary': '',
+            'market_impact': '',
+            'importance_stars': 0,
+            'related_symbols': [],
+            'is_relevant_to_review': 0,
+            'llm_batch_id': '',
+        }
+        item['news_hash'] = generate_news_hash(item['title'], item['content'], item['pub_date'])
+        return item
+
     if not pub_date or not content:
-        return None
+        return _make_rejected('缺少时间或内容字段')
 
     text = f"{title}\n{content}".lower()
     related_symbols = derive_related_symbols(f"{title}\n{content}")
@@ -719,7 +768,8 @@ def apply_rule_filter(news: Dict[str, Any], profile: Dict[str, Any]) -> Dict[str
         reasons.append(f"板块/市场事件命中 {', '.join(market_hits[:3])}")
 
     # 噪音命中且没有跟踪标的、宏观关键词不足时，强制过滤，避免软性噪音通过评分门槛
-    if noise_hits and not related_symbols and len(macro_hits) < 2:
+    noise_override = noise_hits and not related_symbols and len(macro_hits) < 2
+    if noise_override:
         keep = False
 
     logger.debug(
@@ -728,7 +778,17 @@ def apply_rule_filter(news: Dict[str, Any], profile: Dict[str, Any]) -> Dict[str
     )
 
     if not keep:
-        return None
+        if noise_override:
+            reason = f"噪音词命中({', '.join(noise_hits[:2])})；无跟踪标的且宏观词不足"
+        else:
+            parts = []
+            if noise_hits:
+                parts.append(f"噪音词({', '.join(noise_hits[:2])})")
+            if not macro_hits and not market_hits and not related_symbols:
+                parts.append("无关键词命中")
+            parts.append(f"score={score:.1f} threshold={float(profile.get('score_threshold', 4.5)):.1f}")
+            reason = '；'.join(parts)
+        return _make_rejected(reason)
 
     fallback_title = title or _normalize_text(content[:36]) or "未命名新闻"
     summary = news.get('summary') or fallback_title or content[:140]
@@ -740,6 +800,8 @@ def apply_rule_filter(news: Dict[str, Any], profile: Dict[str, Any]) -> Dict[str
         'content': content[:500],
         'url': news.get('url', ''),
         'source': news.get('source', ''),
+        'sub_source': news.get('sub_source', ''),
+        'language': news.get('language', 'zh'),
         'type': rule_type,
         'rule_passed': 1,
         'rule_reason': '；'.join(reasons[:3]) or "规则保留",
@@ -758,20 +820,32 @@ def apply_rule_filter(news: Dict[str, Any], profile: Dict[str, Any]) -> Dict[str
     return cleaned
 
 
-def filter_news_by_rules(news_list: List[Dict[str, Any]], profile: Dict[str, Any]) -> List[Dict[str, Any]]:
-    """对全量新闻逐条应用规则初筛，按重要性降序排序，并截断到 LLM 候选上限"""
-    filtered = []
+def filter_news_by_rules(news_list: List[Dict[str, Any]], profile: Dict[str, Any]) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]]]:
+    """对全量新闻逐条应用规则初筛，按重要性降序排序，并截断到 LLM 候选上限。
+
+    返回 (candidates, rejected)：
+    - candidates: 通过规则且进入 LLM 的候选新闻
+    - rejected: 未通过规则的新闻 + 通过规则但超过候选上限被截断的新闻
+    """
+    passed = []
+    rejected = []
     for news in news_list:
-        kept = apply_rule_filter(news, profile)
-        if kept:
-            filtered.append(kept)
-    filtered.sort(key=lambda item: (item.get('importance_stars', 0), item.get('pub_date', '')), reverse=True)
+        result = apply_rule_filter(news, profile)
+        if result.get('rule_passed'):
+            passed.append(result)
+        else:
+            rejected.append(result)
+    passed.sort(key=lambda item: (item.get('importance_stars', 0), item.get('pub_date', '')), reverse=True)
     # 防止候选过多导致 LLM token 超限，只取评分最高的前 N 条
-    if len(filtered) > LLM_CANDIDATE_LIMIT:
+    if len(passed) > LLM_CANDIDATE_LIMIT:
         logger.info("规则初筛命中过多，按分数仅保留前 %s 条进入 LLM / 正式新闻库", LLM_CANDIDATE_LIMIT)
-        filtered = filtered[:LLM_CANDIDATE_LIMIT]
-    logger.info("规则初筛后保留 %s / %s 条新闻", len(filtered), len(news_list))
-    return filtered
+        capped = passed[LLM_CANDIDATE_LIMIT:]
+        for item in capped:
+            item['processing_status'] = 'rule_capped'
+        rejected.extend(capped)
+        passed = passed[:LLM_CANDIDATE_LIMIT]
+    logger.info("规则初筛后保留 %s / %s 条新闻（被过滤 %s 条）", len(passed), len(news_list), len(rejected))
+    return passed, rejected
 
 
 def _extract_json_payload(raw_text: str) -> Any:
@@ -1525,8 +1599,8 @@ def collect_all_news(context: ExecutionContext | None = None) -> Dict[str, Any]:
         [t.get("label") for t in screening_profile.get("focus_topics", [])],
         screening_profile.get("score_threshold"),
     )
-    filtered_news = filter_news_by_rules(unique_news, screening_profile)
-    logger.info("[初筛] 完成: 保留 %s/%s条, 耗时 %.1fs", len(filtered_news), len(unique_news), time.time() - t0)
+    filtered_news, rejected_news = filter_news_by_rules(unique_news, screening_profile)
+    logger.info("[初筛] 完成: 保留 %s/%s条, 被过滤 %s条, 耗时 %.1fs", len(filtered_news), len(unique_news), len(rejected_news), time.time() - t0)
 
     # --- 批次分析阶段 ---
     t0 = time.time()
@@ -1536,6 +1610,7 @@ def collect_all_news(context: ExecutionContext | None = None) -> Dict[str, Any]:
         "analysis_date": analysis_date,
         "screening_profile": screening_profile,
         "screened_news": filtered_news,
+        "rejected_news": rejected_news,
         "processed_news": processed_news,
         "final_news": final_news,
         "batch_analysis_records": batch_analysis_records,
@@ -1559,12 +1634,14 @@ def run_news_pipeline(
     news_list: List[Dict[str, Any]] = []
     processed_news: List[Dict[str, Any]] = []
     screened_news: List[Dict[str, Any]] = []
+    rejected_news: List[Dict[str, Any]] = []
 
     if collect_fresh_news:
         collected = collect_all_news(context)
         news_list = collected["final_news"]
         processed_news = collected["processed_news"]
         screened_news = collected["screened_news"]
+        rejected_news = collected.get("rejected_news", [])
         analysis_date = collected["analysis_date"]
         batch_analysis_records = collected["batch_analysis_records"]
 
@@ -1588,6 +1665,14 @@ def run_news_pipeline(
             inserted_count = screened_stats["inserted"] + processed_stats["inserted"]
             updated_count = screened_stats["updated"] + processed_stats["updated"]
         logger.info("[写入D1] 完成: 新增 %s, 更新 %s, 耗时 %.1fs", inserted_count, updated_count, time.time() - t0)
+
+    # 被过滤新闻写本地 SQLite（仅用于复盘，不推送 remote）
+    if collect_fresh_news and rejected_news:
+        try:
+            rejected_stats = upsert_news_batch(rejected_news, LOCAL_DB_PATH)
+            logger.info("[复盘库] 被过滤新闻写入本地: 新增 %s, 已存在 %s", rejected_stats["inserted"], rejected_stats.get("ignored", 0) + rejected_stats.get("updated", 0))
+        except Exception as exc:
+            logger.warning("[复盘库] 被过滤新闻写入失败（不影响主流程）: %s", exc)
 
     window_news = load_news_for_summary(analysis_date, use_remote, fallback_news=news_list)
     daily_record: Dict[str, Any] = {}

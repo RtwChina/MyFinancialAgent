@@ -187,9 +187,9 @@ def upsert_news_data(data: Dict[str, Any], db_path: str = None) -> str:
                 pub_date, title, content, url, source, type,
                 rule_passed, rule_reason, processing_status, ai_summary, market_impact,
                 importance_stars, related_symbols, is_relevant_to_review, news_hash, captured_at,
-                created_at
+                created_at, language, sub_source
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(news_hash) DO UPDATE SET
                 pub_date = excluded.pub_date,
                 title = excluded.title,
@@ -205,7 +205,9 @@ def upsert_news_data(data: Dict[str, Any], db_path: str = None) -> str:
                 importance_stars = excluded.importance_stars,
                 related_symbols = excluded.related_symbols,
                 is_relevant_to_review = excluded.is_relevant_to_review,
-                captured_at = excluded.captured_at
+                captured_at = excluded.captured_at,
+                language = excluded.language,
+                sub_source = excluded.sub_source
         ''', (
             pub_date,
             data.get('title'),
@@ -224,6 +226,8 @@ def upsert_news_data(data: Dict[str, Any], db_path: str = None) -> str:
             news_hash,
             now_cst(),
             now_cst(),
+            data.get('language', 'zh'),
+            data.get('sub_source', ''),
         ))
 
         conn.commit()

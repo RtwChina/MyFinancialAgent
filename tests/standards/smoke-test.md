@@ -39,6 +39,9 @@
 | SM-001  | 新闻时间字段时区一致性 | 验证 news_raw_data 三个时间字段均为北京时间 | 新闻采集任务至少执行一次 | 查询 `SELECT pub_date, captured_at, created_at FROM news_raw_data LIMIT 5`，检查三字段时区一致 | 三字段均为北京时间（UTC+8），`captured_at` 与 `created_at` 差值 ≤ 5秒 | P0 | 是 |
 | SM-002  | 前端新闻列表时间显示 | 验证列头显示"北京时间"提示，单条不显示 | 新闻页面可访问 | 打开新闻检索页面，检查列头和单条新闻时间格式 | 列头包含"❗(北京时间)"，单条显示"HH:MM · 来源"无"北京时间"文字 | P0 | 是 |
 
+| SM-003  | 新闻采集多源覆盖 | 验证 AkShare 和 Finnhub 均有数据写入且字段完整 | 本地 DB 已跑 migration 009，FINNHUB_API_KEY 已配置 | 1. 运行一次新闻采集任务 2. `SELECT source, sub_source, language, COUNT(*) FROM news_raw_data GROUP BY source, sub_source, language` | 结果包含 source=akshare 的 cls/10jqka/sina/futu 四行，以及 source=finnhub 的 general/company 两行；language 列中文源为 zh，英文源为 en | P0 | 是 |
+| SM-004  | 英文新闻规则初筛命中 | 验证 Finnhub 英文新闻能通过关键词初筛而非全部被过滤 | 同 SM-003 | `SELECT COUNT(*) FROM news_raw_data WHERE source='finnhub' AND rule_passed=1` | 结果 > 0（至少有部分英文新闻通过初筛） | P1 | 否 |
+
 ## 文档更新时机
 - 新功能进入主链路
 - 主流程步骤改变

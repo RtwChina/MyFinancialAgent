@@ -2,35 +2,35 @@
 
 This module owns only raw input collection. It does not perform rule
 screening, LLM enhancement, or persistence.
+
+数据源：
+- AkShare: 财联社(cls) / 同花顺(10jqka) / 新浪(sina) / 富途(futu) — 中文财经快讯
+- Finnhub: general_news + company_news — 英文全球财经新闻
 """
 
 from __future__ import annotations
 
-import json
-import re
+import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from datetime import datetime
+from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 
-import requests
-import yfinance as yf
-from bs4 import BeautifulSoup
+import akshare as ak
+import finnhub
 
+from config import FINNHUB_API_KEY
 from logger_utils import get_logger
 from runtime.context import ExecutionContext
+from symbol_registry import get_tracked_symbols
 
 
 logger = get_logger("news_live")
-# 模拟浏览器请求头，减少被反爬拦截的概率
-HEADERS = {
-    "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-}
-# 国内新闻源时区（北京）
 BEIJING_TZ = ZoneInfo("Asia/Shanghai")
+UTC_TZ = ZoneInfo("UTC")
 
 
-def _format_beijing_time(dt: datetime | None) -> str:
-    """将带时区的 datetime 转为北京时间字符串（YYYY-MM-DD HH:MM:SS）。"""
+def _fmt_beijing(dt: datetime | None) -> str:
+    """将带时区的 datetime 转为北京时间字符串 YYYY-MM-DD HH:MM:SS。"""
     if dt is None:
         return ""
     if dt.tzinfo is None:
@@ -38,241 +38,245 @@ def _format_beijing_time(dt: datetime | None) -> str:
     return dt.astimezone(BEIJING_TZ).strftime("%Y-%m-%d %H:%M:%S")
 
 
-def fetch_sina_finance() -> list[dict]:
-    """从新浪财经滚动接口抓取最新财经资讯。"""
-    url = "https://feed.sina.com.cn/api/roll/get"
-    # lid=2509 对应新浪财经滚动新闻频道
-    params = {
-        "pageid": "153",
-        "lid": "2509",
-        "k": "",
-        "num": 50,
-        "page": 1,
-    }
+def _unix_to_beijing(ts: int | float) -> str:
+    """UTC Unix 时间戳转北京时间字符串。"""
+    return _fmt_beijing(datetime.fromtimestamp(ts, tz=UTC_TZ))
+
+
+# ─── AkShare 源 ────────────────────────────────────────────────────────────────
+
+def fetch_akshare_cls() -> list[dict]:
+    """财联社全球快讯 — stock_info_global_cls()"""
     try:
-        logger.info("正在抓取新浪财经...")
-        resp = requests.get(url, headers=HEADERS, params=params, timeout=15)
-        resp.raise_for_status()
-
-        result = resp.json().get("result", {}).get("data", [])
-        news_list: list[dict] = []
-        for item in result:
-            # ctime 可能以字符串形式返回，统一转为 int 再解析为带时区的 datetime
-            timestamp = item.get("ctime", 0)
-            if isinstance(timestamp, str):
-                timestamp = int(timestamp)
-            pub_time = datetime.fromtimestamp(timestamp, tz=BEIJING_TZ)
-            news_list.append(
-                {
-                    "time": _format_beijing_time(pub_time),
-                    "title": item.get("title", ""),
-                    "content": item.get("intro", "") or item.get("title", ""),
-                    "url": item.get("url", ""),
-                    "source": "sina",
-                }
-            )
-        logger.info("新浪财经: %s 条", len(news_list))
-        return news_list
-    except Exception as exc:
-        logger.error("[采集] 新浪财经请求失败: %s", exc)
-        return []
-
-
-def fetch_cls_cn() -> list[dict]:
-    """从财联社电报页面抓取快讯列表。"""
-    url = "https://www.cls.cn/telegraph"
-    try:
-        logger.info("正在抓取财联社...")
-        resp = requests.get(url, headers=HEADERS, timeout=15)
-        resp.raise_for_status()
-
-        # 财联社使用 Next.js 服务端渲染，数据内嵌在 <script type="application/json"> 中
-        match = re.search(r'<script[^>]*type="application/json"[^>]*>(.+?)</script>', resp.text, re.DOTALL)
-        if not match:
-            return []
-
-        # 沿 props -> initialState -> telegraph -> telegraphList 路径提取电报列表
-        telegraph_list = (
-            json.loads(match.group(1))
-            .get("props", {})
-            .get("initialState", {})
-            .get("telegraph", {})
-            .get("telegraphList", [])
-        )
-        news_list: list[dict] = []
-        for item in telegraph_list:
-            pub_time = datetime.fromtimestamp(item.get("ctime", 0), tz=BEIJING_TZ) if item.get("ctime") else None
-            news_list.append(
-                {
-                    "time": _format_beijing_time(pub_time),
-                    "title": item.get("title", ""),
-                    "content": item.get("content", "")[:500],
-                    "source": "cls_cn",
-                }
-            )
-        logger.info("财联社: %s 条", len(news_list))
-        return news_list
-    except Exception as exc:
-        logger.error("[采集] 财联社请求失败: %s", exc)
-        return []
-
-
-def fetch_jin10(context: ExecutionContext) -> list[dict]:
-    """从金十数据首页抓取快讯条目，需要 context.clock 来补全时间中缺少的日期部分。"""
-    url = "https://www.jin10.com/"
-    try:
-        logger.info("正在抓取金十数据...")
-        resp = requests.get(url, headers=HEADERS, timeout=15)
-        resp.raise_for_status()
-        resp.encoding = "utf-8"
-
-        soup = BeautifulSoup(resp.text, "html.parser")
-        # 金十快讯条目的 DOM id 均以 "flash" 开头
-        flash_items = soup.find_all(id=lambda value: value and value.startswith("flash"))
-
-        news_list: list[dict] = []
-        for item in flash_items:
+        logger.info("[AkShare] 正在抓取财联社...")
+        df = ak.stock_info_global_cls()
+        news_list = []
+        for _, row in df.iterrows():
+            # CLS 时间字段：发布日期(date) + 发布时间(time) 分开存，需拼接
+            date_str = str(row.get("发布日期", "")).strip()
+            time_str = str(row.get("发布时间", "")).strip()
+            if date_str and time_str:
+                pub_time_str = f"{date_str} {time_str}"
+            elif date_str:
+                pub_time_str = date_str
+            else:
+                pub_time_str = ""
+            # 规范化为 YYYY-MM-DD HH:MM:SS（已是北京时间）
             try:
-                time_elem = item.select_one(".jin-flash_time, [class*='time']")
-                pub_time_str = time_elem.get_text(strip=True) if time_elem else ""
-
-                pub_time = None
-                if pub_time_str and len(pub_time_str) == 8:
-                    # 页面只展示 HH:MM:SS，需拼上当前北京日期才能构成完整 datetime
-                    current = context.clock.now_in_tz("Asia/Shanghai")
-                    parsed = datetime.strptime(
-                        f"{current.strftime('%Y-%m-%d')} {pub_time_str}",
-                        "%Y-%m-%d %H:%M:%S",
-                    )
-                    pub_time = parsed.replace(tzinfo=BEIJING_TZ)
-
-                text = item.get_text(strip=True)
-                content_elem = item.select_one(".jin-flash_content, [class*='content']")
-                content = content_elem.get_text(strip=True) if content_elem else text.replace(pub_time_str, "").strip()
-                # 清除金十页面固定出现的操作按钮文本噪声
-                content = content.replace("分享收藏详情复制", "").strip()
-                is_vip = bool(item.select_one(".vip, [class*='vip'], .lock")) or "VIP" in text
-
-                if content and len(content) > 10:
-                    news_list.append(
-                        {
-                            "time": _format_beijing_time(pub_time),
-                            "title": "",
-                            "content": content[:500],
-                            "source": "jin10",
-                            "is_vip": is_vip,
-                        }
-                    )
+                dt = datetime.strptime(pub_time_str, "%Y-%m-%d %H:%M:%S")
+                pub_time_str = dt.strftime("%Y-%m-%d %H:%M:%S")
             except Exception:
-                continue
+                pass
 
-        # 以内容前 50 字符作为去重键，过滤重复快讯
-        seen: set[str] = set()
-        unique_list: list[dict] = []
-        for item in news_list:
-            key = item["content"][:50]
-            if key not in seen:
-                seen.add(key)
-                unique_list.append(item)
-
-        logger.info("金十数据: %s 条", len(unique_list))
-        return unique_list
+            news_list.append({
+                "time": pub_time_str,
+                "title": str(row.get("标题", "") or "").strip(),
+                "content": str(row.get("内容", "") or row.get("标题", "") or "").strip(),
+                "url": str(row.get("链接", "") or "").strip(),
+                "source": "akshare",
+                "sub_source": "cls",
+                "language": "zh",
+            })
+        logger.info("[AkShare] 财联社: %s 条", len(news_list))
+        return news_list
     except Exception as exc:
-        logger.error("[采集] 金十数据请求失败: %s", exc)
+        logger.error("[AkShare] 财联社失败: %s", exc)
         return []
 
 
-def fetch_yahoo_finance_news() -> list[dict]:
-    """从 Yahoo Finance 首页 HTML 和 yfinance SDK 双渠道抓取英文财经新闻。"""
-    url = "https://finance.yahoo.com/"
+def fetch_akshare_ths() -> list[dict]:
+    """同花顺全球快讯 — stock_info_global_ths()"""
     try:
-        logger.info("正在抓取Yahoo财经...")
-        resp = requests.get(url, headers=HEADERS, timeout=15)
-        resp.raise_for_status()
-
-        soup = BeautifulSoup(resp.text, "html.parser")
-        news_list: list[dict] = []
-
-        # 第一渠道：从首页 HTML 中提取新闻链接（最多取前 30 条）
-        news_links = soup.select('a[href*="/news/"], a[href*="news.yahoo.com"]')
-        for link in news_links[:30]:
-            title = link.get_text(strip=True)
-            href = link.get("href", "")
-            if title and len(title) > 10 and "news" in href.lower():
-                news_list.append(
-                    {
-                        "time": "",
-                        "title": title,
-                        "content": title,
-                        "url": href if href.startswith("http") else f"https://finance.yahoo.com{href}",
-                        "source": "yahoo_finance",
-                    }
-                )
-
-        # 第二渠道：通过 yfinance 获取标普 500 指数相关新闻，补充首页可能遗漏的条目
-        try:
-            yahoo_news = yf.Ticker("^GSPC").news
-            if yahoo_news:
-                for item in yahoo_news[:20]:
-                    content = item.get("content", {})
-                    title = content.get("title", "")
-                    pub_date = content.get("pubDate", "")
-                    pub_time = None
-                    if pub_date:
-                        try:
-                            pub_time = datetime.fromisoformat(pub_date.replace("Z", "+00:00"))
-                        except Exception:
-                            pub_time = None
-                    if title:
-                        news_list.append(
-                            {
-                                "time": _format_beijing_time(pub_time),
-                                "title": title,
-                                "content": content.get("summary", title)[:500],
-                                "url": content.get("canonicalUrl", {}).get("url", ""),
-                                "source": "yahoo_finance",
-                            }
-                        )
-        except Exception as exc:
-            logger.error("[采集] Yahoo yfinance获取失败: %s", exc)
-
-        # 以标题前 50 字符去重，合并两个渠道的结果
-        seen: set[str] = set()
-        unique_list: list[dict] = []
-        for item in news_list:
-            key = item.get("title", "")[:50]
-            if key and key not in seen:
-                seen.add(key)
-                unique_list.append(item)
-
-        logger.info("Yahoo财经: %s 条", len(unique_list))
-        return unique_list
+        logger.info("[AkShare] 正在抓取同花顺...")
+        df = ak.stock_info_global_ths()
+        news_list = []
+        for _, row in df.iterrows():
+            pub_time_str = str(row.get("发布时间", "") or "").strip()
+            news_list.append({
+                "time": pub_time_str,
+                "title": str(row.get("标题", "") or "").strip(),
+                "content": str(row.get("内容", "") or row.get("标题", "") or "").strip(),
+                "url": str(row.get("链接", "") or "").strip(),
+                "source": "akshare",
+                "sub_source": "10jqka",
+                "language": "zh",
+            })
+        logger.info("[AkShare] 同花顺: %s 条", len(news_list))
+        return news_list
     except Exception as exc:
-        logger.error("[采集] Yahoo财经请求失败: %s", exc)
+        logger.error("[AkShare] 同花顺失败: %s", exc)
         return []
 
+
+def fetch_akshare_sina() -> list[dict]:
+    """新浪全球快讯 — stock_info_global_sina()"""
+    try:
+        logger.info("[AkShare] 正在抓取新浪...")
+        df = ak.stock_info_global_sina()
+        news_list = []
+        for _, row in df.iterrows():
+            pub_time_str = str(row.get("时间", "") or "").strip()
+            news_list.append({
+                "time": pub_time_str,
+                "title": str(row.get("标题", "") or "").strip(),
+                "content": str(row.get("内容", "") or row.get("标题", "") or "").strip(),
+                "url": str(row.get("链接", "") or "").strip(),
+                "source": "akshare",
+                "sub_source": "sina",
+                "language": "zh",
+            })
+        logger.info("[AkShare] 新浪: %s 条", len(news_list))
+        return news_list
+    except Exception as exc:
+        logger.error("[AkShare] 新浪失败: %s", exc)
+        return []
+
+
+def fetch_akshare_futu() -> list[dict]:
+    """富途全球快讯 — stock_info_global_futu()"""
+    try:
+        logger.info("[AkShare] 正在抓取富途...")
+        df = ak.stock_info_global_futu()
+        news_list = []
+        for _, row in df.iterrows():
+            pub_time_str = str(row.get("发布时间", "") or "").strip()
+            news_list.append({
+                "time": pub_time_str,
+                "title": str(row.get("标题", "") or "").strip(),
+                "content": str(row.get("内容", "") or row.get("标题", "") or "").strip(),
+                "url": str(row.get("链接", "") or "").strip(),
+                "source": "akshare",
+                "sub_source": "futu",
+                "language": "zh",
+            })
+        logger.info("[AkShare] 富途: %s 条", len(news_list))
+        return news_list
+    except Exception as exc:
+        logger.error("[AkShare] 富途失败: %s", exc)
+        return []
+
+
+# ─── Finnhub 源 ────────────────────────────────────────────────────────────────
+
+def _get_finnhub_client() -> finnhub.Client | None:
+    """创建 Finnhub Client，API Key 为空时返回 None 并记录警告。"""
+    if not FINNHUB_API_KEY:
+        logger.warning("[Finnhub] FINNHUB_API_KEY 未配置，跳过 Finnhub 采集")
+        return None
+    return finnhub.Client(api_key=FINNHUB_API_KEY)
+
+
+def fetch_finnhub_general() -> list[dict]:
+    """Finnhub 大盘新闻 — general_news('general')，约 100 条最近 24 小时。"""
+    client = _get_finnhub_client()
+    if client is None:
+        return []
+    try:
+        logger.info("[Finnhub] 正在抓取大盘新闻...")
+        items = client.general_news("general")
+        news_list = []
+        for item in items:
+            ts = item.get("datetime", 0)
+            news_list.append({
+                "time": _unix_to_beijing(ts) if ts else "",
+                "title": str(item.get("headline", "") or "").strip(),
+                "content": str(item.get("summary", "") or item.get("headline", "") or "").strip(),
+                "url": str(item.get("url", "") or "").strip(),
+                "source": "finnhub",
+                "sub_source": "general",
+                "language": "en",
+            })
+        logger.info("[Finnhub] 大盘新闻: %s 条", len(news_list))
+        return news_list
+    except Exception as exc:
+        logger.error("[Finnhub] 大盘新闻失败: %s", exc)
+        return []
+
+
+def _get_finnhub_symbols() -> list[str]:
+    """从 tracked_symbols 获取美股 stock + sector 标的，过滤 A 股/港股。"""
+    all_symbols = get_tracked_symbols()
+    result = []
+    for s in all_symbols:
+        if s.get("symbol_type") not in ("stock", "sector"):
+            continue
+        yahoo = s.get("yahoo_symbol", "")
+        if yahoo.endswith(".SS") or yahoo.endswith(".SZ") or yahoo.endswith(".HK"):
+            continue
+        result.append(yahoo)
+    return result
+
+
+def fetch_finnhub_company(context: ExecutionContext) -> list[dict]:
+    """Finnhub 个股/ETF 公司新闻 — 逐个 symbol 串行查询，限频 0.5s 间隔。"""
+    client = _get_finnhub_client()
+    if client is None:
+        return []
+
+    symbols = _get_finnhub_symbols()
+    if not symbols:
+        logger.warning("[Finnhub] 无可用的美股标的，跳过 company_news")
+        return []
+
+    now = context.clock.now_in_tz("Asia/Shanghai")
+    date_to = now.strftime("%Y-%m-%d")
+    date_from = (now - timedelta(days=3)).strftime("%Y-%m-%d")
+
+    logger.info("[Finnhub] 开始查询 %s 个标的的公司新闻 (%s ~ %s)", len(symbols), date_from, date_to)
+    all_news: list[dict] = []
+
+    for symbol in symbols:
+        try:
+            items = client.company_news(symbol, _from=date_from, to=date_to)
+            count = 0
+            for item in items[:10]:
+                ts = item.get("datetime", 0)
+                all_news.append({
+                    "time": _unix_to_beijing(ts) if ts else "",
+                    "title": str(item.get("headline", "") or "").strip(),
+                    "content": str(item.get("summary", "") or item.get("headline", "") or "").strip(),
+                    "url": str(item.get("url", "") or "").strip(),
+                    "source": "finnhub",
+                    "sub_source": "company",
+                    "language": "en",
+                })
+                count += 1
+            logger.debug("[Finnhub] %s: %s 条", symbol, count)
+        except Exception as exc:
+            logger.error("[Finnhub] %s 查询失败: %s", symbol, exc)
+        time.sleep(0.5)
+
+    logger.info("[Finnhub] 公司新闻合计: %s 条", len(all_news))
+    return all_news
+
+
+# ─── 编排 ──────────────────────────────────────────────────────────────────────
 
 def fetch_all_news_live(context: ExecutionContext) -> list[dict]:
-    """Fetch all live news inputs in parallel.
-
-    This keeps the existing four-source behavior unchanged while moving the
-    source-selection decision outside the business pipeline.
-    """
-
+    """AkShare 4 源 + Finnhub general 并发，Finnhub company 串行（限频）。"""
     all_news: list[dict] = []
-    # 四个新闻源并发抓取，max_workers=4 与源数量对应，最大化利用 I/O 等待时间
-    with ThreadPoolExecutor(max_workers=4) as executor:
-        futures = {
-            executor.submit(fetch_sina_finance): "sina",
-            executor.submit(fetch_cls_cn): "cls_cn",
-            executor.submit(fetch_jin10, context): "jin10",
-            executor.submit(fetch_yahoo_finance_news): "yahoo",
-        }
-        # as_completed 保证先完成的任务优先处理，单源失败不阻塞其他源
+
+    # 并发：AkShare 4 源 + Finnhub general
+    concurrent_tasks = {
+        "akshare_cls": fetch_akshare_cls,
+        "akshare_ths": fetch_akshare_ths,
+        "akshare_sina": fetch_akshare_sina,
+        "akshare_futu": fetch_akshare_futu,
+        "finnhub_general": fetch_finnhub_general,
+    }
+    with ThreadPoolExecutor(max_workers=5) as executor:
+        futures = {executor.submit(fn): name for name, fn in concurrent_tasks.items()}
         for future in as_completed(futures):
-            source = futures[future]
+            name = futures[future]
             try:
                 all_news.extend(future.result())
             except Exception as exc:
-                logger.error("%s 采集失败: %s", source, exc)
+                logger.error("%s 采集失败: %s", name, exc)
+
+    # 串行：Finnhub company（限频，每次 0.5s 间隔）
+    try:
+        all_news.extend(fetch_finnhub_company(context))
+    except Exception as exc:
+        logger.error("finnhub_company 采集失败: %s", exc)
+
     return all_news

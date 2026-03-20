@@ -18,9 +18,28 @@ const NEWS_SOURCE_LABELS = {
   cls_cn: "财联社",
   jin10: "金十",
   yahoo_finance: "Yahoo",
+  finnhub: "Finnhub",
 };
 
-function formatNewsSource(source) {
+const AKSHARE_SUB_SOURCE_LABELS = {
+  cls: "财联社",
+  "10jqka": "同花顺",
+  sina: "新浪",
+  futu: "富途",
+};
+
+const FINNHUB_SUB_SOURCE_LABELS = {
+  general: "Finnhub",
+  company: "Finnhub",
+};
+
+function formatNewsSource(source, subSource) {
+  if (source === "akshare") {
+    return AKSHARE_SUB_SOURCE_LABELS[subSource] || subSource || "AkShare";
+  }
+  if (source === "finnhub") {
+    return FINNHUB_SUB_SOURCE_LABELS[subSource] || "Finnhub";
+  }
   return NEWS_SOURCE_LABELS[source] || source || "未知来源";
 }
 
@@ -552,7 +571,7 @@ function openNewsDetailFromItem(item) {
 
   const tags = [
     buildChip(item.pub_date || "未知时间", "detail-meta-chip"),
-    ...(item.source ? [buildChip(formatNewsSource(item.source), "detail-meta-chip")] : []),
+    ...(item.source ? [buildChip(formatNewsSource(item.source, item.sub_source), "detail-meta-chip")] : []),
     buildChip(formatStarLabel(item.importance_stars), starChipVariant(item.importance_stars)),
     buildChip(formatNewsType(item.type)),
     ...(item.related_symbols || []).map((symbol) => buildChip(symbol)),
@@ -698,7 +717,7 @@ function buildNewsRow(item) {
   const pubDate = item.pub_date || "";
   const dateDisplay = pubDate.slice(0, 10) || "未知日期";
   const timeDisplay = pubDate.length >= 16 ? pubDate.slice(11, 16) : (pubDate || "未知时间");
-  timeCell.innerHTML = `<strong>${escapeHtml(dateDisplay)}</strong><small>${escapeHtml(timeDisplay)} · ${escapeHtml(formatNewsSource(item.source))}</small>`;
+  timeCell.innerHTML = `<strong>${escapeHtml(dateDisplay)}</strong><small>${escapeHtml(timeDisplay)} · ${escapeHtml(formatNewsSource(item.source, item.sub_source))}</small>`;
 
   const summaryCell = document.createElement("td");
   summaryCell.className = "news-summary-cell";
@@ -1153,7 +1172,7 @@ function buildReviewNewsItem(item) {
   const foot = document.createElement("div");
   foot.className = "review-news-item-foot";
   const time = document.createElement("small");
-  time.textContent = `${item.pub_date || "未知时间"} · ${formatNewsSource(item.source)}`;
+  time.textContent = `${item.pub_date || "未知时间"} · ${formatNewsSource(item.source, item.sub_source)}`;
   const button = document.createElement("button");
   button.type = "button";
   button.className = "ghost";

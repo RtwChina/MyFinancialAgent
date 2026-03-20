@@ -1,11 +1,13 @@
 # 核心依赖
-yfinance>=0.2.36
 pandas>=2.0.0
 requests>=2.31.0
 python-dotenv>=1.0.0
 beautifulsoup4>=4.12.0
 pandas-market-calendars>=4.0.0
 pytz>=2024.0
+akshare>=1.18.0
+finnhub-python>=2.4.0
 
 # 可选依赖（用于数据处理增强）
 numpy>=1.24.0
+yfinance>=0.2.36

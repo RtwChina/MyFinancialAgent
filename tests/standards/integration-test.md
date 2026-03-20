@@ -28,3 +28,28 @@
 - 批量写入 / 删除 / 清理
 - 回填 / 初始化
 - 调试入口 / 运维入口
+
+## 已注册用例
+
+### IT-NEWS-001：新闻数据源替换端到端集成
+
+**场景**：AkShare + Finnhub 替换旧爬虫后的完整采集→筛选→入库→API→前端链路验证
+
+**前置条件**：
+- 本地 DB 已执行 migration 009（language、sub_source 字段存在）
+- `FINNHUB_API_KEY` 已配置
+- Python 依赖已安装（akshare>=1.18.0、finnhub-python>=2.4.0）
+
+**步骤与预期**：
+
+| # | 步骤 | 预期 |
+|---|------|------|
+| 1 | 运行 `fetch_all_news_live(ctx)` | 返回列表包含 source=akshare（4 个 sub_source）和 source=finnhub（general/company），language 字段 zh/en 正确 |
+| 2 | 运行完整 pipeline（SKIP_LLM=true） | 采集→去重→规则初筛→写库全流程无异常，`news_raw_data` 有新增数据 |
+| 3 | 检查 DB 字段 | `SELECT source, sub_source, language FROM news_raw_data WHERE source IN ('akshare','finnhub') LIMIT 10` 返回结果字段非空 |
+| 4 | Finnhub 英文新闻初筛 | `SELECT COUNT(*) FROM news_raw_data WHERE source='finnhub' AND rule_passed=1` 结果 > 0 |
+| 5 | 关键词双语命中验证 | `SELECT rule_reason FROM news_raw_data WHERE source='finnhub' AND rule_passed=1 LIMIT 3` 展示英文关键词命中（如 "war"、"earnings"、"semiconductor"）|
+| 6 | API /api/news 返回 language/sub_source | GET `/api/news?source=finnhub` 响应 JSON 每条包含 language 和 sub_source 字段 |
+| 7 | 前端来源筛选 | 新闻页面来源下拉框显示 AkShare 和 Finnhub 选项，按来源筛选结果正确 |
+
+**通过标准**：步骤 1-5 本地可验证（无需部署），步骤 6-7 需本地 Worker 运行环境。

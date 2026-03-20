@@ -245,9 +245,9 @@ async function ingestNews(env, items) {
         pub_date, title, content, url, source, type,
         rule_passed, rule_reason, processing_status, ai_summary, market_impact,
         importance_stars, related_symbols, is_relevant_to_review, news_hash, captured_at,
-        created_at
+        created_at, language, sub_source
       )
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       ON CONFLICT(news_hash) DO UPDATE SET
         pub_date = excluded.pub_date,
         title = excluded.title,
@@ -263,7 +263,9 @@ async function ingestNews(env, items) {
         importance_stars = excluded.importance_stars,
         related_symbols = excluded.related_symbols,
         is_relevant_to_review = excluded.is_relevant_to_review,
-        captured_at = excluded.captured_at`,
+        captured_at = excluded.captured_at,
+        language = excluded.language,
+        sub_source = excluded.sub_source`,
     )
       .bind(
         item.time || item.pub_date || null,
@@ -283,6 +285,8 @@ async function ingestNews(env, items) {
         newsHash,
         item.captured_at || isoNow(),
         isoNow(),
+        item.language || "zh",
+        item.sub_source || "",
       )
       .run();
 
@@ -384,8 +388,14 @@ async function getNewsList(env, url) {
   const limit = usePagination ? pageSize : Math.min(Number(url.searchParams.get("limit") || "100"), 200);
   const offset = usePagination ? (page - 1) * pageSize : 0;
 
+  const showFiltered = url.searchParams.get("showFiltered") === "1";
+
   const clauses = [];
   const params = [];
+
+  if (!showFiltered) {
+    clauses.push("rule_passed = 1");
+  }
 
   if (keyword) {
     clauses.push("(title LIKE ? OR ai_summary LIKE ? OR content LIKE ? OR market_impact LIKE ?)");
@@ -431,7 +441,7 @@ async function getNewsList(env, url) {
 
   const whereClause = clauses.length ? `WHERE ${clauses.join(" AND ")}` : "";
 
-  const dataQuery = `SELECT id, pub_date, title, content, url, source, type,
+  const dataQuery = `SELECT id, pub_date, title, content, url, source, sub_source, language, type,
     rule_passed, rule_reason, processing_status, ai_summary, market_impact,
     importance_stars, related_symbols, is_relevant_to_review
     FROM news_raw_data
@@ -655,7 +665,7 @@ async function getReviewBootstrap(env, archiveDate) {
     if (sourceNewsIds.length) {
       const placeholders = sourceNewsIds.map(() => "?").join(", ");
       const sourceNews = await env.DB.prepare(
-        `SELECT id, pub_date, title, content, source, type, ai_summary, market_impact,
+        `SELECT id, pub_date, title, content, source, sub_source, language, type, ai_summary, market_impact,
           related_symbols, is_relevant_to_review, rule_passed, rule_reason,
           processing_status, importance_stars, url, news_hash
          FROM news_raw_data
