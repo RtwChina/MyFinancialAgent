@@ -900,22 +900,29 @@ textarea {
 
 /* 面板标题 tooltip 样式 */
 .tip-trigger.tip-panel {
-  margin-left: 6px;
-  vertical-align: middle;
+  width: auto;
+  height: auto;
 }
 
 .tip-trigger.tip-panel .bubble {
   left: 0;
-  transform: translateX(0) translateY(10px);
+  top: calc(100% + 8px);
+  transform: none;
   min-width: 360px;
   max-width: 420px;
+  white-space: normal;
   text-align: left;
   line-height: 1.6;
-  z-index: 1000;
+  z-index: 9999;
+}
+
+.tip-trigger.tip-panel .bubble::after {
+  left: 16px;
+  transform: none;
 }
 
 .tip-trigger.tip-panel:hover .bubble {
-  transform: translateX(0) translateY(0);
+  transform: none;
 }
 
 .tip-trigger.tip-panel .bubble strong {
