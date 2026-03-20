@@ -898,23 +898,27 @@ textarea {
   transform: translateX(-50%) translateY(0);
 }
 
-/* 导航栏 tooltip 样式 */
-.tip-trigger.tip-nav .bubble {
-  left: auto;
-  right: -10px;
+/* 面板标题 tooltip 样式 */
+.tip-trigger.tip-panel {
+  margin-left: 6px;
+  vertical-align: middle;
+}
+
+.tip-trigger.tip-panel .bubble {
+  left: 0;
   transform: translateX(0) translateY(10px);
-  min-width: 340px;
-  max-width: 400px;
+  min-width: 360px;
+  max-width: 420px;
   text-align: left;
   line-height: 1.6;
   z-index: 1000;
 }
 
-.tip-trigger.tip-nav:hover .bubble {
+.tip-trigger.tip-panel:hover .bubble {
   transform: translateX(0) translateY(0);
 }
 
-.tip-trigger.tip-nav .bubble strong {
+.tip-trigger.tip-panel .bubble strong {
   color: #60a5fa;
 }
 

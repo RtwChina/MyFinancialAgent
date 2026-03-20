@@ -24,15 +24,6 @@
               <button class="nav-chip active" data-view="reviews">复盘工作台</button>
               <button class="nav-chip" data-view="news">新闻检索</button>
               <button class="nav-chip" data-view="symbols">标的管理</button>
-              <span class="tip-trigger tip-nav">
-                <svg viewBox="0 0 16 16"><circle cx="8" cy="8" r="7"></circle><line x1="8" y1="7" x2="8" y2="11.5" stroke-linecap="round"></line><circle cx="8" cy="4.8" r="0.1" stroke-width="2" stroke-linecap="round"></circle></svg>
-                <span class="bubble">
-                  <strong>显示名称</strong>：前端展示用，显示在价格卡片、新闻列表、复盘页面。如"标普500"、"英伟达"。与代码区分：代码是系统标识，显示名称是给人看的。<br><br>
-                  <strong>代码</strong>：系统唯一标识，用于数据库关联、价格采集、新闻打标。箭头后为 Yahoo 代码（调用价格API用）。前端也作为标签显示，所有页面的标的名（价格卡片、新闻列表、复盘页面）。<br><br>
-                  <strong>类型</strong>：新闻筛选权重，个股命中权重最高(3.5)直接过筛，板块次之，大盘最后。理论优先级上，个股命中直接过筛，板块需配合市场关键词，大盘需配合宏观关键词。前端按大盘/板块/个股分组展示。<br><br>
-                  <strong>新闻匹配别名</strong>：新闻采集时匹配正文关键词，从新闻正文匹配关键词，自动关联标的。如新闻出现"英伟达"或"NVIDIA"，匹配到 NVDA。
-                </span>
-              </span>
             </nav>
             <div class="hero-env-inline">
               <span>当前环境</span>
@@ -220,7 +211,15 @@
           <section class="panel symbols-panel">
             <div class="panel-header">
               <div>
-                <h2>标的管理</h2>
+                <h2>标的管理 <span class="tip-trigger tip-panel">
+                  <svg viewBox="0 0 16 16"><circle cx="8" cy="8" r="7"></circle><line x1="8" y1="7" x2="8" y2="11.5" stroke-linecap="round"></line><circle cx="8" cy="4.8" r="0.1" stroke-width="2" stroke-linecap="round"></circle></svg>
+                  <span class="bubble">
+                    <strong>显示名称</strong>：前端展示用，显示在价格卡片、新闻列表、复盘页面。如"标普500"、"英伟达"。与代码区分：代码是系统标识，显示名称是给人看的。<br><br>
+                    <strong>代码</strong>：系统唯一标识，用于数据库关联、价格采集、新闻打标。箭头后为 Yahoo 代码（调用价格API用）。前端也作为标签显示，所有页面的标的名（价格卡片、新闻列表、复盘页面）。<br><br>
+                    <strong>类型</strong>：新闻筛选权重，个股命中权重最高(3.5)直接过筛，板块次之，大盘最后。理论优先级上，个股命中直接过筛，板块需配合市场关键词，大盘需配合宏观关键词。前端按大盘/板块/个股分组展示。<br><br>
+                    <strong>新闻匹配别名</strong>：新闻采集时匹配正文关键词，从新闻正文匹配关键词，自动关联标的。如新闻出现"英伟达"或"NVIDIA"，匹配到 NVDA。
+                  </span>
+                </span></h2>
                 <p class="toolbar-caption">智能输入股票名称或代码，AI 自动识别 Yahoo 代码、显示名称和类型。</p>
               </div>
               <div class="panel-header-meta">
