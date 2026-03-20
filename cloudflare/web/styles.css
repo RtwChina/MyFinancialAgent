@@ -1206,13 +1206,15 @@ textarea {
 }
 
 .review-table td strong {
-  display: block;
+  display: inline;
 }
 
 .review-table td small {
-  display: block;
-  margin-top: 4px;
+  display: inline;
+  margin-left: 6px;
+  font-size: 0.7rem;
   color: var(--muted);
+  white-space: nowrap;
 }
 
 .review-table th:nth-child(1),
