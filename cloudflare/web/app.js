@@ -1389,7 +1389,7 @@ function formatBulletStyleText(value) {
     .filter(Boolean)
     .map((item, i) => {
       const stripped = item.replace(/^[•·▪◦\-]\s*/, "");
-      return `# ${i + 1}. ${stripped}`;
+      return `# ${i + 1}.${stripped}`;
     });
   return items.join("\n");
 }
