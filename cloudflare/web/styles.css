@@ -1206,12 +1206,11 @@ textarea {
 }
 
 .review-table td strong {
-  display: inline;
+  display: block;
 }
 
 .review-table td small {
-  display: inline;
-  margin-left: 6px;
+  display: block;
   font-size: 0.7rem;
   color: var(--muted);
   white-space: nowrap;
