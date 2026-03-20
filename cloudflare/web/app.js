@@ -1475,7 +1475,7 @@ function buildReviewCycle(archiveDate) {
 }
 
 function formatReviewWindowLabel(cycle) {
-  return `BJT ${cycle.beijingLabel.replace(/^北京时间\s*/, "")}`;
+  return `北京时间 ${cycle.beijingLabel.replace(/^北京时间\s*/, "")}`;
 }
 
 function resolveNyTimeToBeijing(dateString, targetTime) {
