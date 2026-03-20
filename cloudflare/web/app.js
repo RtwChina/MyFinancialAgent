@@ -627,11 +627,17 @@ async function openReviewDrawer(archiveDate) {
 
   const effectiveAnalysis = getEffectiveAnalysis(data.analysis, data.news);
   const snapshotCard = document.querySelector(".review-snapshot-card");
-  const flatPrices = data.pricesFlat || [];
-  const hasPricesForDate = flatPrices.some((p) => p.k_date === archiveDate);
-  if (hasPricesForDate) {
+  const rawPrices = data.pricesByType || data.prices;
+  const filteredPrices = {};
+  if (rawPrices && typeof rawPrices === "object" && !Array.isArray(rawPrices)) {
+    for (const [key, items] of Object.entries(rawPrices)) {
+      filteredPrices[key] = (items || []).filter((p) => p.k_date === archiveDate);
+    }
+  }
+  const hasAny = Object.values(filteredPrices).some((arr) => arr.length > 0);
+  if (hasAny) {
     snapshotCard.classList.remove("hidden");
-    renderPrices(data.pricesByType || data.prices);
+    renderPrices(filteredPrices);
   } else {
     snapshotCard.classList.add("hidden");
   }
@@ -901,15 +907,7 @@ function buildPriceCard(item) {
   const change = document.createElement("div");
   change.className = `price-change ${dir}`.trim();
   change.textContent = `${raw > 0 ? "+" : ""}${Number.isFinite(raw) ? raw.toFixed(2) : "-"}%`;
-  const dateEl = document.createElement("span");
-  dateEl.className = "price-card-date";
-  if (item.k_date) {
-    dateEl.textContent = item.k_date.slice(5); // MM-DD
-    if (item.k_date !== state.activeDate) {
-      dateEl.classList.add("price-date-mismatch");
-    }
-  }
-  card.append(name, price, change, dateEl);
+  card.append(name, price, change);
   return card;
 }
 
