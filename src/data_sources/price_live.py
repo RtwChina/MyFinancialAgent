@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import time
-from datetime import datetime
+from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 
 import pandas as pd
@@ -77,8 +77,10 @@ def fetch_stock_data_live(symbol_record: dict, context: ExecutionContext) -> dic
         try:
             logger.info("正在获取 %s (%s) 的数据...", display_name, yahoo_code)
             ticker = yf.Ticker(yahoo_code)
-            # 拉取最近一周 K 线；若无数据则直接放弃该标的
-            hist = ticker.history(period="1wk")
+            # 用明确的 start/end 日期范围拉取，避免 period="1wk" 数据缺失
+            end_dt = context.clock.now().date() + timedelta(days=1)
+            start_dt = end_dt - timedelta(days=10)
+            hist = ticker.history(start=start_dt.isoformat(), end=end_dt.isoformat())
             if hist.empty:
                 logger.warning("标的 %s 没有获取到数据", yahoo_code)
                 return None
