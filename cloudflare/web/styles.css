@@ -876,7 +876,7 @@ textarea {
   white-space: nowrap;
   border-radius: 8px;
   box-shadow: 0 4px 16px rgba(0,0,0,0.12), 0 0 0 1px rgba(0,0,0,0.04);
-  pointer-events: none;
+  pointer-events: auto;
   opacity: 0;
   transition: all 0.2s cubic-bezier(0.215, 0.61, 0.355, 1);
   z-index: 10;
@@ -896,6 +896,10 @@ textarea {
 .tip-trigger:hover .bubble {
   opacity: 1;
   transform: translateX(-50%) translateY(0);
+}
+
+.tip-trigger .bubble:hover {
+  opacity: 1;
 }
 
 /* 面板标题 tooltip 样式 */
