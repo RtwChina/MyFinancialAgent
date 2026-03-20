@@ -615,6 +615,7 @@ async function openReviewDrawer(archiveDate) {
 
   const cycle = buildReviewCycle(archiveDate);
   archiveDateLabel.textContent = `${archiveDate} · 美股交易日`;
+  document.querySelector("#priceSnapshotLabel").textContent = `${archiveDate} 核心标的与指数`;
   drawerSubtitle.textContent = `${cycle.beijingLabel} · 新闻窗口（北京时间） ${formatNewsWindowBoundaryBeijing(data.newsWindow.start)} → ${formatNewsWindowBoundaryBeijing(data.newsWindow.end)}`;
   carryForwardLabel.textContent = data.carryForward?.archive_date
     ? `参考上一已复盘日 ${data.carryForward.archive_date}`
@@ -892,7 +893,15 @@ function buildPriceCard(item) {
   const change = document.createElement("div");
   change.className = `price-change ${dir}`.trim();
   change.textContent = `${raw > 0 ? "+" : ""}${Number.isFinite(raw) ? raw.toFixed(2) : "-"}%`;
-  card.append(name, price, change);
+  const dateEl = document.createElement("span");
+  dateEl.className = "price-card-date";
+  if (item.k_date) {
+    dateEl.textContent = item.k_date.slice(5); // MM-DD
+    if (item.k_date !== state.activeDate) {
+      dateEl.classList.add("price-date-mismatch");
+    }
+  }
+  card.append(name, price, change, dateEl);
   return card;
 }
 
