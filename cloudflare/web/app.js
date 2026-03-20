@@ -971,8 +971,7 @@ function renderPrices(prices) {
 
       const details = document.createElement("details");
       details.className = "price-section";
-      const savedState = localStorage.getItem(storageKey);
-      details.open = savedState !== "closed";
+      details.open = true;
       details.addEventListener("toggle", () => {
         localStorage.setItem(storageKey, details.open ? "open" : "closed");
       });
