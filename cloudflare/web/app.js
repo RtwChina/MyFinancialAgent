@@ -618,6 +618,7 @@ async function openReviewDrawer(archiveDate) {
   document.querySelector("#priceSnapshotLabel").textContent = `${archiveDate} 核心标的与指数`;
   drawerSubtitle.textContent = `${cycle.beijingLabel} ｜ 新闻窗口（北京时间） ${formatNewsWindowBoundaryBeijing(data.newsWindow.start)} → ${formatNewsWindowBoundaryBeijing(data.newsWindow.end)}`;
   carryForwardLabel.textContent = "";
+  carryForwardLabel.style.display = "none";
 
   const reviewStatus = data.draft?.review_status || "initialized";
   state.editMode = reviewStatus !== "reviewed";
