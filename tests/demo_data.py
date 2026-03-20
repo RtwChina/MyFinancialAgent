@@ -59,7 +59,6 @@ def build_demo_prices_dataframe() -> pd.DataFrame:
             current = round(previous_close * (1 + move / 100), 4)
             rows.append({
                 "k_date": k_date,
-                "stock_code": symbol,  # 兼容字段
                 "stock_name": meta["name"],
                 "symbol": symbol,
                 "yahoo_symbol": YAHOO_SYMBOL_MAP.get(symbol),

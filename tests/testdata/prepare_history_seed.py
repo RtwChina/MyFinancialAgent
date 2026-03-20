@@ -93,7 +93,6 @@ def create_legacy_temp_schema(conn: sqlite3.Connection) -> None:
         """
         CREATE TABLE stock_raw (
             k_date TEXT,
-            stock_code TEXT,
             stock_name TEXT,
             symbol TEXT,
             yahoo_symbol TEXT,
@@ -179,7 +178,7 @@ def sql_value(value: Any) -> str:
 def render_stock_rows(conn: sqlite3.Connection) -> list[str]:
     rows = conn.execute(
         """
-        SELECT k_date, stock_code, stock_name, symbol, current_price, change_percent, volume, captured_at
+        SELECT k_date, stock_name, symbol, current_price, change_percent, volume, captured_at
         FROM stock_raw
         ORDER BY k_date, symbol
         """
@@ -207,8 +206,8 @@ def render_stock_rows(conn: sqlite3.Connection) -> list[str]:
         yahoo_symbol = yahoo_map.get(system_symbol)
         statements.append(
             "INSERT OR IGNORE INTO stock_raw "
-            "(k_date, stock_code, stock_name, symbol, yahoo_symbol, current_price, change_percent, volume, captured_at) "
-            f"VALUES ({sql_value(row['k_date'])}, {sql_value(system_symbol)}, {sql_value(row['stock_name'])}, "
+            "(k_date, stock_name, symbol, yahoo_symbol, current_price, change_percent, volume, captured_at) "
+            f"VALUES ({sql_value(row['k_date'])}, {sql_value(row['stock_name'])}, "
             f"{sql_value(system_symbol)}, {sql_value(yahoo_symbol)}, {sql_value(row['current_price'])}, {sql_value(row['change_percent'])}, "
             f"{sql_value(row['volume'])}, {sql_value(row['captured_at'])});"
         )

@@ -327,8 +327,8 @@ def validate_nyse_closed_trading_day(db_name: str, worker_base: str) -> dict[str
     """
     inject_sql = (
         "INSERT OR IGNORE INTO stock_raw "
-        "(k_date, stock_code, stock_name, symbol, yahoo_symbol, current_price, change_percent, volume, captured_at) "
-        "VALUES ('2099-12-31', 'HSI', '恒生指数', 'HSI', '^HSI', 99999.0, 0.0, 0, datetime('now'));"
+        "(k_date, stock_name, symbol, yahoo_symbol, current_price, change_percent, volume, captured_at) "
+        "VALUES ('2099-12-31', '恒生指数', 'HSI', '^HSI', 99999.0, 0.0, 0, datetime('now'));"
     )
     d1_execute_sql(db_name, inject_sql)
 
@@ -358,8 +358,8 @@ def validate_cross_market_price_query(db_name: str, worker_base: str, gspc_date:
     next_day = (_dt.date.fromisoformat(gspc_date) + _dt.timedelta(days=1)).isoformat()
     inject_sql = (
         f"INSERT OR IGNORE INTO stock_raw "
-        f"(k_date, stock_code, stock_name, symbol, yahoo_symbol, current_price, change_percent, volume, captured_at) "
-        f"VALUES ('{next_day}', 'HSI', '恒生指数', 'HSI', '^HSI', 20000.0, 0.5, 100000, datetime('now'));"
+        f"(k_date, stock_name, symbol, yahoo_symbol, current_price, change_percent, volume, captured_at) "
+        f"VALUES ('{next_day}', '恒生指数', 'HSI', '^HSI', 20000.0, 0.5, 100000, datetime('now'));"
     )
     d1_execute_sql(db_name, inject_sql)
 

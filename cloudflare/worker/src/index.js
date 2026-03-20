@@ -200,12 +200,11 @@ async function ingestPrices(env, items) {
   for (const item of items) {
     const result = await env.DB.prepare(
       `INSERT OR IGNORE INTO stock_raw
-      (k_date, stock_code, stock_name, symbol, yahoo_symbol, current_price, change_percent, volume, captured_at, created_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      (k_date, stock_name, symbol, yahoo_symbol, current_price, change_percent, volume, captured_at, created_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     )
       .bind(
         item.k_date,
-        item.stock_code || item.symbol,
         item.stock_name || item.symbol,
         item.symbol,
         item.yahoo_symbol || null,

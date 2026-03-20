@@ -40,7 +40,7 @@ def previous_trading_day(date_string: str) -> str:
 def build_price_fixtures(conn: sqlite3.Connection, output_root: Path) -> list[str]:
     rows = conn.execute(
         """
-        SELECT k_date, stock_code, stock_name, symbol, current_price, change_percent, volume, captured_at
+        SELECT k_date, stock_name, symbol, current_price, change_percent, volume, captured_at
         FROM stock_raw
         ORDER BY k_date, symbol
         """
@@ -66,8 +66,6 @@ def build_price_fixtures(conn: sqlite3.Connection, output_root: Path) -> list[st
     for row in rows:
         item = dict(row)
         item["symbol"] = normalize_symbol(item["symbol"])
-        # stock_code -> yahoo_symbol
-        del item["stock_code"]
         item["yahoo_symbol"] = yahoo_map.get(item["symbol"])
         grouped.setdefault(item["k_date"], []).append(item)
 

@@ -92,11 +92,10 @@ def insert_price_data(data: Dict[str, Any], db_path: str = None) -> bool:
 
         cursor.execute('''
             INSERT OR IGNORE INTO stock_raw
-            (k_date, stock_code, stock_name, symbol, yahoo_symbol, current_price, change_percent, volume, captured_at, created_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            (k_date, stock_name, symbol, yahoo_symbol, current_price, change_percent, volume, captured_at, created_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
         ''', (
             data.get('k_date'),
-            data.get('stock_code'),
             data.get('stock_name'),
             data.get('symbol'),
             data.get('yahoo_symbol'),

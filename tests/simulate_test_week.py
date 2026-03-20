@@ -186,7 +186,6 @@ def build_prices_for_trade_dates(trade_dates: List[str]) -> List[Dict[str, Any]]
             current = round(previous_close * (1 + move / 100), 4)
             rows.append({
                 "k_date": trade_date,
-                "stock_code": symbol,  # 兼容字段
                 "stock_name": meta["name"],
                 "symbol": symbol,
                 "yahoo_symbol": YAHOO_SYMBOL_MAP.get(symbol),
