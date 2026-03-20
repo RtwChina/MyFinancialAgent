@@ -626,7 +626,15 @@ async function openReviewDrawer(archiveDate) {
   setReviewStatus(reviewStatus);
 
   const effectiveAnalysis = getEffectiveAnalysis(data.analysis, data.news);
-  renderPrices(data.pricesByType || data.prices);
+  const snapshotCard = document.querySelector(".review-snapshot-card");
+  const flatPrices = data.pricesFlat || [];
+  const hasPricesForDate = flatPrices.some((p) => p.k_date === archiveDate);
+  if (hasPricesForDate) {
+    snapshotCard.classList.remove("hidden");
+    renderPrices(data.pricesByType || data.prices);
+  } else {
+    snapshotCard.classList.add("hidden");
+  }
   renderAnalysis(effectiveAnalysis, data.news);
   renderNewsPicker(data.news);
 
@@ -923,7 +931,7 @@ function renderPrices(prices) {
   pricesBox.classList.remove("price-sections-compact");
   delete pricesBox.dataset.sectionCount;
 
-  // 方案 A: 点击「当日价格」标题区折叠/展开全部
+  // 方案 A: 点击「复盘日价格」标题区折叠/展开全部
   const snapshotHead = pricesBox.closest(".review-snapshot-card")?.querySelector(".snapshot-head");
   if (snapshotHead && !snapshotHead.dataset.collapseInit) {
     snapshotHead.dataset.collapseInit = "1";
