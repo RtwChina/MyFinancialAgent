@@ -260,7 +260,7 @@ def fetch_finnhub_company(context: ExecutionContext) -> list[dict]:
 
     now = context.clock.now_in_tz("Asia/Shanghai")
     date_to = now.strftime("%Y-%m-%d")
-    date_from = (now - timedelta(days=3)).strftime("%Y-%m-%d")
+    date_from = (now - timedelta(days=1)).strftime("%Y-%m-%d")
 
     logger.info("[Finnhub] 开始并发查询 %s 个标的的公司新闻 (%s ~ %s)", len(symbols), date_from, date_to)
     all_news: list[dict] = []

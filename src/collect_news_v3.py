@@ -161,6 +161,27 @@ def _fetch_keywords_from_api() -> Dict[str, List[str]] | None:
         return None
 
 
+def _truncate_stale_news(all_news: List[Dict[str, Any]], cutoff_hours: int = 24) -> List[Dict[str, Any]]:
+    """丢弃 pub_date 早于 now - cutoff_hours 的新闻；pub_date 为空或无法解析时保留。"""
+    from datetime import datetime as _dt, timezone as _tz
+    from zoneinfo import ZoneInfo as _ZI
+    cutoff = _dt.now(_ZI("Asia/Shanghai")) - timedelta(hours=cutoff_hours)
+    cutoff_str = cutoff.strftime("%Y-%m-%d %H:%M:%S")
+    kept, dropped = [], 0
+    for news in all_news:
+        pub = (news.get("time") or news.get("pub_date") or "").strip()
+        if not pub:
+            kept.append(news)
+            continue
+        if pub[:19] < cutoff_str:
+            dropped += 1
+        else:
+            kept.append(news)
+    if dropped:
+        logger.info("[截断] 丢弃超龄 %s 条（pub_date < %s），剩余 %s 条", dropped, cutoff_str, len(kept))
+    return kept
+
+
 def merge_and_deduplicate(all_news: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     """按标题、内容和时间做跨源去重"""
     seen = set()
@@ -1640,17 +1661,18 @@ def collect_all_news(context: ExecutionContext | None = None) -> Dict[str, Any]:
         # --- 采集阶段 ---
         t0 = time.time()
         all_news.extend(fetch_source_news(context))
+        all_news = _truncate_stale_news(all_news)
         unique_news = merge_and_deduplicate(all_news)
         trace["fetch_duration"] = round(time.time() - t0, 2)
         trace["total_fetched"] = len(all_news)
         trace["total_deduped"] = len(unique_news)
         logger.info("[采集] 完成: %s条 (去重后 %s条), 耗时 %.1fs", len(all_news), len(unique_news), trace["fetch_duration"])
 
-        # --- Hash 预过滤：跳过过去 4 天内已存在的新闻（覆盖 Finnhub 3天抓取窗口）---
+        # --- Hash 预过滤：跳过过去 24h 内已存在的新闻 ---
         from datetime import timedelta
         now_dt = dt.now(ZI("Asia/Shanghai"))
         prefilter_date_to = now_dt.strftime("%Y-%m-%d %H:%M:%S")
-        prefilter_date_from = (now_dt - timedelta(days=4)).strftime("%Y-%m-%d %H:%M:%S")
+        prefilter_date_from = (now_dt - timedelta(hours=24)).strftime("%Y-%m-%d %H:%M:%S")
         if context.is_local_env:
             existing_hashes = get_existing_hashes(prefilter_date_from, prefilter_date_to)
         else:
