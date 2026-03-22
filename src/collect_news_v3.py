@@ -11,7 +11,7 @@ import time
 from datetime import datetime
 from zoneinfo import ZoneInfo
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from typing import Any, Dict, List, Tuple
+from typing import Any, Callable, Dict, List, Optional, Tuple
 import pandas as pd
 import pandas_market_calendars as mcal
 import pytz
@@ -1095,7 +1095,11 @@ def _merge_batch_result(news_batch: List[Dict[str, Any]], llm_result: Dict[str, 
     return processed_items, kept_items, batch_record
 
 
-def enhance_news_with_llm(filtered_news: List[Dict[str, Any]], analysis_date: str) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]], List[Dict[str, Any]]]:
+def enhance_news_with_llm(
+    filtered_news: List[Dict[str, Any]],
+    analysis_date: str,
+    on_batch_done: Optional[Callable] = None,
+) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]], List[Dict[str, Any]]]:
     import math
     if not filtered_news:
         return [], [], []
@@ -1122,6 +1126,11 @@ def enhance_news_with_llm(filtered_news: List[Dict[str, Any]], analysis_date: st
                 processed_news.extend(processed_items)
                 enhanced.extend(kept_items)
                 batch_records[batch_no] = batch_record
+                if on_batch_done is not None:
+                    try:
+                        on_batch_done(processed_items, kept_items)
+                    except Exception as cb_exc:
+                        logger.warning("[Stage 3] on_batch_done 回调异常（不影响主流程）: %s", cb_exc)
             except Exception as exc:
                 logger.warning("[Stage 3 重试] %s 失败，加入重试队列: %s", batch_id, exc)
                 failed_batches.append((batch_no, batch))
@@ -1163,6 +1172,11 @@ def enhance_news_with_llm(filtered_news: List[Dict[str, Any]], analysis_date: st
                 processed_news.extend(processed_items)
                 enhanced.extend(kept_items)
                 batch_records[sub_key] = batch_record
+                if on_batch_done is not None:
+                    try:
+                        on_batch_done(processed_items, kept_items)
+                    except Exception as cb_exc:
+                        logger.warning("[Stage 3] on_batch_done 回调异常（不影响主流程）: %s", cb_exc)
 
         retry_success = sum(1 for _, sub_idx, _, _ in retry_sub_batches if sub_idx > 0)
         logger.info("[Stage 3 重试] 完成: %s 个子批次处理完毕", len(retry_sub_batches))
@@ -1759,11 +1773,39 @@ def collect_all_news(context: ExecutionContext | None = None) -> Dict[str, Any]:
         rejected_news.extend(embedding_filtered)
         # Stage 1 不再产生 rejected，rejected 仅来自 Embedding + LLM
 
+        # --- Stage 3 前置写入：screened_news 先入库（含 embedding_filtered 状态）---
+        _use_remote = ENABLE_REMOTE_WRITE and is_remote_write_configured()
+        _accumulated_id_map: Dict[str, int] = {}
+
+        def _persist_news(items: List[Dict[str, Any]], label: str) -> None:
+            """写入一批新闻到远端或本地，累积 id_map，异常不中断。"""
+            if not items:
+                return
+            try:
+                if _use_remote:
+                    result = send_news(items)
+                    _attach_remote_news_ids(items, result)
+                    _accumulated_id_map.update(result.get("id_map") or {} if result else {})
+                    logger.info("[写入] %s %s 条写入 D1 完成", label, len(items))
+                elif context.is_local_env:
+                    init_database()
+                    upsert_news_batch(items)
+                    logger.info("[写入] %s %s 条写入本地 SQLite 完成", label, len(items))
+            except Exception as exc:
+                logger.warning("[写入] %s 写入失败（不影响主流程）: %s", label, exc)
+
+        _persist_news(scored_news, "screened_news")
+
+        def _on_batch_done(processed_items: List[Dict[str, Any]], kept_items: List[Dict[str, Any]]) -> None:
+            _persist_news(processed_items, "batch")
+
         # --- Stage 3: LLM 深度分析 ---
         t0 = time.time()
         llm_input = embedding_passed
         trace["llm_input"] = len(llm_input)
-        processed_news, final_news, batch_analysis_records = enhance_news_with_llm(llm_input, analysis_date)
+        processed_news, final_news, batch_analysis_records = enhance_news_with_llm(
+            llm_input, analysis_date, on_batch_done=_on_batch_done,
+        )
         trace["llm_duration"] = round(time.time() - t0, 2)
         trace["llm_kept"] = len(final_news)
         trace["llm_discarded"] = len(processed_news) - len(final_news)
@@ -1774,6 +1816,12 @@ def collect_all_news(context: ExecutionContext | None = None) -> Dict[str, Any]:
         trace["star_fallback_triggered"] = 1 if star_fallback else 0
 
         logger.info("[Stage 3] LLM: 保留 %s/%s条, 耗时 %.1fs", len(final_news), len(llm_input), trace["llm_duration"])
+
+        # 将累积的远端 ID 回填到 processed_news 和 final_news
+        for item in processed_news + final_news:
+            h = item.get("news_hash")
+            if h and h in _accumulated_id_map:
+                item["id"] = _accumulated_id_map[h]
 
         # 更新 filter_log: LLM 阶段
         for news in processed_news:
@@ -1841,6 +1889,7 @@ def collect_all_news(context: ExecutionContext | None = None) -> Dict[str, Any]:
         "batch_analysis_records": batch_analysis_records,
         "pipeline_trace": trace,
         "filter_logs": filter_logs,
+        "news_already_persisted": True,
     }
 
 
@@ -1882,24 +1931,28 @@ def run_news_pipeline(
     inserted_count = 0
     updated_count = 0
     if collect_fresh_news:
-        t0 = time.time()
-        if use_remote:
-            screened_result = send_news(screened_news) if screened_news else {"inserted": 0, "updated": 0, "ignored": 0}
-            processed_result = send_news(processed_news) if processed_news else {"inserted": 0, "updated": 0, "ignored": 0}
-            _attach_remote_news_ids(screened_news, screened_result)
-            _attach_remote_news_ids(processed_news, processed_result)
-            _attach_remote_news_ids(news_list, processed_result)
-            inserted_count = screened_result.get('inserted', 0) + processed_result.get('inserted', 0)
-            updated_count = screened_result.get('updated', 0) + processed_result.get('updated', 0)
-        elif context.is_local_env:
-            init_database()
-            screened_stats = upsert_news_batch(screened_news)
-            processed_stats = upsert_news_batch(processed_news)
-            inserted_count = screened_stats["inserted"] + processed_stats["inserted"]
-            updated_count = screened_stats["updated"] + processed_stats["updated"]
+        if collected.get("news_already_persisted"):
+            # screened_news 和 processed_news 已在 Stage 3 过程中逐批写入，无需重复写入
+            logger.info("[写入D1] 已在 Stage 3 过程中流式写入，跳过全量写入")
         else:
-            logger.warning("[写入D1] 新闻写入被跳过: use_remote=%s, app_env=%s", use_remote, context.app_env)
-        logger.info("[写入D1] 完成: 新增 %s, 更新 %s, 耗时 %.1fs", inserted_count, updated_count, time.time() - t0)
+            t0 = time.time()
+            if use_remote:
+                screened_result = send_news(screened_news) if screened_news else {"inserted": 0, "updated": 0, "ignored": 0}
+                processed_result = send_news(processed_news) if processed_news else {"inserted": 0, "updated": 0, "ignored": 0}
+                _attach_remote_news_ids(screened_news, screened_result)
+                _attach_remote_news_ids(processed_news, processed_result)
+                _attach_remote_news_ids(news_list, processed_result)
+                inserted_count = screened_result.get('inserted', 0) + processed_result.get('inserted', 0)
+                updated_count = screened_result.get('updated', 0) + processed_result.get('updated', 0)
+            elif context.is_local_env:
+                init_database()
+                screened_stats = upsert_news_batch(screened_news)
+                processed_stats = upsert_news_batch(processed_news)
+                inserted_count = screened_stats["inserted"] + processed_stats["inserted"]
+                updated_count = screened_stats["updated"] + processed_stats["updated"]
+            else:
+                logger.warning("[写入D1] 新闻写入被跳过: use_remote=%s, app_env=%s", use_remote, context.app_env)
+            logger.info("[写入D1] 完成: 新增 %s, 更新 %s, 耗时 %.1fs", inserted_count, updated_count, time.time() - t0)
 
     # --- 写入 pipeline_trace 和 filter_logs ---
     if collect_fresh_news and use_remote and pipeline_trace:
