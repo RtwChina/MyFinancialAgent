@@ -816,15 +816,17 @@ def _chunk_items(items: List[Dict[str, Any]], batch_size: int) -> List[List[Dict
     return [items[index:index + batch_size] for index in range(0, len(items), batch_size)]
 
 
-def _fallback_batch_result(news_batch: List[Dict[str, Any]], batch_id: str) -> Dict[str, Any]:
+def _fallback_batch_result(news_batch: List[Dict[str, Any]], batch_id: str, degraded: bool = False) -> Dict[str, Any]:
     """LLM 调用失败时的降级处理：直接沿用规则初筛结果，全部标记为 keep=True"""
     items = []
     for news in news_batch:
+        raw_summary = news.get("summary") or news.get("title") or news.get("content", "")[:80]
+        ai_summary = f"(降级) {raw_summary}" if degraded else raw_summary
         items.append({
             "news_hash": news["news_hash"],
             "keep": True,
             "type": news.get("type", "index"),
-            "ai_summary": news.get("summary") or news.get("title") or news.get("content", "")[:80],
+            "ai_summary": ai_summary,
             "market_impact": news.get("rule_reason", "可能影响市场情绪和相关标的。"),
             "importance_stars": news.get("importance_stars", 2),
             "primary_symbol": news.get("primary_symbol"),
@@ -1130,7 +1132,7 @@ def enhance_news_with_llm(filtered_news: List[Dict[str, Any]], analysis_date: st
                     logger.info("[Stage 3 重试] %s 成功: %s 条", retry_batch_id, len(sub_batch))
                 except Exception as exc:
                     logger.warning("[Stage 3 重试] %s 失败，降级处理: %s", retry_batch_id, exc)
-                    llm_result = _fallback_batch_result(sub_batch, retry_batch_id)
+                    llm_result = _fallback_batch_result(sub_batch, retry_batch_id, degraded=True)
 
                 # 子批次用小数 key（如 24.1/24.2/24.3）保证排序在主批次之后
                 sub_key = batch_no + sub_idx * 0.01
