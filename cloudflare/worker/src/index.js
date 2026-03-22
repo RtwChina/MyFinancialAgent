@@ -127,7 +127,6 @@ async function handleApi(request, env, url, appEnv) {
       return json(await getScreeningKeywords(env, url), 200, request);
     }
     if (url.pathname === "/api/screening-keywords" && request.method === "POST") {
-      requireWriteAuth(request, env, appEnv);
       const body = await request.json();
       return json(await createScreeningKeyword(env, body), 200, request);
     }
@@ -135,11 +134,9 @@ async function handleApi(request, env, url, appEnv) {
     if (kwMatch) {
       const kwId = Number(kwMatch[1]);
       if (request.method === "PUT") {
-        requireWriteAuth(request, env, appEnv);
         return json(await updateScreeningKeyword(env, kwId, await request.json()), 200, request);
       }
       if (request.method === "DELETE") {
-        requireWriteAuth(request, env, appEnv);
         return json(await deleteScreeningKeyword(env, kwId), 200, request);
       }
     }

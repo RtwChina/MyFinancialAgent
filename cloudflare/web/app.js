@@ -2154,8 +2154,6 @@ async function handleKeywordToggle(e) {
   try {
     await fetchJson(`/api/screening-keywords/${id}`, {
       method: "PUT",
-      auth: true,
-      authReason: "关键词状态更新",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ is_active }),
     });
@@ -2174,8 +2172,6 @@ async function handleKeywordDelete(e) {
   try {
     await fetchJson(`/api/screening-keywords/${id}`, {
       method: "DELETE",
-      auth: true,
-      authReason: "关键词删除",
     });
     _keywordsData = _keywordsData.filter((k) => k.id !== id);
     renderKeywordsList();
@@ -2192,8 +2188,6 @@ async function addKeyword() {
   try {
     const created = await fetchJson("/api/screening-keywords", {
       method: "POST",
-      auth: true,
-      authReason: "添加关键词",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ keyword, keyword_type, language }),
     });
@@ -2213,6 +2207,60 @@ async function addKeyword() {
 const README_ASSET_PATH = "/readme.md";
 const README_LOADING_HTML = '<p class="muted">正在加载 README...</p>';
 const README_ERROR_HTML = '<p class="muted">README 加载失败。请先运行 `npm run sync:readme`，然后重新刷新页面。</p>';
+const README_TOC_HEADING = "目录";
+
+function buildReadmeLayout(container) {
+  const article = document.createElement("article");
+  article.className = "readme-article";
+  while (container.firstChild) article.appendChild(container.firstChild);
+
+  const sections = Array.from(article.querySelectorAll('a[id] + h2'))
+    .map((heading) => {
+      const anchor = heading.previousElementSibling;
+      const id = anchor?.tagName === "A" ? anchor.id : "";
+      const label = heading.textContent.trim();
+      if (!id || !label || label === README_TOC_HEADING) return null;
+      return { id, label };
+    })
+    .filter(Boolean);
+
+  const layout = document.createElement("div");
+  layout.className = "readme-layout";
+
+  if (sections.length) {
+    const sidebar = document.createElement("aside");
+    sidebar.className = "readme-sidebar";
+    const tocTitle = document.createElement("div");
+    tocTitle.className = "readme-sidebar-label";
+    tocTitle.textContent = "目录导航";
+    const tocList = document.createElement("ol");
+    tocList.className = "readme-sidebar-list";
+    sections.forEach(({ id, label }) => {
+      const item = document.createElement("li");
+      const link = document.createElement("a");
+      link.href = `#${id}`;
+      link.textContent = label;
+      item.appendChild(link);
+      tocList.appendChild(item);
+    });
+    sidebar.append(tocTitle, tocList);
+    layout.appendChild(sidebar);
+  }
+
+  layout.appendChild(article);
+  container.innerHTML = "";
+  container.appendChild(layout);
+}
+
+function syncReadmeHash(container) {
+  const hash = window.location.hash.replace(/^#/, "");
+  if (!hash) return;
+  const target = container.querySelector(`#${CSS.escape(hash)}`);
+  if (!target) return;
+  requestAnimationFrame(() => {
+    target.scrollIntoView({ behavior: "auto", block: "start" });
+  });
+}
 
 async function renderReadme() {
   const el = document.querySelector("#readmeContent");
@@ -2223,6 +2271,8 @@ async function renderReadme() {
     if (!response.ok) throw new Error(`Failed to load README: ${response.status}`);
     const markdown = await response.text();
     el.innerHTML = snarkdown(markdown);
+    buildReadmeLayout(el);
+    syncReadmeHash(el);
     state.readmeLoaded = true;
   } catch (error) {
     console.error("README load failed", error);

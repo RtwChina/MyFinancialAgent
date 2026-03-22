@@ -1,0 +1,240 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>README TOC Preview</title>
+    <style>
+      :root {
+        --bg: #f4efe7;
+        --card: rgba(255, 252, 247, 0.94);
+        --card-strong: #fffaf2;
+        --ink: #17233b;
+        --muted: #6a7488;
+        --line: rgba(23, 35, 59, 0.12);
+        --accent: #0f766e;
+        --accent-soft: rgba(15, 118, 110, 0.1);
+        --shadow: 0 24px 60px rgba(23, 35, 59, 0.12);
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      html {
+        scroll-behavior: smooth;
+      }
+
+      body {
+        margin: 0;
+        font-family: "PingFang SC", "Noto Sans SC", "Microsoft YaHei", sans-serif;
+        color: var(--ink);
+        background:
+          radial-gradient(circle at top left, rgba(15, 118, 110, 0.16), transparent 24%),
+          radial-gradient(circle at top right, rgba(217, 119, 6, 0.14), transparent 22%),
+          linear-gradient(180deg, #f9f4ec 0%, var(--bg) 100%);
+      }
+
+      .shell {
+        width: min(1220px, calc(100vw - 40px));
+        margin: 32px auto 48px;
+        display: grid;
+        grid-template-columns: 280px minmax(0, 1fr);
+        gap: 24px;
+        align-items: start;
+      }
+
+      .toc-card,
+      .content-card {
+        background: var(--card);
+        border: 1px solid var(--line);
+        border-radius: 24px;
+        box-shadow: var(--shadow);
+        backdrop-filter: blur(16px);
+      }
+
+      .toc-card {
+        position: sticky;
+        top: 24px;
+        padding: 22px 20px 20px;
+      }
+
+      .toc-eyebrow {
+        font-size: 12px;
+        font-weight: 700;
+        letter-spacing: 0.16em;
+        text-transform: uppercase;
+        color: var(--accent);
+      }
+
+      .toc-card h2 {
+        margin: 10px 0 16px;
+        font-size: 28px;
+      }
+
+      .toc-card ol {
+        margin: 0;
+        padding-left: 22px;
+        display: grid;
+        gap: 8px;
+      }
+
+      .toc-card a {
+        color: var(--ink);
+        text-decoration: none;
+        border-bottom: 1px solid transparent;
+      }
+
+      .toc-card a:hover {
+        color: var(--accent);
+        border-bottom-color: currentColor;
+      }
+
+      .content-card {
+        padding: 36px 52px 64px;
+      }
+
+      .hero {
+        margin-bottom: 28px;
+        padding: 24px 28px;
+        background: linear-gradient(135deg, rgba(15, 118, 110, 0.12), rgba(217, 119, 6, 0.1));
+        border: 1px solid rgba(15, 118, 110, 0.12);
+        border-radius: 20px;
+      }
+
+      .hero .label {
+        font-size: 13px;
+        font-weight: 700;
+        letter-spacing: 0.14em;
+        text-transform: uppercase;
+        color: var(--accent);
+      }
+
+      .hero h1 {
+        margin: 10px 0 8px;
+        font-size: clamp(34px, 4vw, 46px);
+        line-height: 1.06;
+      }
+
+      .hero p {
+        margin: 0;
+        color: var(--muted);
+        font-size: 16px;
+        line-height: 1.75;
+      }
+
+      #content h1:first-child {
+        display: none;
+      }
+
+      #content h2,
+      #content h3 {
+        scroll-margin-top: 28px;
+      }
+
+      #content h2 {
+        margin: 40px 0 14px;
+        font-size: 34px;
+        line-height: 1.15;
+      }
+
+      #content h3 {
+        margin: 28px 0 12px;
+        font-size: 24px;
+      }
+
+      #content p,
+      #content li {
+        color: #27334e;
+        font-size: 16px;
+        line-height: 1.85;
+      }
+
+      #content ul,
+      #content ol {
+        padding-left: 24px;
+      }
+
+      #content pre {
+        overflow-x: auto;
+        padding: 18px 20px;
+        background: #fbf7f0;
+        border: 1px solid rgba(23, 35, 59, 0.08);
+        border-radius: 16px;
+      }
+
+      #content code {
+        font-family: "SFMono-Regular", "Menlo", "Monaco", monospace;
+        font-size: 0.92em;
+      }
+
+      #content p code,
+      #content li code {
+        padding: 2px 6px;
+        background: var(--accent-soft);
+        border-radius: 999px;
+      }
+
+      .anchored-heading::before {
+        content: "#";
+        display: inline-block;
+        margin-right: 10px;
+        color: rgba(15, 118, 110, 0.72);
+      }
+
+      .meta {
+        margin-top: 24px;
+        padding-top: 18px;
+        border-top: 1px solid var(--line);
+        color: var(--muted);
+        font-size: 14px;
+      }
+
+      @media (max-width: 980px) {
+        .shell {
+          grid-template-columns: 1fr;
+        }
+
+        .toc-card {
+          position: static;
+        }
+
+        .content-card {
+          padding: 28px 24px 42px;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <main class="shell">
+      <aside id="toc"><nav class="toc-card" aria-label="ReadMe 目录"><div class="toc-eyebrow">Directory</div><h2>目录</h2><ol><li><a href="#system-overview">系统说明</a></li><li><a href="#system-architecture">系统架构</a></li><li><a href="#data-storage">数据存储</a></li><li><a href="#project-structure">目录结构</a></li><li><a href="#quick-start">快速启动</a></li><li><a href="#scheduled-jobs">定时任务</a></li><li><a href="#environments">环境</a></li><li><a href="#news-pipeline">新闻采集与过滤流程</a></li><li><a href="#core-fields">核心字段说明</a></li><li><a href="#keywords-and-aliases">关键词与标的别名</a></li><li><a href="#review-workflow">复盘工作流</a></li><li><a href="#testing">测试</a></li><li><a href="#docs">文档</a></li></ol></nav></aside>
+      <section class="content-card">
+        <div class="hero">
+          <div class="label">Local Preview</div>
+          <h1>ReadMe 目录效果预览</h1>
+          <p>这个页面用当前仓库里的 README 生成，左侧目录是拟议中的导航效果，方便你先看样式和跳转感受。</p>
+        </div>
+        <article id="content"></article>
+        <div class="meta">生成文件：<code>.tests/readme-toc-preview.html</code>。如果你更新了 <code>README.md</code>，重新运行生成脚本即可刷新预览。</div>
+      </section>
+    </main>
+
+    <script>
+      document.querySelector("#content").innerHTML = "<h1>MyFinancialAgent — 股票自动化复盘系统</h1>\n<p>面向个人投资者的一体化股票自动化复盘系统。系统会自动采集跟踪标的的价格与财经新闻，通过多层过滤保留真正有价值的信息，并在网页端提供新闻检索、标的管理、关键词管理和复盘工作台。</p>\n<p>技术栈：Python 3.12 + Cloudflare Workers (JS) + Cloudflare D1 + 原生 HTML/CSS/JS</p>\n<h2 id=\"system-overview\" class=\"anchored-heading\">系统说明</h2>\n<p>MyFinancialAgent 主要服务于单用户、私有化的日常复盘场景。它的目标不是做一个公开资讯平台，而是把你真正关心的价格、新闻、AI 分析和人工复盘内容放到同一条工作流里，减少噪音，提升复盘效率。</p>\n<p>系统当前主要包含四类页面能力：</p>\n<ul><li>复盘工作台：查看待复盘日期、打开某天复盘、保存草稿、标记完成</li><li>新闻检索：按关键词、日期、来源、类型、标的筛选新闻</li><li>标的管理：维护跟踪标的、别名和显示信息</li><li>关键词管理：维护新闻筛选所需的关键词词表</li></ul>\n<p>用户的日常使用路径通常是：系统自动采集数据并生成日期级分析，用户进入复盘工作台查看当天价格与新闻回填，再补充自己的判断、计划和总结。</p>\n<h2 id=\"system-architecture\" class=\"anchored-heading\">系统架构</h2>\n<p>系统整体链路如下：</p>\n<pre><code>GitHub Actions\n   ↓\nPython 采集端\n   ↓\nCloudflare Worker API\n   ↓\nCloudflare D1\n   ↑\nWeb 前端</code></pre>\n<p>具体来说：</p>\n<ul><li>GitHub Actions 负责按计划触发任务</li><li>Python 采集端负责价格采集、新闻抓取、过滤与 AI 分析</li><li>Cloudflare Worker 提供写入接口和查询接口</li><li>Cloudflare D1 作为主数据库保存生产数据</li><li>Web 前端通过 Worker API 读取数据并展示</li></ul>\n<p>前端本身是静态页面，业务数据不直接连数据库，而是统一通过 Worker API 查询。</p>\n<h2 id=\"data-storage\" class=\"anchored-heading\">数据存储</h2>\n<p>系统当前采用“云端主存储 + 本地回退”的结构。</p>\n<ul><li>生产数据存储在 Cloudflare D1 的 <code>my-financial-agent</code></li><li>测试数据存储在 Cloudflare D1 的 <code>my-financial-agent-test</code></li><li>本地开发或回退模式下使用 SQLite，默认路径为 <code>output/financial_data.db</code></li><li>ReadMe 页面内容来源于仓库根目录 <code>README.md</code>，后续接入页面时将同步到前端静态资源目录供页面渲染</li></ul>\n<p>核心业务表包括：</p>\n<ul><li><code>stock_raw</code>：价格数据</li><li><code>news_raw_data</code>：新闻数据</li><li><code>daily_review_archive</code>：复盘主表</li><li><code>daily_news_ai_analysis</code>：日期级 AI 新闻分析</li><li><code>daily_review_archive_news</code>：复盘新闻快照</li></ul>\n<h2 id=\"project-structure\" class=\"anchored-heading\">目录结构</h2>\n<p>仓库主要按“采集端、Worker、前端、文档、测试”分层组织：</p>\n<pre><code>.\n├── .github/workflows/     # GitHub Actions 定时采集\n├── cloudflare/\n│   ├── migrations/        # D1 数据库迁移\n│   ├── web/               # 前端静态页面\n│   └── worker/src/        # Cloudflare Worker API\n├── docs/                  # 架构与需求文档\n├── src/                   # Python 源代码\n├── tests/                 # 集成测试、冒烟测试、测试数据\n├── main.py                # CLI 入口\n├── README.md              # 项目主文档，也是网页 ReadMe 的内容源\n└── wrangler.toml          # Cloudflare 配置</code></pre>\n<p>其中：</p>\n<ul><li><code>src/collect_prices.py</code> 负责价格采集</li><li><code>src/collect_news_v3.py</code> 负责新闻采集、过滤与日期级分析</li><li><code>src/cloudflare_ingest.py</code> 负责与 Worker API 通信</li><li><code>cloudflare/worker/src/index.js</code> 负责 API 路由与数据读写</li><li><code>cloudflare/web/</code> 负责网页界面</li></ul>\n<h2 id=\"quick-start\" class=\"anchored-heading\">快速启动</h2>\n<h3>1. 环境准备</h3>\n<pre><code>python -m venv .venv\nsource .venv/bin/activate\npip install -r requirements.txt</code></pre>\n<h3>2. 配置</h3>\n<pre><code>cp .env.example .env</code></pre>\n<p>然后编辑 <code>.env</code>，至少补齐这些配置：</p>\n<ul><li><code>LLM_API_KEY</code></li><li><code>LLM_BASE_URL</code></li><li><code>INGEST_API_BASE_URL</code></li><li><code>INGEST_API_TOKEN</code></li></ul>\n<h3>3. 运行</h3>\n<pre><code>python main.py\npython main.py hourly-news\npython main.py close-summary</code></pre>\n<p>说明：</p>\n<ul><li><code>python main.py</code>：全量流程，价格 + 新闻 + AI 总结</li><li><code>python main.py hourly-news</code>：仅执行新闻采集</li><li><code>python main.py close-summary</code>：执行收盘后新闻补采、价格写入和日期级汇总</li></ul>\n<h2 id=\"scheduled-jobs\" class=\"anchored-heading\">定时任务</h2>\n<p>系统当前有两类定时任务：</p>\n<ul><li><code>hourly-news</code>：每小时执行一次，只采集新闻</li><li><code>close-summary</code>：每天北京 05:00 执行一次，负责收盘后价格、新闻和日期级汇总</li></ul>\n<p>这两类任务由 GitHub Actions 触发，Python 采集端负责具体执行。</p>\n<h2 id=\"environments\" class=\"anchored-heading\">环境</h2>\n<p>系统区分生产和测试两套环境：</p>\n<ul><li>生产环境</li></ul>\n<p>- Worker：<code>my-financial-agent.rtw1994.workers.dev</code> - D1：<code>my-financial-agent</code></p>\n<ul><li>测试环境</li></ul>\n<p>- Worker：<code>my-financial-agent-test.rtw1994.workers.dev</code> - D1：<code>my-financial-agent-test</code></p>\n<p>测试环境用于集成验证，避免直接污染生产数据。</p>\n<h2 id=\"news-pipeline\" class=\"anchored-heading\">新闻采集与过滤流程</h2>\n<p>新闻处理采用三级漏斗：先用低成本规则快速打分，再用 Embedding 做语义过滤，最后才把候选新闻送入 LLM 深度分析。这样做的目的很简单：LLM 最贵最慢，不能把所有原始新闻直接丢进去。</p>\n<h3>Stage 1：关键词打分</h3>\n<p>这一步扫描每条新闻的标题和正文，判断它命中了哪些关键词和标的别名。Stage 1 不做最终过滤，只给每条新闻算一个基础分数 <code>rule_score</code>。</p>\n<p>它主要回答两个问题：</p>\n<ul><li>这条新闻属于什么话题</li><li>这条新闻有没有提到你正在跟踪的标的</li></ul>\n<p>输出结果是每条新闻带一个 <code>rule_score</code>，为后续流程提供便宜的第一层信号。</p>\n<h3>Stage 2：Embedding 过滤</h3>\n<p>这一步会调用 Embedding 能力，计算新闻和跟踪标的描述之间的语义相似度。系统会把相似度和 <code>rule_score</code> 结合起来，得到综合分数，并据此过滤掉明显不相关的新闻。</p>\n<p>这一步是真正开始“缩量”的地方。它的目标不是做最终结论，而是把大量无关新闻挡在 LLM 之前。</p>\n<h3>Stage 3：LLM 深度分析</h3>\n<p>通过前两层过滤的新闻会被分批交给大模型进一步分析。LLM 会输出结构化结果，例如：</p>\n<ul><li>是否保留</li><li>新闻类型</li><li>重要星级</li><li>AI 摘要</li><li>市场影响</li><li>归属标的</li></ul>\n<p>最终只有 <code>keep=true</code> 的新闻会作为高价值新闻进入后续展示与复盘链路。</p>\n<h3>三级漏斗总结</h3>\n<p>可以把整个流程理解为：</p>\n<pre><code>原始新闻\n  ↓\nStage 1：关键词打分\n  ↓\nStage 2：Embedding 过滤\n  ↓\nStage 3：LLM 深度分析\n  ↓\n高价值新闻入库</code></pre>\n<p>Stage 1 成本最低，Stage 3 成本最高。前两层的存在，就是为了把昂贵的 LLM 使用集中到真正值得分析的候选新闻上。</p>\n<h2 id=\"core-fields\" class=\"anchored-heading\">核心字段说明</h2>\n<p>这一节说明系统中的关键新闻字段分别代表什么，以及它们在前端页面中的实际使用位置。重点不是字段字面含义，而是“这个字段最后影响了哪个页面、哪个区域、哪种交互”。</p>\n<h3><code>related_symbols</code></h3>\n<p><code>related_symbols</code> 表示这条新闻关联到的跟踪标的列表。它是一个数组，可能为空，也可能包含一个或多个标的。</p>\n<p>它的主要作用不是做展示装饰，而是把新闻和具体标的建立关联关系。</p>\n<p>前端使用位置：</p>\n<ul><li>新闻检索台：显示在新闻列表的“标签”列中，作为标的标签展示</li><li>新闻详情弹窗：显示在详情弹窗顶部标签区</li><li>复盘工作台：显示在每条新闻卡片的标签区</li><li>复盘工作台 / 个股新闻分组：个股新闻会根据它进行按标的分组</li></ul>\n<p>前端逻辑作用：</p>\n<ul><li>在复盘工作台中，个股新闻不是简单平铺展示，而是按标的归类</li><li>分组时前端优先使用 <code>primary_symbol</code>，如果没有，则回退到 <code>related_symbols[0]</code></li><li>因此，<code>related_symbols</code> 不只是“显示成标签”，还直接决定了个股新闻最终会被归到哪个标的下面</li></ul>\n<p>举例：</p>\n<ul><li>一条只和美光相关的新闻，可能是 <code>[&quot;MU&quot;]</code></li><li>一条同时提到多只跟踪标的的新闻，可能是 <code>[&quot;MU&quot;, &quot;SOXX&quot;]</code></li><li>如果没有明确标的关联，则可能为空数组</li></ul>\n<h3><code>primary_symbol</code></h3>\n<p><code>primary_symbol</code> 表示前端在需要“单一主标的”时优先采用的那个标的。</p>\n<p>它不是所有页面都单独显示的字段，但它在前端分组逻辑里非常重要。</p>\n<p>前端使用位置：</p>\n<ul><li>复盘工作台 / 个股新闻分组：作为分组的第一优先键</li></ul>\n<p>前端逻辑作用：</p>\n<ul><li>个股新闻分组时，前端会先取 <code>primary_symbol</code></li><li>如果 <code>primary_symbol</code> 不存在，才回退到 <code>related_symbols[0]</code></li><li>如果两者都没有，才归到“其他标的”</li></ul>\n<p>也就是说，<code>primary_symbol</code> 决定了一条多标的新闻在前端更偏向被归到哪一个标的下面。</p>\n<h3><code>type</code></h3>\n<p><code>type</code> 表示新闻的最终归属类型。</p>\n<p>当前系统主要使用三类值：</p>\n<ul><li><code>index</code>：大盘 / 宏观 / 利率 / 商品 / 指数层面</li><li><code>sector</code>：板块 / 行业 / 主题层面</li><li><code>stock</code>：具体公司 / 个股层面</li></ul>\n<p>前端使用位置：</p>\n<ul><li>新闻检索台：可作为筛选条件</li><li>新闻检索台：显示在“标签”列</li><li>新闻详情弹窗：显示在顶部标签区</li><li>复盘工作台：显示在每条新闻卡片标签区</li></ul>\n<p>前端逻辑作用：</p>\n<ul><li>复盘工作台会按 <code>type</code> 将新闻拆分成三组：</li></ul>\n<p>- 大盘新闻 - 板块新闻 - 个股新闻</p>\n<ul><li>前端会兼容旧值：</li></ul>\n<p>- <code>macro</code> 会被视作 <code>index</code> - <code>market</code> 会被视作 <code>sector</code> - <code>symbol</code> 会被视作 <code>stock</code></p>\n<p>所以，<code>type</code> 不只是给用户看的标签，它直接决定了这条新闻在复盘工作台出现在哪个大类里。</p>\n<h3><code>importance_stars</code></h3>\n<p><code>importance_stars</code> 表示 LLM 对新闻重要性的打星结果，通常范围为 1 到 5。</p>\n<p>可按下面理解：</p>\n<ul><li><code>5</code> 星：足以改变当天市场主线</li><li><code>4</code> 星：对跟踪标的或市场方向有明确影响</li><li><code>3</code> 星：有信息增量，值得看</li><li><code>2</code> 星：背景补充</li><li><code>1</code> 星：弱相关</li></ul>\n<p>前端使用位置：</p>\n<ul><li>新闻检索台：显示在“标签”列</li><li>新闻详情弹窗：显示在顶部标签区</li><li>复盘工作台：显示在每条新闻卡片标签区</li></ul>\n<p>前端逻辑作用：</p>\n<ul><li>复盘工作台新闻列表会先按星级降序排序，再按发布时间排序</li><li>各新闻分组标题中会显示“最高几星”</li><li>因此，<code>importance_stars</code> 既影响展示样式，也影响前端默认排序结果</li></ul>\n<p>换句话说，星级越高，新闻在复盘页面中越靠前，也越容易先被看到。</p>\n<h3><code>ai_summary</code></h3>\n<p><code>ai_summary</code> 是系统为新闻生成的一句话摘要，用于快速传达新闻核心内容。</p>\n<p>前端使用位置：</p>\n<ul><li>新闻检索台：优先作为新闻主标题显示</li><li>新闻详情弹窗：显示在“AI 摘要”区域</li><li>复盘工作台：优先作为每条新闻卡片标题显示</li></ul>\n<p>前端逻辑作用：</p>\n<ul><li>如果存在 <code>ai_summary</code>，前端优先展示它</li><li>如果没有，前端才回退到原始标题 <code>title</code></li><li>因此它决定了用户在页面上第一眼看到的“新闻标题”是否更凝练、更适合复盘</li></ul>\n<h3><code>market_impact</code></h3>\n<p><code>market_impact</code> 表示系统对“这条新闻可能如何影响市场”的解释。</p>\n<p>前端使用位置：</p>\n<ul><li>新闻详情弹窗：显示在“市场影响”区域</li><li>复盘工作台：显示在每条新闻卡片的正文说明区域</li></ul>\n<p>前端逻辑作用：</p>\n<ul><li>如果 <code>market_impact</code> 存在，优先展示它</li><li>如果为空，前端会退回使用 <code>rule_reason</code></li><li>所以它是前端“影响解释”区域的首选内容来源</li></ul>\n<h3><code>title</code></h3>\n<p><code>title</code> 是新闻的原始标题。</p>\n<p>前端使用位置：</p>\n<ul><li>新闻详情弹窗：作为“原始标题”显示</li><li>新闻检索台与复盘工作台：当 <code>ai_summary</code> 不存在时作为回退标题显示</li></ul>\n<p>前端逻辑作用：</p>\n<ul><li><code>title</code> 是前端很多位置的兜底文本</li><li>如果 AI 摘要不可用，用户最终看到的标题就是 <code>title</code></li></ul>\n<h3><code>content</code></h3>\n<p><code>content</code> 是新闻的原始正文内容或正文截断内容。</p>\n<p>前端使用位置：</p>\n<ul><li>新闻详情弹窗：正文区域</li><li>新闻检索台：正文预览区会从它或相关字段中提取预览</li><li>复盘工作台：当 <code>ai_summary</code> 和 <code>title</code> 都不足时，可作为兜底显示内容</li></ul>\n<p>前端逻辑作用：</p>\n<ul><li>它主要承担详情查看和预览兜底功能</li><li>一般不是最先展示的字段，但它决定了详情弹窗里用户能看到什么原始信息</li></ul>\n<h3><code>rule_score</code></h3>\n<p><code>rule_score</code> 是 Stage 1 关键词打分阶段得到的基础分数。</p>\n<p>它反映的是：这条新闻从“关键词命中”和“标的别名命中”的角度看，和系统关注范围有多相关。</p>\n<p>前端使用位置：</p>\n<ul><li>当前前端页面不直接展示</li></ul>\n<p>前端逻辑作用：</p>\n<ul><li>当前页面不会把它作为标签或列展示给用户</li><li>它主要用于后端 Stage 2 的综合过滤逻辑，与语义相似度一起决定新闻是否继续进入下一阶段</li></ul>\n<p>因此，<code>rule_score</code> 是系统内部筛选信号，不是当前 UI 的直接展示字段。</p>\n<h3><code>rule_passed</code></h3>\n<p><code>rule_passed</code> 表示新闻是否通过规则阶段筛选。</p>\n<p>前端使用位置：</p>\n<ul><li>当前前端页面不把它单独显示成字段</li></ul>\n<p>前端逻辑作用：</p>\n<ul><li>新闻检索台默认加载的新闻集合，已经隐含受到它影响</li><li>也就是说，用户在新闻检索页看到的“默认列表”，本身已经是规则通过后的结果之一</li></ul>\n<p>所以它更像“决定哪些新闻会出现在列表里”，而不是“出现在列表里后怎么展示”。</p>\n<h3><code>processing_status</code></h3>\n<p><code>processing_status</code> 表示这条新闻当前处于哪一个处理阶段。</p>\n<p>典型值包括：</p>\n<ul><li><code>rule_screened</code></li><li><code>llm_processed</code></li><li><code>llm_discarded</code></li><li><code>reviewed</code></li></ul>\n<p>前端使用位置：</p>\n<ul><li>当前前端页面不直接展示</li></ul>\n<p>前端逻辑作用：</p>\n<ul><li>它主要服务于后端处理链路和复盘归档状态管理</li><li>当前网页不会把这个字段直接展示给用户</li><li>但它会影响新闻在后续流程中是否被视为已处理、已归档或已进入复盘上下文</li></ul>\n<h3><code>is_relevant_to_review</code></h3>\n<p><code>is_relevant_to_review</code> 表示系统是否认为这条新闻与复盘相关。</p>\n<p>前端使用位置：</p>\n<ul><li>当前前端页面不直接展示</li></ul>\n<p>前端逻辑作用：</p>\n<ul><li>它主要用于后端筛选和复盘候选新闻范围控制</li><li>会影响哪些新闻进入复盘相关的数据集合</li><li>但当前前端不会把它单独展示出来</li></ul>\n<h3><code>review_status</code></h3>\n<p><code>review_status</code> 表示某一天复盘记录当前处于什么状态。</p>\n<p>主要值包括：</p>\n<ul><li><code>initialized</code>：记录已创建，但还没有真正开始写</li><li><code>draft</code>：已有人工编辑内容，处于进行中</li><li><code>reviewed</code>：这一天已完成复盘</li></ul>\n<p>前端使用位置：</p>\n<ul><li>复盘工作台列表：显示状态标签</li><li>复盘工作台列表：决定操作按钮显示“开始复盘 / 继续复盘 / 查看”</li><li>复盘抽屉：决定是否只读、是否可编辑、是否显示已复盘状态</li></ul>\n<p>前端逻辑作用：</p>\n<ul><li><code>initialized</code> 会被视作“待开始”</li><li><code>draft</code> 会被视作“进行中”</li><li><code>reviewed</code> 会被视作“已复盘”</li><li>它不仅影响显示文案，还影响抽屉进入后的交互模式</li></ul>\n<h3><code>reviewer_news_notes</code></h3>\n<p><code>reviewer_news_notes</code> 表示用户在复盘工作台中填写的“新闻总结 / 主线判断 / 补充点评”。</p>\n<p>前端使用位置：</p>\n<ul><li>复盘工作台抽屉：作为“新闻总结”输入框的内容来源</li><li>复盘保存后再次打开抽屉：用于回填草稿内容</li></ul>\n<p>前端逻辑作用：</p>\n<ul><li>如果这一天已有草稿，前端会优先回填它</li><li>如果没有，前端才会回退到 AI 分析生成的默认摘要</li><li>因此，这个字段决定了复盘抽屉打开时“新闻总结”区域最终展示的是人工内容还是系统默认内容</li></ul>\n<h2 id=\"keywords-and-aliases\" class=\"anchored-heading\">关键词与标的别名</h2>\n<p>关键词和标的别名都会参与新闻筛选，但职责不同。</p>\n<p>关键词负责“话题加权”：</p>\n<ul><li>宏观词、市场词会提高相关新闻的通过概率</li><li>噪音词会压低相关新闻分数</li><li>它不直接绑定到某个具体标的</li></ul>\n<p>标的别名负责“标的归因”：</p>\n<ul><li>如果新闻提到了某个跟踪标的的常见写法，系统就能把新闻和该标的关联起来</li><li>这会影响 <code>related_symbols</code>，也会影响后续 LLM 的上下文判断</li></ul>\n<p>什么时候加别名：</p>\n<ul><li>你关心某个具体公司、ETF 或资产在新闻中被准确识别</li><li>新闻里经常出现该标的的中文名、简称、行业叫法或英文别名</li></ul>\n<p>什么时候加关键词：</p>\n<ul><li>你关心某类宏观或行业主题，希望相关新闻更容易通过</li><li>你想压低某类重复噪音新闻的权重</li></ul>\n<p>简单判断原则：</p>\n<ul><li>关注“某个具体标的”时，加别名</li><li>关注“某类话题或噪音”时，加关键词</li></ul>\n<h2 id=\"review-workflow\" class=\"anchored-heading\">复盘工作流</h2>\n<p>复盘工作流以最近已收盘的美股交易日为主线。</p>\n<p>系统会先识别最近一个已收盘的复盘日，再在网页中展示待复盘日期。用户打开某天复盘后，系统会自动回填：</p>\n<ul><li>当日价格快照</li><li>对应新闻窗口内的新闻</li><li>日期级 AI 分析</li><li>上一个已完成复盘日的参考字段</li><li>这一天已有的草稿内容</li></ul>\n<p>之后用户可以继续编辑并保存内容。当前复盘内容主要包括：</p>\n<ul><li>新闻总结</li><li>大盘盘点</li><li>板块轮动</li><li>操作计划</li><li>深度总结</li></ul>\n<p>状态上可以理解为：</p>\n<ul><li><code>initialized</code>：记录已创建，但还没有真正开始写</li><li><code>draft</code>：已经有人工编辑内容，处于进行中</li><li><code>reviewed</code>：这一天的复盘已完成</li></ul>\n<h2 id=\"testing\" class=\"anchored-heading\">测试</h2>\n<p>项目当前包含集成测试与测试数据生成脚本。</p>\n<p>集成测试：</p>\n<pre><code>.venv/bin/python tests/integration/run_weekly_integration.py \\\n  --worker-base https://my-financial-agent-test.rtw1994.workers.dev \\\n  --db-name my-financial-agent-test \\\n  --ingest-token &quot;$INGEST_API_TOKEN&quot;</code></pre>\n<p>生成历史基线 seed：</p>\n<pre><code>.venv/bin/python tests/testdata/prepare_history_seed.py \\\n  tests/testdata/test_week_seed_20260315.sql \\\n  tests/testdata/_generated_history_seed.sql</code></pre>\n<p>测试环境与生产环境分离，便于做集成验证和回归检查。</p>\n<h2 id=\"docs\" class=\"anchored-heading\">文档</h2>\n<p>更多细节可参考：</p>\n<ul><li><code>docs/arch/TECHNICAL_ARCHITECTURE.md</code></li><li><code>docs/rfcs/项目需求文档.md</code></li><li><code>docs/api/NEWS_PIPELINE_SEQUENCE.md</code></li></ul>";
+      
+const content = document.querySelector("#content");
+
+function scrollToHashTarget() {
+  const hash = window.location.hash.replace(/^#/, "");
+  if (!hash) return;
+  const target = document.getElementById(hash);
+  if (!target) return;
+  target.scrollIntoView({ block: "start", behavior: "auto" });
+}
+
+window.addEventListener("hashchange", scrollToHashTarget);
+scrollToHashTarget();
+
+    </script>
+  </body>
+</html>
