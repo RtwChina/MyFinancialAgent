@@ -163,9 +163,9 @@ def _fetch_keywords_from_api() -> Dict[str, List[str]] | None:
 
 def _truncate_stale_news(all_news: List[Dict[str, Any]], cutoff_hours: int = 24) -> List[Dict[str, Any]]:
     """丢弃 pub_date 早于 now - cutoff_hours 的新闻；pub_date 为空或无法解析时保留。"""
-    from datetime import datetime as _dt, timezone as _tz
+    from datetime import datetime as _dt, timedelta as _td
     from zoneinfo import ZoneInfo as _ZI
-    cutoff = _dt.now(_ZI("Asia/Shanghai")) - timedelta(hours=cutoff_hours)
+    cutoff = _dt.now(_ZI("Asia/Shanghai")) - _td(hours=cutoff_hours)
     cutoff_str = cutoff.strftime("%Y-%m-%d %H:%M:%S")
     kept, dropped = [], 0
     for news in all_news:
