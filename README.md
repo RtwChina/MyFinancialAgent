@@ -181,7 +181,7 @@ python main.py close-summary
 
 **[截断]：按时间丢弃超龄文章**
 
-数据源（尤其是 Finnhub）每次抓取时会带回最近 2 天的文章。系统在 `merge_and_deduplicate` 之前，统一丢弃 `pub_date < now - 24h` 的所有条目。这一步不需要查数据库，纯时间比较，成本极低。
+Finnhub `company_news` 接口的日期参数只支持天粒度（`YYYY-MM-DD`），无法精确到小时。因此 `date_from = today - 1天` 实际会拉回约 47 小时的文章。系统在 `merge_and_deduplicate` 之前统一丢弃 `pub_date < now - 24h` 的条目，将窗口精确收窄到 24h。这一步不需要查数据库，纯时间比较，成本极低。
 
 **[预过滤]：按 hash 跳过已入库文章**
 
