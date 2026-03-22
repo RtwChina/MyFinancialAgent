@@ -1805,8 +1805,6 @@ def collect_all_news(context: ExecutionContext | None = None) -> Dict[str, Any]:
             except Exception as exc:
                 logger.warning("[写入] %s 写入失败（不影响主流程）: %s", label, exc)
 
-        _persist_news(embedding_passed, "embedding_passed")
-
         def _on_batch_done(processed_items: List[Dict[str, Any]], kept_items: List[Dict[str, Any]]) -> None:
             _persist_news(processed_items, "batch")
 
