@@ -1683,14 +1683,17 @@ def collect_all_news(context: ExecutionContext | None = None) -> Dict[str, Any]:
         logger.info("[采集] 完成: %s条 (去重后 %s条), 耗时 %.1fs", len(all_news), len(unique_news), trace["fetch_duration"])
 
         # --- Hash 预过滤：跳过过去 24h 内已存在的新闻 ---
+        _use_remote = ENABLE_REMOTE_WRITE and is_remote_write_configured()
         from datetime import timedelta
         now_dt = dt.now(ZI("Asia/Shanghai"))
         prefilter_date_to = now_dt.strftime("%Y-%m-%d %H:%M:%S")
         prefilter_date_from = (now_dt - timedelta(hours=24)).strftime("%Y-%m-%d %H:%M:%S")
-        if context.is_local_env:
+        if _use_remote:
+            existing_hashes = fetch_existing_hashes(prefilter_date_from, prefilter_date_to)
+        elif context.is_local_env:
             existing_hashes = get_existing_hashes(prefilter_date_from, prefilter_date_to)
         else:
-            existing_hashes = fetch_existing_hashes(prefilter_date_from, prefilter_date_to)
+            existing_hashes = set()
         if existing_hashes:
             before_count = len(unique_news)
             unique_news = [n for n in unique_news if n.get("news_hash") not in existing_hashes]
@@ -1774,7 +1777,6 @@ def collect_all_news(context: ExecutionContext | None = None) -> Dict[str, Any]:
         # Stage 1 不再产生 rejected，rejected 仅来自 Embedding + LLM
 
         # --- Stage 3 前置写入：screened_news 先入库（含 embedding_filtered 状态）---
-        _use_remote = ENABLE_REMOTE_WRITE and is_remote_write_configured()
         _accumulated_id_map: Dict[str, int] = {}
 
         def _persist_news(items: List[Dict[str, Any]], label: str) -> None:
