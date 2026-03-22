@@ -39,7 +39,7 @@ jobs:
           LLM_BATCH_TIMEOUT: "120"
           LLM_SUMMARY_TIMEOUT: "60"
           LLM_BATCH_SIZE: "6"
-          LLM_MAX_WORKERS: "20"
+          LLM_MAX_WORKERS: "30"
           SKIP_LLM: "false"
           # Pipeline 三级漏斗参数（2026-03-21 回归测试确定）
           RULE_ACTIVE_STRATEGY: "C"
