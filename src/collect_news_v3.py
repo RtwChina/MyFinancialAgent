@@ -1646,11 +1646,11 @@ def collect_all_news(context: ExecutionContext | None = None) -> Dict[str, Any]:
         trace["total_deduped"] = len(unique_news)
         logger.info("[采集] 完成: %s条 (去重后 %s条), 耗时 %.1fs", len(all_news), len(unique_news), trace["fetch_duration"])
 
-        # --- Hash 预过滤：跳过过去 24h 内已存在的新闻 ---
+        # --- Hash 预过滤：跳过过去 4 天内已存在的新闻（覆盖 Finnhub 3天抓取窗口）---
         from datetime import timedelta
         now_dt = dt.now(ZI("Asia/Shanghai"))
         prefilter_date_to = now_dt.strftime("%Y-%m-%d %H:%M:%S")
-        prefilter_date_from = (now_dt - timedelta(hours=24)).strftime("%Y-%m-%d %H:%M:%S")
+        prefilter_date_from = (now_dt - timedelta(days=4)).strftime("%Y-%m-%d %H:%M:%S")
         if context.is_local_env:
             existing_hashes = get_existing_hashes(prefilter_date_from, prefilter_date_to)
         else:
