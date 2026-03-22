@@ -54,6 +54,8 @@
 
 | SM-013  | 已复盘记录 initialize 保护 | 验证夜间任务调用 initialize 不会覆盖已完成复盘的数据 | 数据库中存在 `review_status='reviewed'` 的记录 | 1. 记录该日期的 `reviewer_news_notes` 内容 2. 调用 `POST /api/reviews/<date>/initialize` 3. 查询数据库确认字段未变更 | 接口返回 `{ ok: true, skipped: true, reason: "already reviewed" }`，数据库记录完全未变更 | P0 | 是 |
 
+| SM-014  | Stage 3 批次拆分重试 | 验证批次失败后触发拆分重试路径，日志可观测，最终无未处理异常 | LLM API 可访问，至少一个批次发生超时或解析失败 | 1. 运行 `python main.py hourly-news` 2. 在日志中查找 `[Stage 3 重试]` 关键词 3. 确认子批次成功（`[Stage 3 重试] xxx 成功`）或降级（`[Stage 3 重试] xxx 失败，降级处理`）4. 确认 Stage 3 正常完成，无未捕获异常 | 日志包含 `[Stage 3 重试]` 行；重试批次显示 `成功` 或 `降级处理`；Stage 3 总体完成无异常 | P1 | 否 |
+
 ## 文档更新时机
 - 新功能进入主链路
 - 主流程步骤改变

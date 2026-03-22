@@ -54,7 +54,6 @@ LLM_TIMEOUT = int(os.getenv("LLM_TIMEOUT", "300"))  # LLM 超时时间(秒)
 LLM_RULES_TIMEOUT = int(os.getenv("LLM_RULES_TIMEOUT", str(LLM_TIMEOUT)))
 LLM_BATCH_TIMEOUT = int(os.getenv("LLM_BATCH_TIMEOUT", str(LLM_TIMEOUT)))
 LLM_SUMMARY_TIMEOUT = int(os.getenv("LLM_SUMMARY_TIMEOUT", str(LLM_TIMEOUT)))
-LLM_MAX_RETRIES = int(os.getenv("LLM_MAX_RETRIES", "2"))  # 最大重试次数
 LLM_MAX_WORKERS = int(os.getenv("LLM_MAX_WORKERS", "5"))  # 并发数（Session 连接池复用，支持高并发）
 LLM_BATCH_SIZE = max(1, int(os.getenv("LLM_BATCH_SIZE", "8")))
 LLM_RULES_SAMPLE_SIZE = max(8, int(os.getenv("LLM_RULES_SAMPLE_SIZE", "12")))
@@ -68,7 +67,7 @@ llm_client = LLMClient(
     base_url=LLM_BASE_URL,
     default_model=LLM_MODEL_ID,
     timeout=LLM_TIMEOUT,
-    max_retries=LLM_MAX_RETRIES,
+    max_retries=0,
     logger=logger,
 )
 
@@ -925,9 +924,10 @@ def _call_batch_llm(news_batch: List[Dict[str, Any]], batch_id: str) -> Dict[str
         model=LLM_BATCH_MODEL_ID,
         max_tokens=2400,
         timeout=LLM_BATCH_TIMEOUT,
+        max_retries=0,  # 重试由 enhance_news_with_llm 统一处理
     )
     if not llm_result.success:
-        return _fallback_batch_result(news_batch, batch_id)
+        raise RuntimeError("[批次分析] %s 调用失败: %s" % (batch_id, llm_result.error))
 
     logger.info("[批次分析] %s LLM原始返回(前200字): %s", batch_id, llm_result.response_text[:200])
 
@@ -939,8 +939,7 @@ def _call_batch_llm(news_batch: List[Dict[str, Any]], batch_id: str) -> Dict[str
         parsed["batch_id"] = batch_id
         return parsed
     except Exception as exc:
-        logger.error("[批次分析] %s JSON解析失败，回退规则结果: %s", batch_id, exc)
-        return _fallback_batch_result(news_batch, batch_id)
+        raise ValueError("[批次分析] %s JSON解析失败: %s" % (batch_id, exc)) from exc
 
 
 def _normalize_type(value: str | None, fallback: str) -> str:
@@ -1072,6 +1071,7 @@ def _merge_batch_result(news_batch: List[Dict[str, Any]], llm_result: Dict[str, 
 
 
 def enhance_news_with_llm(filtered_news: List[Dict[str, Any]], analysis_date: str) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]], List[Dict[str, Any]]]:
+    import math
     if not filtered_news:
         return [], [], []
 
@@ -1079,8 +1079,9 @@ def enhance_news_with_llm(filtered_news: List[Dict[str, Any]], analysis_date: st
     processed_news: List[Dict[str, Any]] = []
     enhanced: List[Dict[str, Any]] = []
     batch_records: Dict[int, Dict[str, Any]] = {}
+    failed_batches: List[tuple] = []  # (batch_no, batch)
 
-    # 多批次并发调用 LLM，以 batch_no 为键收集结果，最后按批次序号重排保证输出顺序稳定
+    # --- 主批次并发 ---
     with ThreadPoolExecutor(max_workers=LLM_MAX_WORKERS) as executor:
         futures = {}
         for index, batch in enumerate(batches, start=1):
@@ -1089,11 +1090,57 @@ def enhance_news_with_llm(filtered_news: List[Dict[str, Any]], analysis_date: st
 
         for future in as_completed(futures):
             batch_no, batch = futures[future]
-            llm_result = future.result()
-            processed_items, kept_items, batch_record = _merge_batch_result(batch, llm_result, batch_no, analysis_date)
-            processed_news.extend(processed_items)
-            enhanced.extend(kept_items)
-            batch_records[batch_no] = batch_record
+            batch_id = f"{analysis_date}-batch-{batch_no}"
+            try:
+                llm_result = future.result()
+                processed_items, kept_items, batch_record = _merge_batch_result(batch, llm_result, batch_no, analysis_date)
+                processed_news.extend(processed_items)
+                enhanced.extend(kept_items)
+                batch_records[batch_no] = batch_record
+            except Exception as exc:
+                logger.warning("[Stage 3 重试] %s 失败，加入重试队列: %s", batch_id, exc)
+                failed_batches.append((batch_no, batch))
+
+    # --- 重试阶段：将失败批次均分为 3 份并发重试 ---
+    if failed_batches:
+        retry_sub_batches: List[tuple] = []  # (batch_no, sub_idx, sub_batch, retry_batch_id)
+        for batch_no, batch in failed_batches:
+            chunk_size = max(1, math.ceil(len(batch) / 3))
+            sub_batches = _chunk_items(batch, chunk_size)
+            for sub_idx, sub_batch in enumerate(sub_batches, start=1):
+                retry_batch_id = f"{analysis_date}-batch-{batch_no}-retry-{sub_idx}"
+                retry_sub_batches.append((batch_no, sub_idx, sub_batch, retry_batch_id))
+
+        logger.info(
+            "[Stage 3 重试] %s 个批次失败，拆分为 %s 个子批次（每批约 %s 条）并发重试",
+            len(failed_batches), len(retry_sub_batches),
+            max(1, math.ceil(LLM_BATCH_SIZE / 3)),
+        )
+
+        with ThreadPoolExecutor(max_workers=len(retry_sub_batches)) as retry_executor:
+            retry_futures = {
+                retry_executor.submit(_call_batch_llm, sub_batch, retry_batch_id): (batch_no, sub_idx, sub_batch, retry_batch_id)
+                for batch_no, sub_idx, sub_batch, retry_batch_id in retry_sub_batches
+            }
+
+            for future in as_completed(retry_futures):
+                batch_no, sub_idx, sub_batch, retry_batch_id = retry_futures[future]
+                try:
+                    llm_result = future.result()
+                    logger.info("[Stage 3 重试] %s 成功: %s 条", retry_batch_id, len(sub_batch))
+                except Exception as exc:
+                    logger.warning("[Stage 3 重试] %s 失败，降级处理: %s", retry_batch_id, exc)
+                    llm_result = _fallback_batch_result(sub_batch, retry_batch_id)
+
+                # 子批次用小数 key（如 24.1/24.2/24.3）保证排序在主批次之后
+                sub_key = batch_no + sub_idx * 0.01
+                processed_items, kept_items, batch_record = _merge_batch_result(sub_batch, llm_result, batch_no, analysis_date)
+                processed_news.extend(processed_items)
+                enhanced.extend(kept_items)
+                batch_records[sub_key] = batch_record
+
+        retry_success = sum(1 for _, sub_idx, _, _ in retry_sub_batches if sub_idx > 0)
+        logger.info("[Stage 3 重试] 完成: %s 个子批次处理完毕", len(retry_sub_batches))
 
     enhanced.sort(
         key=lambda item: (
@@ -1579,9 +1626,9 @@ def collect_all_news(context: ExecutionContext | None = None) -> Dict[str, Any]:
         analysis_date, LLM_RULES_MODEL_ID, LLM_BATCH_MODEL_ID, LLM_SUMMARY_MODEL_ID,
     )
     logger.info(
-        "超时: rules=%ss, batch=%ss, summary=%ss | 重试=%s | 并发=%s | 批量=%s | 策略=%s | SKIP_LLM=%s",
+        "超时: rules=%ss, batch=%ss, summary=%ss | 并发=%s | 批量=%s | 策略=%s | SKIP_LLM=%s",
         LLM_RULES_TIMEOUT, LLM_BATCH_TIMEOUT, LLM_SUMMARY_TIMEOUT,
-        LLM_MAX_RETRIES, LLM_MAX_WORKERS, LLM_BATCH_SIZE, RULE_ACTIVE_STRATEGY, EFFECTIVE_SKIP_LLM,
+        LLM_MAX_WORKERS, LLM_BATCH_SIZE, RULE_ACTIVE_STRATEGY, EFFECTIVE_SKIP_LLM,
     )
     logger.info("==========================================")
 
