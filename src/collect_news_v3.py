@@ -24,6 +24,7 @@ from config import (
 from symbol_registry import build_aliases_lookup, get_symbol_type_map, get_tracked_symbols
 from cloudflare_ingest import (
     CloudflareIngestError,
+    fetch_existing_hashes,
     fetch_news as fetch_remote_news,
     initialize_review as initialize_remote_review,
     is_remote_write_configured,
@@ -37,6 +38,7 @@ from logger_utils import get_logger
 from db_utils import (
     generate_news_hash,
     get_daily_news_ai_analysis_by_date,
+    get_existing_hashes,
     get_news_by_date_range,
     initialize_archive_record,
     init_database,
@@ -1611,7 +1613,7 @@ def collect_all_news(context: ExecutionContext | None = None) -> Dict[str, Any]:
         "run_date": analysis_date,
         "started_at": now_bj,
         "status": "running",
-        "total_fetched": 0, "total_deduped": 0,
+        "total_fetched": 0, "total_deduped": 0, "prefilter_skipped": 0,
         "rule_passed": 0, "rule_filtered": 0,
         "embedding_input": 0, "embedding_passed": 0, "embedding_filtered": 0,
         "llm_input": 0, "llm_kept": 0, "llm_discarded": 0, "final_count": 0,
@@ -1643,6 +1645,24 @@ def collect_all_news(context: ExecutionContext | None = None) -> Dict[str, Any]:
         trace["total_fetched"] = len(all_news)
         trace["total_deduped"] = len(unique_news)
         logger.info("[采集] 完成: %s条 (去重后 %s条), 耗时 %.1fs", len(all_news), len(unique_news), trace["fetch_duration"])
+
+        # --- Hash 预过滤：跳过过去 24h 内已存在的新闻 ---
+        from datetime import timedelta
+        now_dt = dt.now(ZI("Asia/Shanghai"))
+        prefilter_date_to = now_dt.strftime("%Y-%m-%d %H:%M:%S")
+        prefilter_date_from = (now_dt - timedelta(hours=24)).strftime("%Y-%m-%d %H:%M:%S")
+        if context.is_local_env:
+            existing_hashes = get_existing_hashes(prefilter_date_from, prefilter_date_to)
+        else:
+            existing_hashes = fetch_existing_hashes(prefilter_date_from, prefilter_date_to)
+        if existing_hashes:
+            before_count = len(unique_news)
+            unique_news = [n for n in unique_news if n.get("news_hash") not in existing_hashes]
+            skipped = before_count - len(unique_news)
+            trace["prefilter_skipped"] = skipped
+            logger.info("[预过滤] 跳过已存在 %s 条，剩余 %s 条进入 Stage 1", skipped, len(unique_news))
+        else:
+            logger.info("[预过滤] hash 集合为空，全量 %s 条进入 Stage 1", len(unique_news))
 
         # --- Stage 1: 关键词软加分（不过滤，全量进入 Stage 2）---
         t0 = time.time()
@@ -1782,9 +1802,9 @@ def collect_all_news(context: ExecutionContext | None = None) -> Dict[str, Any]:
         raise
     finally:
         logger.info(
-            "[Trace] run_id=%s status=%s | 采集=%s→去重=%s→规则=%s→Embedding=%s→LLM=%s→最终=%s | 耗时=%.1fs",
+            "[Trace] run_id=%s status=%s | 采集=%s→去重=%s→预过滤跳过=%s→规则=%s→Embedding=%s→LLM=%s→最终=%s | 耗时=%.1fs",
             run_id[:8], trace["status"],
-            trace["total_fetched"], trace["total_deduped"], trace["rule_passed"],
+            trace["total_fetched"], trace["total_deduped"], trace["prefilter_skipped"], trace["rule_passed"],
             trace["embedding_passed"], trace["llm_kept"], trace["final_count"],
             trace.get("total_duration", 0),
         )

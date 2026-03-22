@@ -202,6 +202,22 @@ def fetch_news(date_from: str, date_to: str, limit: int = 200) -> List[Dict[str,
     return result.get("items", [])
 
 
+def fetch_existing_hashes(date_from: str, date_to: str) -> set:
+    """从 Workers API 拉取指定时间范围内已存在的 news_hash 集合，用于 pipeline 入口预过滤。
+    调用失败时记录 WARNING 并返回空集合，pipeline 不中断。
+    Args:
+        date_from: 起始时间，格式 'YYYY-MM-DD HH:MM:SS'（北京时间）
+        date_to:   结束时间，格式 'YYYY-MM-DD HH:MM:SS'（北京时间）
+    """
+    try:
+        result = _get("/api/news/hashes", {"dateFrom": date_from, "dateTo": date_to})
+        hashes = result.get("hashes", [])
+        return set(hashes)
+    except Exception as exc:
+        logger.warning("[预过滤] 拉取远端 hash 失败，降级为不过滤: %s", exc)
+        return set()
+
+
 def fetch_symbols() -> List[Dict[str, Any]]:
     """从 Workers API 拉取全部活跃标的列表"""
     result = _get("/api/symbols")

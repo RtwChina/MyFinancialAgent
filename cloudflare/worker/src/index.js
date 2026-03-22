@@ -146,6 +146,10 @@ async function handleApi(request, env, url, appEnv) {
       return json(await getPendingReviews(env, url), 200, request);
     }
 
+    if (url.pathname === "/api/news/hashes" && request.method === "GET") {
+      return json(await getNewsHashes(env, url), 200, request);
+    }
+
     if (url.pathname === "/api/news" && request.method === "GET") {
       return json(await getNewsList(env, url), 200, request);
     }
@@ -383,18 +387,19 @@ async function ingestPipelineTrace(env, body) {
   await env.DB.prepare(
     `INSERT INTO pipeline_trace
     (run_id, run_date, started_at, finished_at, status,
-     total_fetched, total_deduped,
+     total_fetched, total_deduped, prefilter_skipped,
      rule_passed, rule_filtered,
      embedding_input, embedding_passed, embedding_filtered,
      llm_input, llm_kept, llm_discarded, final_count,
      fetch_duration, rule_duration, embedding_duration, llm_duration, total_duration,
      config_snapshot, dynamic_keywords, active_strategy, star_fallback_triggered, error_message)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     ON CONFLICT(run_id) DO UPDATE SET
       finished_at = excluded.finished_at,
       status = excluded.status,
       total_fetched = excluded.total_fetched,
       total_deduped = excluded.total_deduped,
+      prefilter_skipped = excluded.prefilter_skipped,
       rule_passed = excluded.rule_passed,
       rule_filtered = excluded.rule_filtered,
       embedding_input = excluded.embedding_input,
@@ -417,7 +422,7 @@ async function ingestPipelineTrace(env, body) {
   )
     .bind(
       body.run_id, body.run_date, body.started_at, body.finished_at || null, body.status || "running",
-      body.total_fetched || 0, body.total_deduped || 0,
+      body.total_fetched || 0, body.total_deduped || 0, body.prefilter_skipped || 0,
       body.rule_passed || 0, body.rule_filtered || 0,
       body.embedding_input || 0, body.embedding_passed || 0, body.embedding_filtered || 0,
       body.llm_input || 0, body.llm_kept || 0, body.llm_discarded || 0, body.final_count || 0,
@@ -530,6 +535,30 @@ async function getPendingReviews(env, url) {
       updatedAt: row.updated_at || null,
     })),
   };
+}
+
+async function getNewsHashes(env, url) {
+  const dateFrom = url.searchParams.get("dateFrom");
+  const dateTo = url.searchParams.get("dateTo");
+
+  const clauses = [];
+  const bindings = [];
+  if (dateFrom) {
+    clauses.push("pub_date >= ?");
+    bindings.push(dateFrom);
+  }
+  if (dateTo) {
+    clauses.push("pub_date < ?");
+    bindings.push(dateTo);
+  }
+
+  const where = clauses.length > 0 ? " WHERE " + clauses.join(" AND ") : "";
+  const { results } = await env.DB.prepare(
+    `SELECT news_hash FROM news_raw_data${where}`,
+  ).bind(...bindings).all();
+
+  const hashes = results.map((r) => r.news_hash);
+  return { hashes, count: hashes.length };
 }
 
 async function getNewsList(env, url) {

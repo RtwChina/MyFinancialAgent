@@ -548,6 +548,27 @@ def upsert_tracked_symbol(data: Dict[str, Any], db_path: str = None) -> bool:
         return False
 
 
+def get_existing_hashes(date_from: str, date_to: str, db_path: str = None) -> set:
+    """从本地 SQLite 查询指定时间范围内已存在的 news_hash 集合，用于本地环境 pipeline 入口预过滤。
+    Args:
+        date_from: 起始时间，格式 'YYYY-MM-DD HH:MM:SS'（北京时间，含）
+        date_to:   结束时间，格式 'YYYY-MM-DD HH:MM:SS'（北京时间，不含）
+    """
+    try:
+        conn = get_db_connection(db_path)
+        cursor = conn.cursor()
+        cursor.execute(
+            "SELECT news_hash FROM news_raw_data WHERE pub_date >= ? AND pub_date < ?",
+            (date_from, date_to),
+        )
+        hashes = {row["news_hash"] for row in cursor.fetchall()}
+        conn.close()
+        return hashes
+    except Exception as exc:
+        logger.warning("[预过滤] 查询本地 hash 失败，降级为不过滤: %s", exc)
+        return set()
+
+
 def delete_tracked_symbol(symbol: str, db_path: str = None) -> bool:
     """软删除标的（is_active=0）"""
     try:
