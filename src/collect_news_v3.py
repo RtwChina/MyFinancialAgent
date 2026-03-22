@@ -1682,6 +1682,15 @@ def collect_all_news(context: ExecutionContext | None = None) -> Dict[str, Any]:
         trace["total_deduped"] = len(unique_news)
         logger.info("[采集] 完成: %s条 (去重后 %s条), 耗时 %.1fs", len(all_news), len(unique_news), trace["fetch_duration"])
 
+        # --- 预计算 news_hash（与 Stage 1 保持相同 normalize 逻辑，供预过滤使用）---
+        for item in unique_news:
+            if not item.get("news_hash"):
+                item["news_hash"] = generate_news_hash(
+                    _normalize_text(item.get("title") or ""),
+                    _normalize_text(item.get("content") or ""),
+                    _normalize_text(item.get("time") or item.get("pub_date") or ""),
+                )
+
         # --- Hash 预过滤：跳过过去 24h 内已存在的新闻 ---
         _use_remote = ENABLE_REMOTE_WRITE and is_remote_write_configured()
         from datetime import timedelta
