@@ -74,6 +74,27 @@ async function handleApi(request, env, url, appEnv) {
       return json(await ingestNewsAnalysis(env, body), 200, request);
     }
 
+    // ── Pipeline Trace & Filter Log ──────────────────────────
+    if (url.pathname === "/api/ingest/pipeline-trace" && request.method === "POST") {
+      requireWriteAuth(request, env, appEnv);
+      const body = await request.json();
+      return json(await ingestPipelineTrace(env, body), 200, request);
+    }
+
+    if (url.pathname === "/api/ingest/filter-logs" && request.method === "POST") {
+      requireWriteAuth(request, env, appEnv);
+      const body = await request.json();
+      return json(await ingestFilterLogs(env, body.items || []), 200, request);
+    }
+
+    if (url.pathname === "/api/pipeline-traces" && request.method === "GET") {
+      return json(await getPipelineTraces(env, url), 200, request);
+    }
+
+    if (url.pathname === "/api/filter-logs" && request.method === "GET") {
+      return json(await getFilterLogs(env, url), 200, request);
+    }
+
     // ── Symbol Management ──────────────────────────────────────
     if (url.pathname === "/api/symbols" && request.method === "GET") {
       return json(await getSymbols(env, url), 200, request);
@@ -99,6 +120,27 @@ async function handleApi(request, env, url, appEnv) {
       }
       if (request.method === "DELETE") {
         return json(await deleteSymbol(env, symbolId), 200, request);
+      }
+    }
+    // ── Screening Keywords Management ─────────────────────────
+    if (url.pathname === "/api/screening-keywords" && request.method === "GET") {
+      return json(await getScreeningKeywords(env, url), 200, request);
+    }
+    if (url.pathname === "/api/screening-keywords" && request.method === "POST") {
+      requireWriteAuth(request, env, appEnv);
+      const body = await request.json();
+      return json(await createScreeningKeyword(env, body), 200, request);
+    }
+    const kwMatch = url.pathname.match(/^\/api\/screening-keywords\/(\d+)$/);
+    if (kwMatch) {
+      const kwId = Number(kwMatch[1]);
+      if (request.method === "PUT") {
+        requireWriteAuth(request, env, appEnv);
+        return json(await updateScreeningKeyword(env, kwId, await request.json()), 200, request);
+      }
+      if (request.method === "DELETE") {
+        requireWriteAuth(request, env, appEnv);
+        return json(await deleteScreeningKeyword(env, kwId), 200, request);
       }
     }
     // ─────────────────────────────────────────────────────────
@@ -336,6 +378,133 @@ async function ingestNewsAnalysis(env, body) {
     .run();
 
   return { inserted: 1 };
+}
+
+// ── Pipeline Trace & Filter Log handlers ─────────────────────
+
+async function ingestPipelineTrace(env, body) {
+  await env.DB.prepare(
+    `INSERT INTO pipeline_trace
+    (run_id, run_date, started_at, finished_at, status,
+     total_fetched, total_deduped,
+     rule_passed, rule_filtered,
+     embedding_input, embedding_passed, embedding_filtered,
+     llm_input, llm_kept, llm_discarded, final_count,
+     fetch_duration, rule_duration, embedding_duration, llm_duration, total_duration,
+     config_snapshot, dynamic_keywords, active_strategy, star_fallback_triggered, error_message)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    ON CONFLICT(run_id) DO UPDATE SET
+      finished_at = excluded.finished_at,
+      status = excluded.status,
+      total_fetched = excluded.total_fetched,
+      total_deduped = excluded.total_deduped,
+      rule_passed = excluded.rule_passed,
+      rule_filtered = excluded.rule_filtered,
+      embedding_input = excluded.embedding_input,
+      embedding_passed = excluded.embedding_passed,
+      embedding_filtered = excluded.embedding_filtered,
+      llm_input = excluded.llm_input,
+      llm_kept = excluded.llm_kept,
+      llm_discarded = excluded.llm_discarded,
+      final_count = excluded.final_count,
+      fetch_duration = excluded.fetch_duration,
+      rule_duration = excluded.rule_duration,
+      embedding_duration = excluded.embedding_duration,
+      llm_duration = excluded.llm_duration,
+      total_duration = excluded.total_duration,
+      config_snapshot = excluded.config_snapshot,
+      dynamic_keywords = excluded.dynamic_keywords,
+      active_strategy = excluded.active_strategy,
+      star_fallback_triggered = excluded.star_fallback_triggered,
+      error_message = excluded.error_message`,
+  )
+    .bind(
+      body.run_id, body.run_date, body.started_at, body.finished_at || null, body.status || "running",
+      body.total_fetched || 0, body.total_deduped || 0,
+      body.rule_passed || 0, body.rule_filtered || 0,
+      body.embedding_input || 0, body.embedding_passed || 0, body.embedding_filtered || 0,
+      body.llm_input || 0, body.llm_kept || 0, body.llm_discarded || 0, body.final_count || 0,
+      body.fetch_duration || null, body.rule_duration || null, body.embedding_duration || null,
+      body.llm_duration || null, body.total_duration || null,
+      body.config_snapshot || null, body.dynamic_keywords || null,
+      body.active_strategy || "A", body.star_fallback_triggered || 0, body.error_message || null,
+    )
+    .run();
+
+  return { inserted: 1 };
+}
+
+async function ingestFilterLogs(env, items) {
+  let inserted = 0;
+  for (const item of items) {
+    await env.DB.prepare(
+      `INSERT INTO news_filter_log
+      (run_id, news_hash,
+       strategy_a_score, strategy_b_score, strategy_c_score,
+       active_strategy, rule_threshold,
+       macro_hits, market_hits, noise_hits, symbol_hits, focus_hits,
+       rule_decision, rule_reason,
+       embedding_similarity, embedding_matched_symbol, embedding_decision,
+       llm_keep, llm_stars, llm_type, llm_summary, llm_cot_reasoning, llm_raw_response,
+       final_decision)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    )
+      .bind(
+        item.run_id, item.news_hash,
+        item.strategy_a_score ?? null, item.strategy_b_score ?? null, item.strategy_c_score ?? null,
+        item.active_strategy || "A", item.rule_threshold ?? null,
+        item.macro_hits || null, item.market_hits || null, item.noise_hits || null,
+        item.symbol_hits || null, item.focus_hits || null,
+        item.rule_decision || null, item.rule_reason || null,
+        item.embedding_similarity ?? null, item.embedding_matched_symbol || null,
+        item.embedding_decision || null,
+        item.llm_keep ?? null, item.llm_stars ?? null, item.llm_type || null,
+        item.llm_summary || null, item.llm_cot_reasoning || null, item.llm_raw_response || null,
+        item.final_decision || null,
+      )
+      .run();
+    inserted += 1;
+  }
+  return { inserted, total: items.length };
+}
+
+async function getPipelineTraces(env, url) {
+  const date = url.searchParams.get("date");
+  const limit = Math.min(Number(url.searchParams.get("limit") || "20"), 100);
+
+  let sql = "SELECT * FROM pipeline_trace";
+  const bindings = [];
+  if (date) {
+    sql += " WHERE run_date = ?";
+    bindings.push(date);
+  }
+  sql += " ORDER BY created_at DESC LIMIT ?";
+  bindings.push(limit);
+
+  const { results } = await env.DB.prepare(sql).bind(...bindings).all();
+  return { items: results, total: results.length };
+}
+
+async function getFilterLogs(env, url) {
+  const runId = url.searchParams.get("run_id");
+  const decision = url.searchParams.get("decision");
+  const limit = Math.min(Number(url.searchParams.get("limit") || "200"), 500);
+
+  let sql = "SELECT * FROM news_filter_log WHERE 1=1";
+  const bindings = [];
+  if (runId) {
+    sql += " AND run_id = ?";
+    bindings.push(runId);
+  }
+  if (decision) {
+    sql += " AND final_decision = ?";
+    bindings.push(decision);
+  }
+  sql += " ORDER BY id DESC LIMIT ?";
+  bindings.push(limit);
+
+  const { results } = await env.DB.prepare(sql).bind(...bindings).all();
+  return { items: results, total: results.length };
 }
 
 async function getPendingReviews(env, url) {
@@ -807,9 +976,7 @@ async function saveReviewDraft(env, archiveDate, body) {
   )
     .bind(archiveDate)
     .first();
-  const reviewStatus = body.reviewStatus
-    || (existing?.review_status === "initialized" ? "draft" : existing?.review_status)
-    || "draft";
+  const reviewStatus = body.reviewStatus || existing?.review_status || "initialized";
 
   await env.DB.prepare(
     `INSERT INTO daily_review_archive (
@@ -997,6 +1164,8 @@ async function initializeReview(env, archiveDate) {
     )
       .bind(archiveDate, now)
       .run();
+  } else if (existing.review_status === "reviewed") {
+    return { ok: true, skipped: true, reason: "already reviewed" };
   } else {
     await env.DB.prepare(
       `UPDATE daily_review_archive
@@ -1329,4 +1498,64 @@ function validateSymbolBody(body) {
   if (!["index", "sector", "stock"].includes(body.symbol_type)) {
     const e = new Error("symbol_type must be index, sector, or stock"); e.statusCode = 400; throw e;
   }
+}
+
+// ── Screening Keywords CRUD ───────────────────────────────────────────────────
+
+async function getScreeningKeywords(env, url) {
+  const type = url.searchParams.get("type");
+  const active = url.searchParams.get("active");
+
+  let query = "SELECT * FROM screening_keywords WHERE 1=1";
+  const params = [];
+  if (type) { query += " AND keyword_type = ?"; params.push(type); }
+  if (active !== null && active !== "") { query += " AND is_active = ?"; params.push(Number(active)); }
+  query += " ORDER BY keyword_type, sort_order, language, keyword";
+
+  const { results } = await env.DB.prepare(query).bind(...params).all();
+  return { items: results, total: results.length };
+}
+
+async function createScreeningKeyword(env, body) {
+  const keyword = String(body.keyword || "").trim();
+  const keyword_type = String(body.keyword_type || "").trim();
+  const language = String(body.language || "zh").trim();
+
+  if (!keyword) { const e = new Error("keyword is required"); e.statusCode = 400; throw e; }
+  if (!["macro", "market", "noise", "symbol_context"].includes(keyword_type)) {
+    const e = new Error("keyword_type must be macro, market, noise, or symbol_context"); e.statusCode = 400; throw e;
+  }
+  if (!["zh", "en"].includes(language)) {
+    const e = new Error("language must be zh or en"); e.statusCode = 400; throw e;
+  }
+
+  // 检查是否重复
+  const existing = await env.DB.prepare(
+    "SELECT id FROM screening_keywords WHERE keyword = ? AND keyword_type = ?"
+  ).bind(keyword, keyword_type).first();
+  if (existing) { const e = new Error("keyword already exists for this type"); e.statusCode = 409; throw e; }
+
+  const result = await env.DB.prepare(
+    "INSERT INTO screening_keywords (keyword, keyword_type, language, is_active, sort_order) VALUES (?, ?, ?, 1, 100) RETURNING *"
+  ).bind(keyword, keyword_type, language).first();
+  return result;
+}
+
+async function updateScreeningKeyword(env, id, body) {
+  const row = await env.DB.prepare("SELECT * FROM screening_keywords WHERE id = ?").bind(id).first();
+  if (!row) { const e = new Error("keyword not found"); e.statusCode = 404; throw e; }
+
+  const is_active = body.is_active !== undefined ? Number(body.is_active) : row.is_active;
+
+  const result = await env.DB.prepare(
+    "UPDATE screening_keywords SET is_active = ?, updated_at = datetime('now') WHERE id = ? RETURNING *"
+  ).bind(is_active, id).first();
+  return result;
+}
+
+async function deleteScreeningKeyword(env, id) {
+  const row = await env.DB.prepare("SELECT id FROM screening_keywords WHERE id = ?").bind(id).first();
+  if (!row) { const e = new Error("keyword not found"); e.statusCode = 404; throw e; }
+  await env.DB.prepare("DELETE FROM screening_keywords WHERE id = ?").bind(id).run();
+  return { ok: true, deleted_id: id };
 }

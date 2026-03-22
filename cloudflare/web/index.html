@@ -24,6 +24,8 @@
               <button class="nav-chip active" data-view="reviews">复盘工作台</button>
               <button class="nav-chip" data-view="news">新闻检索</button>
               <button class="nav-chip" data-view="symbols">标的管理</button>
+              <button class="nav-chip" data-view="keywords">关键词管理</button>
+              <button class="nav-chip" data-view="readme">ReadMe</button>
             </nav>
             <div class="hero-env-inline">
               <span>当前环境</span>
@@ -123,7 +125,7 @@
                       <th>发布时间 <span class="tip-trigger"><svg viewBox="0 0 16 16"><circle cx="8" cy="8" r="7"/><line x1="8" y1="7" x2="8" y2="11.5" stroke-linecap="round"/><circle cx="8" cy="4.8" r="0.1" stroke-width="2" stroke-linecap="round"/></svg><span class="bubble">北京时间 UTC+8</span></span></th>
                       <th id="newsAiHeader">AI 摘要</th>
                       <th>正文</th>
-                      <th>标签</th>
+                      <th>标签 <span class="tip-trigger tip-rich"><svg viewBox="0 0 16 16"><circle cx="8" cy="8" r="7"/><line x1="8" y1="7" x2="8" y2="11.5" stroke-linecap="round"/><circle cx="8" cy="4.8" r="0.1" stroke-width="2" stroke-linecap="round"/></svg><span class="bubble">标签由 Stage 3 LLM 产生，参考标的管理中的别名数据；LLM 失败时，标的字段回退到 Stage 1 规则匹配结果。<br><br><strong>星级</strong>：LLM 判断新闻对持仓的潜在影响程度。5星=改变当日主线；4星=对跟踪标的有明确影响；3星=有信息增量；2星=背景补充；1星=弱相关。星级影响复盘时新闻的排序权重。<br><br><strong>类型</strong>：LLM 判断新闻影响范围。index=大盘/宏观/大宗商品；sector=板块/行业；stock=具体个股。用于复盘时按范围过滤和聚合。<br><br><strong>标的</strong>：LLM 从新闻中归因出受影响的跟踪标的，以 Stage 1 别名匹配结果为参考 hint。只保留标的管理中维护的跟踪标的；LLM 失败时回退到 Stage 1 别名匹配。标的列表决定该新闻出现在哪支股票的复盘摘要中。</span></span></th>
                       <th>操作</th>
                     </tr>
                   </thead>
@@ -218,8 +220,8 @@
                   <span class="bubble">
                     <strong>显示名称</strong>：前端展示用，显示在价格卡片、新闻列表、复盘页面。如"标普500"、"英伟达"。与代码区分：代码是系统标识，显示名称是给人看的。<br><br>
                     <strong>代码</strong>：系统唯一标识，用于数据库关联、价格采集、新闻打标。箭头后为 Yahoo 代码（调用价格API用）。前端也作为标签显示，所有页面的标的名（价格卡片、新闻列表、复盘页面）。<br><br>
-                    <strong>类型</strong>：新闻筛选权重，个股命中权重最高(3.5)直接过筛，板块次之，大盘最后。理论优先级上，个股命中直接过筛，板块需配合市场关键词，大盘需配合宏观关键词。前端按大盘/板块/个股分组展示。<br><br>
-                    <strong>新闻匹配别名</strong>：新闻采集时匹配正文关键词，从新闻正文匹配关键词，自动关联标的。如新闻出现"英伟达"或"NVIDIA"，匹配到 NVDA。
+                    <strong>类型</strong>：仅用于前端分组展示（大盘 / 板块 / 个股）。新闻的最终 type 由 Stage 3 LLM 判断，不由标的类型决定。<br><br>
+                    <strong>新闻匹配别名</strong>：新闻正文中匹配到别名时，该标的自动加入新闻的 related_symbols（如出现"英伟达"或"NVIDIA"→ 关联 NVDA），Stage 3 LLM 也会收到这个关联。别名匹配是 rule_score 中权重最高的加分项（权重 3.5），在 Stage 2 与 Embedding 相似度叠加影响保留结果。<br><br>与关键词的核心区别：别名回答"这条新闻提到了哪个标的"并产生标的绑定；关键词只影响评分，不产生绑定。两套机制独立叠加。
                   </span>
                 </span></h2>
                 <p class="toolbar-caption">智能输入股票名称或代码，AI 自动识别 Yahoo 代码、显示名称和类型。</p>
@@ -263,6 +265,91 @@
             </div>
           </section>
         </section>
+
+        <!-- ── 关键词管理 ──────────────────────────────────────────── -->
+        <section id="keywordsView" class="view">
+          <section class="panel symbols-panel">
+            <div class="panel-header">
+              <div>
+                <h2>关键词管理 <span class="tip-trigger tip-panel">
+                  <svg viewBox="0 0 16 16"><circle cx="8" cy="8" r="7"></circle><line x1="8" y1="7" x2="8" y2="11.5" stroke-linecap="round"></line><circle cx="8" cy="4.8" r="0.1" stroke-width="2" stroke-linecap="round"></circle></svg>
+                  <span class="bubble">
+                    <strong>macro（宏观）</strong>：权重 2.5，加分。命中美联储、利率、地缘、战争等宏观关键词，提升 rule_score，在 Stage 2 与 Embedding 相似度叠加，影响新闻最终是否保留。<br><br>
+                    <strong>market（市场）</strong>：权重 1.7，加分。命中财报、芯片、AI、并购等市场话题关键词，提升 rule_score。<br><br>
+                    <strong>noise（噪音）</strong>：权重 2.5，减分。命中分析师评级、目标价、传闻等噪音词，降低 rule_score，在 Stage 2 压低综合评分。<br><br>
+                    <strong>symbol_context（标的事件）</strong>：权重 1.2，加分。配合标的别名匹配使用，命中财报、监管、收购等事件词进一步提升 rule_score。<br><br>
+                    <strong>与标的别名的区别</strong>：关键词回答"这条新闻属于什么话题"，标的别名回答"这条新闻提到了哪个标的"。标的别名的权重（3.5）高于关键词，两套机制独立叠加。<br><br>
+                    基础词（系统预置）只能启用/禁用；自定义词可以删除。
+                  </span>
+                </span></h2>
+                <p class="toolbar-caption">管理 Stage 1 新闻初筛关键词，实时生效，下次 Pipeline 执行自动加载。</p>
+              </div>
+              <div class="panel-header-meta">
+                <button id="refreshKeywordsBtn" class="ghost">刷新</button>
+              </div>
+            </div>
+            <div class="keywords-add-bar">
+              <label class="search-field">
+                <span>关键词</span>
+                <input type="text" id="keywordInput" placeholder="输入关键词，如：DeepSeek、量子计算…" autocomplete="off" />
+              </label>
+              <label class="search-field">
+                <span>类型</span>
+                <select id="keywordTypeSelect">
+                  <option value="macro">宏观 (macro)</option>
+                  <option value="market" selected>市场 (market)</option>
+                  <option value="noise">噪音 (noise)</option>
+                  <option value="symbol_context">标的事件 (symbol_context)</option>
+                </select>
+              </label>
+              <label class="search-field">
+                <span>语言</span>
+                <select id="keywordLangSelect">
+                  <option value="zh" selected>中文</option>
+                  <option value="en">英文</option>
+                </select>
+              </label>
+              <div class="action-row">
+                <button id="keywordAddBtn" type="button" class="compact-button">添加</button>
+              </div>
+            </div>
+            <div class="keywords-tabs">
+              <button class="kw-tab active" data-type="macro">宏观</button>
+              <button class="kw-tab" data-type="market">市场</button>
+              <button class="kw-tab" data-type="noise">噪音</button>
+              <button class="kw-tab" data-type="symbol_context">标的事件</button>
+            </div>
+            <div id="keywordsContent" class="keywords-content">
+              <div class="symbols-table-wrap">
+                <table class="symbols-table">
+                  <thead>
+                    <tr>
+                      <th>关键词</th>
+                      <th>语言</th>
+                      <th>状态</th>
+                      <th></th>
+                    </tr>
+                  </thead>
+                  <tbody id="keywordsList"></tbody>
+                </table>
+              </div>
+            </div>
+          </section>
+        </section>
+
+        <!-- ── ReadMe ──────────────────────────────────────────────── -->
+        <section id="readmeView" class="view">
+          <section class="panel">
+            <div class="panel-header">
+              <div>
+                <h2>ReadMe</h2>
+                <p class="toolbar-caption">系统说明文档，只读。</p>
+              </div>
+            </div>
+            <div id="readmeContent" class="readme-content"></div>
+          </section>
+        </section>
+
       </main>
     </div>
 

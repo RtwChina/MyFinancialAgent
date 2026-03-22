@@ -42,6 +42,18 @@
 | SM-003  | 新闻采集多源覆盖 | 验证 AkShare 和 Finnhub 均有数据写入且字段完整 | 本地 DB 已跑 migration 009，FINNHUB_API_KEY 已配置 | 1. 运行一次新闻采集任务 2. `SELECT source, sub_source, language, COUNT(*) FROM news_raw_data GROUP BY source, sub_source, language` | 结果包含 source=akshare 的 cls/10jqka/sina/futu 四行，以及 source=finnhub 的 general/company 两行；language 列中文源为 zh，英文源为 en | P0 | 是 |
 | SM-004  | 英文新闻规则初筛命中 | 验证 Finnhub 英文新闻能通过关键词初筛而非全部被过滤 | 同 SM-003 | `SELECT COUNT(*) FROM news_raw_data WHERE source='finnhub' AND rule_passed=1` | 结果 > 0（至少有部分英文新闻通过初筛） | P1 | 否 |
 
+| SM-005  | 三策略评分正确性 | 验证 A/B/C 三种关键词评分策略均返回有效分数 | 新闻采集任务至少执行一次 | 1. 运行一次新闻采集 2. 检查 `_scoring` 字段包含 `strategy_a_score`、`strategy_b_score`、`strategy_c_score` | 三个策略分数均为数值且 ≥ 0，B 策略使用 BM25 饱和，C 策略标题加权 | P0 | 是 |
+| SM-006  | Embedding 过滤及降级 | 验证 Embedding 过滤正常工作，API 失败时自动降级 | DashScope API Key 已配置 | 1. 正常运行：检查 `_embedding.decision` 字段 2. 断开 API：验证全部新闻 decision=skipped 直接进入 Stage 3 | 正常时 decision 为 pass/filter；降级时全部 skipped 且不中断流程 | P0 | 是 |
+| SM-007  | 打星兜底触发 | 验证 ≥80% 五星时兜底机制自动触发 | LLM 返回结果中 ≥80% 为 5 星 | 检查 `star_fallback_triggered` 标记和 `llm_original_stars` 字段 | 兜底触发后星级重新分配，`llm_original_stars` 保留原始值，`pipeline_trace.star_fallback_triggered=1` | P1 | 否 |
+| SM-008  | pipeline_trace 写入 | 验证每次采集生成完整 pipeline_trace 记录 | 远程写入已配置 | 1. 运行一次采集 2. `GET /api/pipeline-traces?date=YYYY-MM-DD` | 返回记录包含 run_id、三级漏斗数据、各阶段耗时、config_snapshot | P0 | 是 |
+| SM-009  | filter_log 写入 | 验证 filter_log 记录每条新闻在各阶段的决策 | 同 SM-008 | `GET /api/filter-logs?run_id=xxx` | 返回记录包含三策略分数、embedding_similarity、llm_stars、final_decision | P0 | 是 |
+
+| SM-010  | 关键词 API 可访问 | 验证 GET /api/screening-keywords 返回全量激活词 | migration 011 已 apply，Workers 已部署 | `GET /api/screening-keywords?active=1` | 返回数组长度 ≥ 100（seed 151 条），每条含 id/keyword/keyword_type/language/is_active/sort_order | P0 | 是 |
+| SM-011  | Pipeline 从 API 加载关键词 | 验证 collect_news_v3 能从 Workers API 拉取关键词并使用 | INGEST_API_BASE_URL 已配置 | 运行 `python main.py hourly-news`（ENABLE_REMOTE_WRITE=false），检查日志 | 日志含 "[初筛] 关键词来源=API: 宏观=N词, 市场=N词..." | P0 | 是 |
+| SM-012  | Pipeline 关键词 API 降级 | 验证 API 不可达时降级到 FALLBACK_KEYWORDS 且 Pipeline 正常完成 | INGEST_API_BASE_URL 配置错误 URL | 临时设置错误 INGEST_API_BASE_URL，运行 `python main.py hourly-news`（ENABLE_REMOTE_WRITE=false） | 日志含 "[初筛] 关键词来源=FALLBACK"，Pipeline 正常完成无异常 | P0 | 是 |
+
+| SM-013  | 已复盘记录 initialize 保护 | 验证夜间任务调用 initialize 不会覆盖已完成复盘的数据 | 数据库中存在 `review_status='reviewed'` 的记录 | 1. 记录该日期的 `reviewer_news_notes` 内容 2. 调用 `POST /api/reviews/<date>/initialize` 3. 查询数据库确认字段未变更 | 接口返回 `{ ok: true, skipped: true, reason: "already reviewed" }`，数据库记录完全未变更 | P0 | 是 |
+
 ## 文档更新时机
 - 新功能进入主链路
 - 主流程步骤改变

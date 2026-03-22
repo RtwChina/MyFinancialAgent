@@ -20,7 +20,7 @@ import requests
 
 from config import (
     LLM_API_KEY, LLM_BASE_URL, LLM_BATCH_MODEL_ID, LLM_MODEL_ID, LLM_RULES_MODEL_ID, LLM_SUMMARY_MODEL_ID,
-    ENABLE_REMOTE_WRITE,
+    ENABLE_REMOTE_WRITE, INGEST_API_BASE_URL,
 )
 from symbol_registry import build_aliases_lookup, get_symbol_type_map, get_tracked_symbols
 from cloudflare_ingest import (
@@ -30,6 +30,8 @@ from cloudflare_ingest import (
     is_remote_write_configured,
     send_news,
     send_daily_news_ai_analysis,
+    send_pipeline_trace,
+    send_filter_logs,
 )
 from data_sources.news_router import fetch_all_news as fetch_source_news
 from logger_utils import get_logger
@@ -58,10 +60,10 @@ LLM_RULES_TIMEOUT = int(os.getenv("LLM_RULES_TIMEOUT", str(LLM_TIMEOUT)))
 LLM_BATCH_TIMEOUT = int(os.getenv("LLM_BATCH_TIMEOUT", str(LLM_TIMEOUT)))
 LLM_SUMMARY_TIMEOUT = int(os.getenv("LLM_SUMMARY_TIMEOUT", str(LLM_TIMEOUT)))
 LLM_MAX_RETRIES = int(os.getenv("LLM_MAX_RETRIES", "2"))  # 最大重试次数
-LLM_MAX_WORKERS = int(os.getenv("LLM_MAX_WORKERS", "2"))  # 并发数降低，避免超时
-LLM_BATCH_SIZE = max(1, int(os.getenv("LLM_BATCH_SIZE", "6")))
-LLM_CANDIDATE_LIMIT = max(1, int(os.getenv("LLM_CANDIDATE_LIMIT", "10")))
+LLM_MAX_WORKERS = int(os.getenv("LLM_MAX_WORKERS", "5"))  # 并发数（Session 连接池复用，支持高并发）
+LLM_BATCH_SIZE = max(1, int(os.getenv("LLM_BATCH_SIZE", "8")))
 LLM_RULES_SAMPLE_SIZE = max(8, int(os.getenv("LLM_RULES_SAMPLE_SIZE", "12")))
+RULE_ACTIVE_STRATEGY = os.getenv("RULE_ACTIVE_STRATEGY", "A").upper()  # A/B/C 评分策略
 SKIP_LLM = os.getenv("SKIP_LLM", "false").lower() == "true"  # 跳过 LLM 分析开关
 # 运行时实际生效的跳过标志（预留给测试或降级逻辑修改）
 EFFECTIVE_SKIP_LLM = SKIP_LLM
@@ -312,41 +314,77 @@ STOCK_TRACKED_SYMBOLS, INDEX_TRACKED_SYMBOLS, SECTOR_TRACKED_SYMBOLS = _load_sym
 EQUITY_TRACKED_SYMBOLS = STOCK_TRACKED_SYMBOLS
 MARKET_REFERENCE_SYMBOLS = INDEX_TRACKED_SYMBOLS | SECTOR_TRACKED_SYMBOLS
 
-BASE_MACRO_KEYWORDS = [
-    # 中文
-    "美联储", "利率", "降息", "加息", "通胀", "非农", "就业",
-    "关税", "制裁", "贸易", "财政刺激", "流动性", "衰退", "债务上限",
-    "战争", "冲突", "霍尔木兹", "中东", "俄乌", "伊朗", "以色列", "原油", "油价",
-    # 英文
-    "fed", "federal reserve", "interest rate", "rate cut", "rate hike",
-    "inflation", "cpi", "ppi", "nonfarm", "employment", "unemployment",
-    "tariff", "sanctions", "trade war", "fiscal", "liquidity", "recession", "debt ceiling",
-    "war", "conflict", "middle east", "iran", "israel", "crude oil", "oil price",
-]
-BASE_MARKET_KEYWORDS = [
-    # 中文
-    "标普", "纳指", "道指", "财报", "盈利", "业绩", "回购", "分红",
-    "并购", "收购", "监管", "芯片", "半导体", "人工智能", "英伟达", "微软", "谷歌",
-    # 英文
-    "s&p", "nasdaq", "dow", "earnings", "revenue", "buyback", "dividend",
-    "ipo", "merger", "acquisition", "regulation", "chip", "semiconductor",
-    "ai", "artificial intelligence", "nvidia", "microsoft", "google", "apple",
-]
-BASE_NOISE_KEYWORDS = [
-    # 中文
-    "分析师", "评级", "目标价", "看涨", "看跌", "买入评级", "卖出评级",
-    "技术面", "盘前异动", "盘后异动", "短线", "传闻",
-    # 英文
-    "analyst", "rating", "price target", "bullish", "bearish",
-    "buy rating", "sell rating", "technical analysis", "premarket", "afterhours", "rumor",
-]
-BASE_SYMBOL_CONTEXT_KEYWORDS = [
-    # 中文
-    "财报", "指引", "监管", "诉讼", "产品", "合作", "订单", "收购", "回购", "盈利",
-    # 英文
-    "earnings", "guidance", "regulation", "lawsuit", "product", "partnership",
-    "order", "acquisition", "buyback", "revenue",
-]
+# 降级词表：当 API 不可达时使用，内容与 migration 011 seed 数据一致
+FALLBACK_KEYWORDS: Dict[str, List[str]] = {
+    "macro": [
+        # 中文
+        "美联储", "利率", "降息", "加息", "通胀", "非农", "就业",
+        "关税", "制裁", "贸易", "财政刺激", "流动性", "衰退", "债务上限",
+        "战争", "冲突", "霍尔木兹", "中东", "俄乌", "伊朗", "以色列", "原油", "油价",
+        "地缘", "地缘政治", "央行", "货币政策", "国债", "美债", "收益率",
+        # 英文
+        "fed", "federal reserve", "interest rate", "rate cut", "rate hike",
+        "inflation", "cpi", "ppi", "nonfarm", "employment", "unemployment",
+        "tariff", "sanctions", "trade war", "fiscal", "liquidity", "recession", "debt ceiling",
+        "war", "conflict", "middle east", "iran", "israel", "crude oil", "oil price",
+        "geopolitical", "treasury", "yield", "monetary policy", "central bank",
+    ],
+    "market": [
+        # 中文
+        "标普", "纳指", "道指", "财报", "盈利", "业绩", "回购", "分红",
+        "并购", "收购", "监管", "芯片", "半导体", "人工智能", "英伟达", "微软", "谷歌",
+        "数据中心", "云计算", "光模块", "算力", "存储", "HBM",
+        # 英文
+        "s&p", "nasdaq", "dow", "earnings", "revenue", "buyback", "dividend",
+        "ipo", "merger", "acquisition", "regulation", "chip", "semiconductor",
+        "ai", "artificial intelligence", "nvidia", "microsoft", "google", "apple",
+        "data center", "cloud", "hbm", "memory", "optical", "capex",
+    ],
+    "noise": [
+        # 中文
+        "分析师", "评级", "目标价", "看涨", "看跌", "买入评级", "卖出评级",
+        "技术面", "盘前异动", "盘后异动", "短线", "传闻",
+        # 英文
+        "analyst", "rating", "price target", "bullish", "bearish",
+        "buy rating", "sell rating", "technical analysis", "premarket", "afterhours", "rumor",
+    ],
+    "symbol_context": [
+        # 中文
+        "财报", "指引", "监管", "诉讼", "产品", "合作", "订单", "收购", "回购", "盈利",
+        # 英文
+        "earnings", "guidance", "regulation", "lawsuit", "product", "partnership",
+        "order", "acquisition", "buyback", "revenue",
+    ],
+}
+
+
+def _fetch_keywords_from_api() -> Dict[str, List[str]] | None:
+    """从 Workers API 拉取激活状态的关键词，按 keyword_type 分组。
+
+    超时 5 秒；失败返回 None（调用方降级到 FALLBACK_KEYWORDS）。
+    """
+    if not INGEST_API_BASE_URL:
+        return None
+    try:
+        resp = requests.get(
+            f"{INGEST_API_BASE_URL}/api/screening-keywords",
+            params={"active": "1"},
+            timeout=5,
+        )
+        resp.raise_for_status()
+        records = resp.json()
+        if not isinstance(records, list):
+            return None
+        grouped: Dict[str, List[str]] = {}
+        for rec in records:
+            kw_type = rec.get("keyword_type")
+            keyword = rec.get("keyword")
+            if kw_type and keyword:
+                grouped.setdefault(kw_type, []).append(keyword)
+        return grouped if grouped else None
+    except Exception as exc:
+        logger.debug("[初筛] 关键词 API 拉取失败: %s，将降级到 FALLBACK_KEYWORDS", exc)
+        return None
 
 
 def merge_and_deduplicate(all_news: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
@@ -393,6 +431,125 @@ def _score_keyword_hits(text: str, keywords: List[str]) -> List[str]:
     return sorted({keyword for keyword in keywords if keyword.lower() in text})
 
 
+def _score_keyword_hits_split(title: str, content: str, keywords: List[str]) -> Tuple[List[str], int, int]:
+    """分别统计标题和正文的关键词命中，返回 (命中关键词列表, title_count, body_count)"""
+    title_lower = title.lower()
+    content_lower = content.lower()
+    hits = set()
+    title_count = 0
+    body_count = 0
+    for kw in keywords:
+        kw_lower = kw.lower()
+        in_title = kw_lower in title_lower
+        in_body = kw_lower in content_lower
+        if in_title or in_body:
+            hits.add(kw)
+            if in_title:
+                title_count += 1
+            if in_body:
+                body_count += 1
+    return sorted(hits), title_count, body_count
+
+
+def bm25_saturate(count: int, weight: float, k1: float = 1.2) -> float:
+    """BM25 饱和函数：抑制重复关键词的边际贡献"""
+    if count <= 0:
+        return 0.0
+    return weight * (count * (k1 + 1)) / (count + k1)
+
+
+def _compute_three_strategy_scores(
+    title: str,
+    content: str,
+    profile: Dict[str, Any],
+) -> Dict[str, Any]:
+    """并行计算三种关键词评分策略的分数，返回命中详情和三种分数。"""
+    text = f"{title}\n{content}".lower()
+    related_symbols = derive_related_symbols(f"{title}\n{content}")
+
+    # 整体命中（用于策略 A/B + 决策逻辑）
+    macro_hits = _score_keyword_hits(text, profile["macro_keywords"])
+    market_hits = _score_keyword_hits(text, profile["market_keywords"])
+    noise_hits = _score_keyword_hits(text, profile["noise_keywords"])
+    symbol_context_hits = _score_keyword_hits(text, profile["symbol_context_keywords"])
+
+    # 分拆命中（用于策略 C）
+    _, macro_title, macro_body = _score_keyword_hits_split(title, content, profile["macro_keywords"])
+    _, market_title, market_body = _score_keyword_hits_split(title, content, profile["market_keywords"])
+    _, noise_title, noise_body = _score_keyword_hits_split(title, content, profile["noise_keywords"])
+    _, sym_ctx_title, sym_ctx_body = _score_keyword_hits_split(title, content, profile["symbol_context_keywords"])
+
+    focus_hits = []
+    focus_score_a = 0.0
+    focus_score_b = 0.0
+    focus_count_c = 0
+    for topic in profile.get("focus_topics", []):
+        matched = _score_keyword_hits(text, topic.get("keywords", []))
+        if matched:
+            focus_hits.append(f"{topic['label']}({', '.join(matched[:2])})")
+            w = float(topic.get("weight", 2))
+            focus_score_a += w
+            focus_score_b += bm25_saturate(len(matched), w)
+            # 策略 C: 分拆标题/正文
+            _, ft, fb = _score_keyword_hits_split(title, content, topic.get("keywords", []))
+            effective = ft * 2 + fb if title else fb
+            focus_count_c += effective
+
+    # --- 策略 A: 线性加权（现有方案）---
+    score_a = (
+        len(macro_hits) * 2.5
+        + len(market_hits) * 1.7
+        + len(related_symbols) * 3.5
+        + len(symbol_context_hits) * 1.2
+        + focus_score_a
+    )
+    score_a -= len(noise_hits) * 2.5
+
+    # --- 策略 B: BM25 饱和 ---
+    score_b = (
+        bm25_saturate(len(macro_hits), 2.5)
+        + bm25_saturate(len(market_hits), 1.7)
+        + bm25_saturate(len(related_symbols), 3.5)
+        + bm25_saturate(len(symbol_context_hits), 1.2)
+        + focus_score_b
+    )
+    score_b -= bm25_saturate(len(noise_hits), 2.5)
+
+    # --- 策略 C: BM25 饱和 + 标题加权 ---
+    # 标题命中 ×2 + 正文命中；title 为空时 title_count=0，退化为策略 B
+    macro_eff_c = macro_title * 2 + macro_body if title else macro_body
+    market_eff_c = market_title * 2 + market_body if title else market_body
+    noise_eff_c = noise_title * 2 + noise_body if title else noise_body
+    sym_ctx_eff_c = sym_ctx_title * 2 + sym_ctx_body if title else sym_ctx_body
+
+    score_c = (
+        bm25_saturate(macro_eff_c, 2.5)
+        + bm25_saturate(market_eff_c, 1.7)
+        + bm25_saturate(len(related_symbols), 3.5)  # symbol 不区分标题/正文
+        + bm25_saturate(sym_ctx_eff_c, 1.2)
+        + bm25_saturate(focus_count_c, 2.0)
+    )
+    score_c -= bm25_saturate(noise_eff_c, 2.5)
+
+    # VIP 降权
+    if "vip" in text:
+        score_a -= 0.5
+        score_b -= 0.5
+        score_c -= 0.5
+
+    return {
+        "score_a": score_a,
+        "score_b": score_b,
+        "score_c": score_c,
+        "macro_hits": macro_hits,
+        "market_hits": market_hits,
+        "noise_hits": noise_hits,
+        "symbol_context_hits": symbol_context_hits,
+        "focus_hits": focus_hits,
+        "related_symbols": related_symbols,
+    }
+
+
 def _score_to_stars(score: float) -> int:
     """将规则打分线性映射到 0-5 星重要性等级"""
     if score >= 10:
@@ -410,10 +567,10 @@ def _score_to_stars(score: float) -> int:
 
 def _default_screening_profile() -> Dict[str, Any]:
     return {
-        "macro_keywords": BASE_MACRO_KEYWORDS,
-        "market_keywords": BASE_MARKET_KEYWORDS,
-        "noise_keywords": BASE_NOISE_KEYWORDS,
-        "symbol_context_keywords": BASE_SYMBOL_CONTEXT_KEYWORDS,
+        "macro_keywords": FALLBACK_KEYWORDS["macro"],
+        "market_keywords": FALLBACK_KEYWORDS["market"],
+        "noise_keywords": FALLBACK_KEYWORDS["noise"],
+        "symbol_context_keywords": FALLBACK_KEYWORDS["symbol_context"],
         "focus_topics": [],
         "include_rules": [
             "保留显著影响全球经济、美股大盘、能源、利率和关键科技板块的新闻",
@@ -517,7 +674,7 @@ def _normalize_screening_profile(raw_profile: Dict[str, Any] | None) -> Dict[str
     静态词表作为基础层，动态词表作为增量补充。
     """
     # 静态词表作为基础
-    static_base = _get_static_screening_base()
+    static_base = _get_screening_profile()
 
     if not isinstance(raw_profile, dict):
         # 无动态词表，仅使用静态词表
@@ -547,13 +704,30 @@ def _normalize_screening_profile(raw_profile: Dict[str, Any] | None) -> Dict[str
     return profile
 
 
-def _get_static_screening_base() -> Dict[str, Any]:
-    """返回静态基础词表（当动态词表生成失败时使用）"""
+def _get_screening_profile() -> Dict[str, Any]:
+    """获取初筛词表 profile。先尝试从 API 拉取，失败降级到 FALLBACK_KEYWORDS。"""
+    api_keywords = _fetch_keywords_from_api()
+    if api_keywords:
+        source = "API"
+        macro = api_keywords.get("macro", FALLBACK_KEYWORDS["macro"])
+        market = api_keywords.get("market", FALLBACK_KEYWORDS["market"])
+        noise = api_keywords.get("noise", FALLBACK_KEYWORDS["noise"])
+        symbol_context = api_keywords.get("symbol_context", FALLBACK_KEYWORDS["symbol_context"])
+    else:
+        source = "FALLBACK"
+        macro = list(FALLBACK_KEYWORDS["macro"])
+        market = list(FALLBACK_KEYWORDS["market"])
+        noise = list(FALLBACK_KEYWORDS["noise"])
+        symbol_context = list(FALLBACK_KEYWORDS["symbol_context"])
+    logger.info(
+        "[初筛] 关键词来源=%s: 宏观=%s词, 市场=%s词, 噪音=%s词, 标的上下文=%s词",
+        source, len(macro), len(market), len(noise), len(symbol_context),
+    )
     return {
-        "macro_keywords": list(BASE_MACRO_KEYWORDS),
-        "market_keywords": list(BASE_MARKET_KEYWORDS),
-        "noise_keywords": list(BASE_NOISE_KEYWORDS),
-        "symbol_context_keywords": list(BASE_SYMBOL_CONTEXT_KEYWORDS),
+        "macro_keywords": macro,
+        "market_keywords": market,
+        "noise_keywords": noise,
+        "symbol_context_keywords": symbol_context,
         "focus_topics": [],
         "include_rules": [
             "保留显著影响全球经济、美股大盘、能源、利率和关键科技板块的新闻",
@@ -563,13 +737,13 @@ def _get_static_screening_base() -> Dict[str, Any]:
             "丢弃分析师评级、目标价、纯情绪点评、消费民生噪音和无市场含义的碎片新闻",
         ],
         "score_threshold": 4.5,
-        "reasoning_summary": "",
+        "reasoning_summary": f"关键词来源: {source}",
     }
 
 
 def generate_dynamic_screening_profile(news_list: List[Dict[str, Any]], analysis_date: str) -> Dict[str, Any]:
     # 打印静态词表统计
-    static_base = _get_static_screening_base()
+    static_base = _get_screening_profile()
     logger.info(
         "[初筛] 静态词表: 宏观=%s词, 市场=%s词, 噪音=%s词",
         len(static_base["macro_keywords"]),
@@ -696,75 +870,48 @@ def apply_rule_filter(news: Dict[str, Any], profile: Dict[str, Any]) -> Dict[str
         return item
 
     if not pub_date or not content:
-        return _make_rejected('缺少时间或内容字段')
+        rejected = _make_rejected('缺少时间或内容字段')
+        rejected['_scoring'] = {}
+        return rejected
 
+    # 三种策略并行评分
+    scoring = _compute_three_strategy_scores(title, content, profile)
+    score_a = scoring["score_a"]
+    score_b = scoring["score_b"]
+    score_c = scoring["score_c"]
+    macro_hits = scoring["macro_hits"]
+    market_hits = scoring["market_hits"]
+    noise_hits = scoring["noise_hits"]
+    symbol_context_hits = scoring["symbol_context_hits"]
+    focus_hits = scoring["focus_hits"]
+    related_symbols = scoring["related_symbols"]
     text = f"{title}\n{content}".lower()
-    related_symbols = derive_related_symbols(f"{title}\n{content}")
-    macro_hits = _score_keyword_hits(text, profile["macro_keywords"])
-    market_hits = _score_keyword_hits(text, profile["market_keywords"])
-    noise_hits = _score_keyword_hits(text, profile["noise_keywords"])
-    symbol_context_hits = _score_keyword_hits(text, profile["symbol_context_keywords"])
 
-    focus_hits = []
-    focus_score = 0
-    for topic in profile.get("focus_topics", []):
-        matched = _score_keyword_hits(text, topic.get("keywords", []))
-        if matched:
-            focus_hits.append(f"{topic['label']}({', '.join(matched[:2])})")
-            focus_score += float(topic.get("weight", 2))
-
-    # 加权打分：跟踪标的权重最高(3.5)，宏观次之(2.5)，噪音扣分(2.5)
-    score = len(macro_hits) * 2.5 + len(market_hits) * 1.7 + len(related_symbols) * 3.5 + len(symbol_context_hits) * 1.2 + focus_score
-    score -= len(noise_hits) * 2.5
-
-    # VIP 付费内容通常含水分，轻微降权
-    if "vip" in text:
-        score -= 0.5
+    # 根据激活策略选择实际用于过滤决策的分数
+    strategy_scores = {"A": score_a, "B": score_b, "C": score_c}
+    score = strategy_scores.get(RULE_ACTIVE_STRATEGY, score_a)
 
     threshold = float(profile.get("score_threshold", 4.5))
     keep = False
-    rule_type = "index"
+    rule_type = "index"  # type 字段由 Stage 3 LLM 最终判断，此处统一默认值
     reasons = []
 
-    type_map = get_symbol_type_map()
-    stock_symbols = [s for s in related_symbols if type_map.get(s) == "stock"]
-    sector_symbols = [s for s in related_symbols if type_map.get(s) == "sector"]
-    index_symbols = [s for s in related_symbols if type_map.get(s) == "index"]
-
-    if stock_symbols:
+    if related_symbols:
         keep = True
-        rule_type = "stock"
-        reasons.append(f"涉及跟踪个股 {', '.join(stock_symbols)}")
+        reasons.append(f"涉及跟踪标的 {', '.join(related_symbols[:3])}")
         if symbol_context_hits:
             reasons.append(f"标的事件命中 {', '.join(symbol_context_hits[:3])}")
-    elif sector_symbols and (len(macro_hits) >= 1 or len(market_hits) >= 1 or focus_hits):
-        keep = True
-        rule_type = "sector"
-        reasons.append(f"涉及板块标的 {', '.join(sector_symbols[:3])}")
-        if market_hits:
-            reasons.append(f"板块关键词命中 {', '.join(market_hits[:3])}")
-    elif index_symbols and (len(macro_hits) >= 1 or len(market_hits) >= 1 or focus_hits):
-        keep = True
-        rule_type = "index"
-        reasons.append(f"涉及大盘资产 {', '.join(index_symbols[:3])}")
-        if macro_hits:
-            reasons.append(f"宏观关键词命中 {', '.join(macro_hits[:3])}")
-        if market_hits:
-            reasons.append(f"市场关键词命中 {', '.join(market_hits[:3])}")
     elif focus_hits:
         keep = True
-        rule_type = "index" if len(macro_hits) >= len(market_hits) else "sector"
         reasons.append(f"动态主题命中 {'；'.join(focus_hits[:2])}")
     elif len(macro_hits) >= 2 or score >= threshold:
         keep = True
-        rule_type = "index" if len(macro_hits) >= len(market_hits) else "sector"
         if macro_hits:
             reasons.append(f"宏观关键词命中 {', '.join(macro_hits[:3])}")
         if market_hits:
             reasons.append(f"市场关键词命中 {', '.join(market_hits[:3])}")
     elif len(market_hits) >= 2 and not noise_hits:
         keep = True
-        rule_type = "sector"
         reasons.append(f"板块/市场事件命中 {', '.join(market_hits[:3])}")
 
     # 噪音命中且没有跟踪标的、宏观关键词不足时，强制过滤，避免软性噪音通过评分门槛
@@ -788,7 +935,20 @@ def apply_rule_filter(news: Dict[str, Any], profile: Dict[str, Any]) -> Dict[str
                 parts.append("无关键词命中")
             parts.append(f"score={score:.1f} threshold={float(profile.get('score_threshold', 4.5)):.1f}")
             reason = '；'.join(parts)
-        return _make_rejected(reason)
+        rejected = _make_rejected(reason)
+        rejected['_scoring'] = {
+            "strategy_a_score": round(score_a, 2),
+            "strategy_b_score": round(score_b, 2),
+            "strategy_c_score": round(score_c, 2),
+            "active_strategy": RULE_ACTIVE_STRATEGY,
+            "rule_threshold": threshold,
+            "macro_hits": macro_hits,
+            "market_hits": market_hits,
+            "noise_hits": noise_hits,
+            "symbol_hits": related_symbols,
+            "focus_hits": focus_hits,
+        }
+        return rejected
 
     fallback_title = title or _normalize_text(content[:36]) or "未命名新闻"
     summary = news.get('summary') or fallback_title or content[:140]
@@ -817,35 +977,43 @@ def apply_rule_filter(news: Dict[str, Any], profile: Dict[str, Any]) -> Dict[str
         'reviewed_at': None,
     }
     cleaned['news_hash'] = generate_news_hash(cleaned['title'], cleaned['content'], cleaned['pub_date'])
+    cleaned['_scoring'] = {
+        "strategy_a_score": round(score_a, 2),
+        "strategy_b_score": round(score_b, 2),
+        "strategy_c_score": round(score_c, 2),
+        "active_strategy": RULE_ACTIVE_STRATEGY,
+        "rule_threshold": threshold,
+        "macro_hits": macro_hits,
+        "market_hits": market_hits,
+        "noise_hits": noise_hits,
+        "symbol_hits": related_symbols,
+        "focus_hits": focus_hits,
+    }
     return cleaned
 
 
-def filter_news_by_rules(news_list: List[Dict[str, Any]], profile: Dict[str, Any]) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]]]:
-    """对全量新闻逐条应用规则初筛，按重要性降序排序，并截断到 LLM 候选上限。
+def score_news_by_rules(news_list: List[Dict[str, Any]], profile: Dict[str, Any]) -> List[Dict[str, Any]]:
+    """对全量新闻逐条计算 rule_score（软加分），所有新闻均保留进入 Stage 2。
 
-    返回 (candidates, rejected)：
-    - candidates: 通过规则且进入 LLM 的候选新闻
-    - rejected: 未通过规则的新闻 + 通过规则但超过候选上限被截断的新闻
+    返回全量新闻列表，每条附加 _scoring.rule_score 字段。
+    不再区分 passed/rejected，Stage 2 Embedding 综合 rule_score 做最终过滤。
     """
-    passed = []
-    rejected = []
+    scored = []
     for news in news_list:
         result = apply_rule_filter(news, profile)
-        if result.get('rule_passed'):
-            passed.append(result)
-        else:
-            rejected.append(result)
-    passed.sort(key=lambda item: (item.get('importance_stars', 0), item.get('pub_date', '')), reverse=True)
-    # 防止候选过多导致 LLM token 超限，只取评分最高的前 N 条
-    if len(passed) > LLM_CANDIDATE_LIMIT:
-        logger.info("规则初筛命中过多，按分数仅保留前 %s 条进入 LLM / 正式新闻库", LLM_CANDIDATE_LIMIT)
-        capped = passed[LLM_CANDIDATE_LIMIT:]
-        for item in capped:
-            item['processing_status'] = 'rule_capped'
-        rejected.extend(capped)
-        passed = passed[:LLM_CANDIDATE_LIMIT]
-    logger.info("规则初筛后保留 %s / %s 条新闻（被过滤 %s 条）", len(passed), len(news_list), len(rejected))
-    return passed, rejected
+        # 计算 rule_score：取当前激活策略的分数，最低为 0
+        scoring = result.get("_scoring", {})
+        strategy_key = f"strategy_{RULE_ACTIVE_STRATEGY.lower()}_score"
+        rule_score = max(0.0, scoring.get(strategy_key, 0.0))
+        scoring["rule_score"] = round(rule_score, 2)
+        result["_scoring"] = scoring
+        # 软加分模式：所有新闻标记为 rule_passed=1
+        result["rule_passed"] = 1
+        result["processing_status"] = "rule_screened"
+        scored.append(result)
+    scored.sort(key=lambda item: (item.get("_scoring", {}).get("rule_score", 0), item.get("pub_date", "")), reverse=True)
+    logger.info("[Stage 1] 软加分完成: %s条新闻, 全部进入 Stage 2", len(scored))
+    return scored
 
 
 def _extract_json_payload(raw_text: str) -> Any:
@@ -914,14 +1082,28 @@ def _call_batch_llm(news_batch: List[Dict[str, Any]], batch_id: str) -> Dict[str
         ]
     }
 
+    batch_count = len(news_batch)
     messages = [
         {
             "role": "system",
             "content": (
-                "你是一位金融新闻筛选助手。"
+                "你是一位拥有20年经验的金融新闻筛选专家。"
                 "请只输出 JSON，不要输出额外解释。"
                 "你需要对输入新闻逐条判断是否值得保留进入正式新闻库。"
-                "所有 ai_summary 和 market_impact 必须使用中文。"
+                "所有 ai_summary、market_impact、cot_reasoning 必须使用中文。\n\n"
+                "## importance_stars 评分标准与锚定示例\n"
+                "评分必须严格参照以下标准和示例：\n\n"
+                "**5星（极重要，改变当日主线）**：显著改变宏观主线、大盘方向、流动性/利率预期的重大事件。\n"
+                "  示例：「美联储意外降息50基点，远超市场预期的25基点」\n\n"
+                "**4星（重要，值得重点复盘）**：对重点板块、核心资产或跟踪标的有明确且较强影响。\n"
+                "  示例：「美光科技Q3财报：营收同比增长93%，HBM出货量超预期30%」\n\n"
+                "**3星（有信息增量，纳入复盘）**：有明确市场信息增量，但不是当天最核心主线。\n"
+                "  示例：「三星电子宣布投资50亿美元扩建HBM产线，预计2027年投产」\n\n"
+                "**2星（背景补充）**：影响较弱，仅作背景补充，不建议纳入复盘主视图。\n"
+                "  示例：「摩根大通上调美光科技目标价至145美元，维持增持评级」\n\n"
+                "**1星（弱相关）**：弱相关、低信息增量，或只有轻微信号价值。\n"
+                "  示例：「某半导体公司高管减持5000股，价值约12万美元」\n\n"
+                "**0星（噪音）**：噪音、重复、无市场意义，应标记 keep=false。\n"
             ),
         },
         {
@@ -934,6 +1116,7 @@ def _call_batch_llm(news_batch: List[Dict[str, Any]], batch_id: str) -> Dict[str
                 '      "news_hash": "原样返回",\n'
                 '      "keep": true,\n'
                 '      "type": "index|sector|stock",\n'
+                '      "cot_reasoning": "重要理由: ... | 不重要理由: ... | 综合判断: ...",\n'
                 '      "ai_summary": "一句中文摘要",\n'
                 '      "market_impact": "一句中文说明市场影响",\n'
                 '      "importance_stars": 0,\n'
@@ -943,20 +1126,21 @@ def _call_batch_llm(news_batch: List[Dict[str, Any]], batch_id: str) -> Dict[str
                 "  ]\n"
                 "}\n"
                 "要求：\n"
-                "1. 如果一条新闻信息价值不够高，可以返回 keep=false，importance_stars 必须给 0。\n"
-                "2. 保留新闻时，importance_stars 必须是 1-5 的整数，5 星代表极重要。\n"
-                "3. related_symbols 必须是数组。\n"
-                "4. type 取值规则：index=影响大盘/宏观/央行/大宗商品；sector=影响某板块/行业；stock=直接影响具体个股。\n"
-                "5. importance_stars 评分标准如下：\n"
-                "   - 5星：显著改变当日宏观主线、大盘方向、流动性预期、利率预期，或核心跟踪标的交易逻辑的重大事件。\n"
-                "   - 4星：对重点板块、核心市场资产或跟踪标的有明确且较强影响，值得重点复盘。\n"
-                "   - 3星：有明确市场信息增量，值得纳入复盘，但不是当天最核心主线。\n"
-                "   - 2星：影响较弱，仅作背景补充，不建议纳入复盘主视图。\n"
-                "   - 1星：弱相关、低信息增量，或只有轻微信号价值。\n"
-                "   - 0星：噪音、重复、无市场意义，或不应保留。\n"
-                "6. 若新闻仅是分析师评级、目标价、纯情绪点评、无新增事实的二手解读，通常不应高于 2 星。\n"
-                "7. 若新闻直接影响美联储路径、利率/通胀预期、地缘风险、核心指数，或核心跟踪标的的财报、指引、订单、监管、资本开支，通常应优先考虑 3-5 星。\n"
-                "8. 只返回 JSON。\n\n"
+                "1. 对每条新闻，必须先在 cot_reasoning 中思考：\n"
+                "   - 列出2-3个该新闻重要的理由\n"
+                "   - 列出2-3个该新闻不重要的理由\n"
+                "   - 综合两方面后给出最终判断\n"
+                "2. 如果一条新闻信息价值不够高，可以返回 keep=false，importance_stars 必须给 0。\n"
+                "3. 保留新闻时，importance_stars 必须是 1-5 的整数。\n"
+                "4. related_symbols 必须是数组。\n"
+                "5. type 取值规则：index=影响大盘/宏观/央行/大宗商品；sector=影响某板块/行业；stock=直接影响具体个股。\n"
+                f"6. **分布约束**：本批共{batch_count}条新闻，你的评分必须遵循以下分布：\n"
+                f"   - 5星：最多{max(1, batch_count // 5)}条（不超过20%）\n"
+                f"   - 4-5星合计：最多{max(2, int(batch_count * 0.4))}条（不超过40%）\n"
+                "   - 如果你觉得大部分都很重要，请重新校准你的标准，参照锚定示例。\n"
+                "7. 若新闻仅是分析师评级、目标价、纯情绪点评、无新增事实的二手解读，通常不应高于 2 星。\n"
+                "8. 若新闻直接影响美联储路径、利率/通胀预期、地缘风险、核心指数，或核心跟踪标的的财报、指引、订单、监管、资本开支，通常应优先考虑 3-5 星。\n"
+                "9. 只返回 JSON。\n\n"
                 f"{json.dumps(batch_prompt, ensure_ascii=False)}"
             ),
         },
@@ -966,7 +1150,7 @@ def _call_batch_llm(news_batch: List[Dict[str, Any]], batch_id: str) -> Dict[str
         messages,
         log_label="新闻批次分析 %s" % batch_id,
         model=LLM_BATCH_MODEL_ID,
-        max_tokens=1200,
+        max_tokens=2400,
         timeout=LLM_BATCH_TIMEOUT,
     )
     if not llm_result.success:
@@ -1074,6 +1258,8 @@ def _merge_batch_result(news_batch: List[Dict[str, Any]], llm_result: Dict[str, 
         merged["ai_summary"] = _normalize_text(item_result.get("ai_summary") or news.get("summary") or news.get("title"))
         merged["market_impact"] = _normalize_text(item_result.get("market_impact") or news.get("rule_reason"))
         merged["importance_stars"] = _normalize_importance_stars(item_result.get("importance_stars"), news.get("importance_stars", 0))
+        merged["llm_original_stars"] = merged["importance_stars"]  # 保留 LLM 原始星级
+        merged["cot_reasoning"] = _normalize_text(item_result.get("cot_reasoning", ""))
         merged["primary_symbol"] = item_result.get("primary_symbol") or (related_symbols[0] if related_symbols else news.get("primary_symbol"))
         merged["related_symbols"] = related_symbols
         merged["is_relevant_to_review"] = 1 if keep else 0
@@ -1083,6 +1269,22 @@ def _merge_batch_result(news_batch: List[Dict[str, Any]], llm_result: Dict[str, 
         if keep:
             kept_items.append(merged)
 
+    # 打星兜底：如果 ≥ 80% 的保留新闻为 5 星，用规则评分重新分配
+    star_fallback_triggered = False
+    if kept_items:
+        five_star_count = sum(1 for item in kept_items if item.get("importance_stars") == 5)
+        if five_star_count / len(kept_items) >= 0.8:
+            star_fallback_triggered = True
+            logger.warning(
+                "[打星兜底] %s/%s条为5星(≥80%%)，触发规则评分重新分配",
+                five_star_count, len(kept_items),
+            )
+            for item in kept_items:
+                if item.get("importance_stars") == 5:
+                    scoring = item.get("_scoring", {})
+                    rule_score = scoring.get(f"strategy_{RULE_ACTIVE_STRATEGY.lower()}_score", 0)
+                    item["importance_stars"] = _score_to_stars(rule_score)
+
     batch_record = {
         "analysis_date": analysis_date,
         "analysis_scope": "batch",
@@ -1091,6 +1293,7 @@ def _merge_batch_result(news_batch: List[Dict[str, Any]], llm_result: Dict[str, 
         "sector_impact_map": f"保留 {len(kept_items)} 条 / 输入 {len(news_batch)} 条",
         "linkage_logic_chain": "\n".join(f"- {item['title'] or item['summary']}" for item in kept_items if item.get("type") in {"stock", "symbol"}),
         "raw_summary": llm_result.get("raw_text", ""),
+        "star_fallback_triggered": star_fallback_triggered,
     }
     return processed_items, kept_items, batch_record
 
@@ -1565,55 +1768,215 @@ def _attach_remote_news_ids(items: List[Dict[str, Any]], result: Dict[str, Any] 
 
 
 def collect_all_news(context: ExecutionContext | None = None) -> Dict[str, Any]:
-    """采集新闻 -> 动态规则初筛 -> 批量 LLM 结构化增强"""
+    """采集新闻 -> Stage 1 关键词规则 -> Stage 2 Embedding -> Stage 3 LLM 深度分析
+
+    三级漏斗架构，每个阶段的决策详情记录到 filter_log。
+    """
+    import uuid
+    from embedding_filter import filter_news_by_embedding, generate_profile_embeddings
+
     context = context or build_execution_context()
     all_news: List[Dict[str, Any]] = []
     analysis_date = get_latest_closed_trading_day(context)
+    run_id = str(uuid.uuid4())
 
-    logger.info("========== 新闻采集 v5.0 启动 ==========")
+    # --- 初始化 trace ---
+    from datetime import datetime as dt
+    from zoneinfo import ZoneInfo as ZI
+    now_bj = dt.now(ZI("Asia/Shanghai")).strftime("%Y-%m-%d %H:%M:%S")
+    trace = {
+        "run_id": run_id,
+        "run_date": analysis_date,
+        "started_at": now_bj,
+        "status": "running",
+        "total_fetched": 0, "total_deduped": 0,
+        "rule_passed": 0, "rule_filtered": 0,
+        "embedding_input": 0, "embedding_passed": 0, "embedding_filtered": 0,
+        "llm_input": 0, "llm_kept": 0, "llm_discarded": 0, "final_count": 0,
+        "fetch_duration": 0, "rule_duration": 0, "embedding_duration": 0, "llm_duration": 0,
+        "active_strategy": RULE_ACTIVE_STRATEGY,
+        "star_fallback_triggered": 0,
+        "error_message": "",
+    }
+    filter_logs: List[Dict[str, Any]] = []
+
+    logger.info("========== 新闻采集 v6.0 启动 (run_id=%s) ==========", run_id[:8])
     logger.info(
         "分析日: %s | LLM: rules=%s, batch=%s, summary=%s",
         analysis_date, LLM_RULES_MODEL_ID, LLM_BATCH_MODEL_ID, LLM_SUMMARY_MODEL_ID,
     )
     logger.info(
-        "超时: rules=%ss, batch=%ss, summary=%ss | 重试=%s | 并发=%s | 批量=%s | 候选上限=%s | SKIP_LLM=%s",
+        "超时: rules=%ss, batch=%ss, summary=%ss | 重试=%s | 并发=%s | 批量=%s | 策略=%s | SKIP_LLM=%s",
         LLM_RULES_TIMEOUT, LLM_BATCH_TIMEOUT, LLM_SUMMARY_TIMEOUT,
-        LLM_MAX_RETRIES, LLM_MAX_WORKERS, LLM_BATCH_SIZE, LLM_CANDIDATE_LIMIT, EFFECTIVE_SKIP_LLM,
+        LLM_MAX_RETRIES, LLM_MAX_WORKERS, LLM_BATCH_SIZE, RULE_ACTIVE_STRATEGY, EFFECTIVE_SKIP_LLM,
     )
     logger.info("==========================================")
 
-    # --- 采集阶段 ---
-    t0 = time.time()
-    all_news.extend(fetch_source_news(context))
-    unique_news = merge_and_deduplicate(all_news)
-    logger.info("[采集] 完成: %s条 (去重后 %s条), 耗时 %.1fs", len(all_news), len(unique_news), time.time() - t0)
+    try:
+        # --- 采集阶段 ---
+        t0 = time.time()
+        all_news.extend(fetch_source_news(context))
+        unique_news = merge_and_deduplicate(all_news)
+        trace["fetch_duration"] = round(time.time() - t0, 2)
+        trace["total_fetched"] = len(all_news)
+        trace["total_deduped"] = len(unique_news)
+        logger.info("[采集] 完成: %s条 (去重后 %s条), 耗时 %.1fs", len(all_news), len(unique_news), trace["fetch_duration"])
 
-    # --- 初筛阶段 ---
-    t0 = time.time()
-    screening_profile = generate_dynamic_screening_profile(unique_news, analysis_date)
-    logger.info(
-        "[初筛] 动态规则: 宏观词=%s, 市场词=%s, 噪音词=%s, 动态主题=%s, threshold=%s",
-        screening_profile.get("macro_keywords"),
-        screening_profile.get("market_keywords"),
-        screening_profile.get("noise_keywords"),
-        [t.get("label") for t in screening_profile.get("focus_topics", [])],
-        screening_profile.get("score_threshold"),
-    )
-    filtered_news, rejected_news = filter_news_by_rules(unique_news, screening_profile)
-    logger.info("[初筛] 完成: 保留 %s/%s条, 被过滤 %s条, 耗时 %.1fs", len(filtered_news), len(unique_news), len(rejected_news), time.time() - t0)
+        # --- Stage 1: 关键词软加分（不过滤，全量进入 Stage 2）---
+        t0 = time.time()
+        screening_profile = _get_screening_profile()
+        scored_news = score_news_by_rules(unique_news, screening_profile)
+        trace["rule_duration"] = round(time.time() - t0, 2)
+        trace["rule_passed"] = len(scored_news)  # 全量
+        trace["rule_filtered"] = 0
+        logger.info("[Stage 1] 软加分: %s条全部进入 Stage 2, 耗时 %.1fs", len(scored_news), trace["rule_duration"])
 
-    # --- 批次分析阶段 ---
-    t0 = time.time()
-    processed_news, final_news, batch_analysis_records = enhance_news_with_llm(filtered_news, analysis_date)
-    logger.info("[批次分析] 完成: 保留 %s条, 耗时 %.1fs", len(final_news), time.time() - t0)
+        # 构建 filter_log: 所有新闻（软加分模式下全量）
+        for news in scored_news:
+            scoring = news.get("_scoring", {})
+            log_entry = {
+                "run_id": run_id,
+                "news_hash": news.get("news_hash", ""),
+                "strategy_a_score": scoring.get("strategy_a_score"),
+                "strategy_b_score": scoring.get("strategy_b_score"),
+                "strategy_c_score": scoring.get("strategy_c_score"),
+                "active_strategy": scoring.get("active_strategy", RULE_ACTIVE_STRATEGY),
+                "rule_threshold": scoring.get("rule_threshold"),
+                "macro_hits": json.dumps(scoring.get("macro_hits", []), ensure_ascii=False),
+                "market_hits": json.dumps(scoring.get("market_hits", []), ensure_ascii=False),
+                "noise_hits": json.dumps(scoring.get("noise_hits", []), ensure_ascii=False),
+                "symbol_hits": json.dumps(scoring.get("symbol_hits", []), ensure_ascii=False),
+                "focus_hits": json.dumps(scoring.get("focus_hits", []), ensure_ascii=False),
+                "rule_score": scoring.get("rule_score", 0),
+                "rule_decision": "pass",
+                "rule_reason": news.get("rule_reason", ""),
+                "final_decision": None,
+            }
+            filter_logs.append(log_entry)
+
+        # filter_log 按 news_hash 索引方便后续更新
+        log_by_hash = {log["news_hash"]: log for log in filter_logs}
+
+        # --- Stage 2: Embedding 语义过滤（综合 rule_score 加分）---
+        t0 = time.time()
+        embedding_input = scored_news
+        trace["embedding_input"] = len(embedding_input)
+
+        profile_embeddings = generate_profile_embeddings()
+        if profile_embeddings:
+            embedding_passed, embedding_filtered = filter_news_by_embedding(embedding_input, profile_embeddings)
+        else:
+            logger.warning("[Stage 2] Profile 向量生成失败，跳过 Embedding 阶段")
+            embedding_passed = embedding_input
+            embedding_filtered = []
+            for news in embedding_input:
+                news["_embedding"] = {"similarity": None, "matched_symbol": None, "decision": "skipped"}
+
+        trace["embedding_duration"] = round(time.time() - t0, 2)
+        trace["embedding_passed"] = len(embedding_passed)
+        trace["embedding_filtered"] = len(embedding_filtered)
+        logger.info("[Stage 2] Embedding: 保留 %s/%s条, 耗时 %.1fs", len(embedding_passed), len(embedding_input), trace["embedding_duration"])
+
+        # 更新 filter_log: Embedding 阶段
+        for news in embedding_passed + embedding_filtered:
+            emb = news.get("_embedding", {})
+            log_entry = log_by_hash.get(news.get("news_hash"))
+            if log_entry:
+                log_entry["embedding_similarity"] = emb.get("similarity")
+                log_entry["embedding_matched_symbol"] = emb.get("matched_symbol")
+                log_entry["embedding_decision"] = emb.get("decision", "skipped")
+                if emb.get("decision") == "filter":
+                    log_entry["final_decision"] = "embedding_filtered"
+
+        # 被 Embedding 过滤的新闻标记
+        rejected_news = []
+        for news in embedding_filtered:
+            news["processing_status"] = "embedding_filtered"
+        rejected_news.extend(embedding_filtered)
+        # Stage 1 不再产生 rejected，rejected 仅来自 Embedding + LLM
+
+        # --- Stage 3: LLM 深度分析 ---
+        t0 = time.time()
+        llm_input = embedding_passed
+        trace["llm_input"] = len(llm_input)
+        processed_news, final_news, batch_analysis_records = enhance_news_with_llm(llm_input, analysis_date)
+        trace["llm_duration"] = round(time.time() - t0, 2)
+        trace["llm_kept"] = len(final_news)
+        trace["llm_discarded"] = len(processed_news) - len(final_news)
+        trace["final_count"] = len(final_news)
+
+        # 检查是否触发了打星兜底
+        star_fallback = any(rec.get("star_fallback_triggered") for rec in batch_analysis_records)
+        trace["star_fallback_triggered"] = 1 if star_fallback else 0
+
+        logger.info("[Stage 3] LLM: 保留 %s/%s条, 耗时 %.1fs", len(final_news), len(llm_input), trace["llm_duration"])
+
+        # 更新 filter_log: LLM 阶段
+        for news in processed_news:
+            log_entry = log_by_hash.get(news.get("news_hash"))
+            if log_entry:
+                log_entry["llm_keep"] = 1 if news.get("processing_status") == "llm_processed" else 0
+                log_entry["llm_stars"] = news.get("importance_stars")
+                log_entry["llm_type"] = news.get("type")
+                log_entry["llm_summary"] = news.get("ai_summary", "")
+                log_entry["llm_cot_reasoning"] = news.get("cot_reasoning", "")
+                log_entry["llm_raw_response"] = ""  # batch 级别的 raw 在 batch_record 中
+                if news.get("processing_status") == "llm_discarded":
+                    log_entry["final_decision"] = "llm_discarded"
+                elif news.get("processing_status") == "llm_processed":
+                    log_entry["final_decision"] = "kept"
+
+        trace["status"] = "completed"
+        trace["finished_at"] = dt.now(ZI("Asia/Shanghai")).strftime("%Y-%m-%d %H:%M:%S")
+        total_start = dt.strptime(trace["started_at"], "%Y-%m-%d %H:%M:%S")
+        total_end = dt.strptime(trace["finished_at"], "%Y-%m-%d %H:%M:%S")
+        trace["total_duration"] = round((total_end - total_start).total_seconds(), 2)
+
+        # 配置快照
+        trace["config_snapshot"] = json.dumps({
+            "LLM_BATCH_SIZE": LLM_BATCH_SIZE,
+            "LLM_MAX_WORKERS": LLM_MAX_WORKERS,
+            "LLM_BATCH_MODEL_ID": LLM_BATCH_MODEL_ID,
+            "LLM_RULES_MODEL_ID": LLM_RULES_MODEL_ID,
+            "RULE_ACTIVE_STRATEGY": RULE_ACTIVE_STRATEGY,
+            "EMBEDDING_SIMILARITY_THRESHOLD": float(os.getenv("EMBEDDING_SIMILARITY_THRESHOLD", "0.3")),
+            "score_threshold": screening_profile.get("score_threshold"),
+        }, ensure_ascii=False)
+
+        # 动态关键词快照
+        trace["dynamic_keywords"] = json.dumps({
+            "macro_keywords": screening_profile.get("macro_keywords", []),
+            "market_keywords": screening_profile.get("market_keywords", []),
+            "noise_keywords": screening_profile.get("noise_keywords", []),
+            "focus_topics": [],
+        }, ensure_ascii=False)
+
+    except Exception as exc:
+        trace["status"] = "failed"
+        trace["error_message"] = str(exc)[:500]
+        from datetime import datetime as dt2
+        from zoneinfo import ZoneInfo as ZI2
+        trace["finished_at"] = dt2.now(ZI2("Asia/Shanghai")).strftime("%Y-%m-%d %H:%M:%S")
+        raise
+    finally:
+        logger.info(
+            "[Trace] run_id=%s status=%s | 采集=%s→去重=%s→规则=%s→Embedding=%s→LLM=%s→最终=%s | 耗时=%.1fs",
+            run_id[:8], trace["status"],
+            trace["total_fetched"], trace["total_deduped"], trace["rule_passed"],
+            trace["embedding_passed"], trace["llm_kept"], trace["final_count"],
+            trace.get("total_duration", 0),
+        )
+
     return {
         "analysis_date": analysis_date,
         "screening_profile": screening_profile,
-        "screened_news": filtered_news,
+        "screened_news": scored_news,
         "rejected_news": rejected_news,
         "processed_news": processed_news,
         "final_news": final_news,
         "batch_analysis_records": batch_analysis_records,
+        "pipeline_trace": trace,
+        "filter_logs": filter_logs,
     }
 
 
@@ -1636,6 +1999,9 @@ def run_news_pipeline(
     screened_news: List[Dict[str, Any]] = []
     rejected_news: List[Dict[str, Any]] = []
 
+    pipeline_trace = None
+    filter_logs_data = []
+
     if collect_fresh_news:
         collected = collect_all_news(context)
         news_list = collected["final_news"]
@@ -1644,6 +2010,8 @@ def run_news_pipeline(
         rejected_news = collected.get("rejected_news", [])
         analysis_date = collected["analysis_date"]
         batch_analysis_records = collected["batch_analysis_records"]
+        pipeline_trace = collected.get("pipeline_trace")
+        filter_logs_data = collected.get("filter_logs", [])
 
     use_remote = ENABLE_REMOTE_WRITE and is_remote_write_configured()
 
@@ -1665,6 +2033,18 @@ def run_news_pipeline(
             inserted_count = screened_stats["inserted"] + processed_stats["inserted"]
             updated_count = screened_stats["updated"] + processed_stats["updated"]
         logger.info("[写入D1] 完成: 新增 %s, 更新 %s, 耗时 %.1fs", inserted_count, updated_count, time.time() - t0)
+
+    # --- 写入 pipeline_trace 和 filter_logs ---
+    if collect_fresh_news and use_remote and pipeline_trace:
+        try:
+            send_pipeline_trace(pipeline_trace)
+        except Exception as exc:
+            logger.warning("[Trace] pipeline_trace 写入失败（不影响主流程）: %s", exc)
+        if filter_logs_data:
+            try:
+                send_filter_logs(filter_logs_data)
+            except Exception as exc:
+                logger.warning("[Trace] filter_logs 写入失败（不影响主流程）: %s", exc)
 
     # 被过滤新闻写本地 SQLite（仅用于复盘，不推送 remote）
     if collect_fresh_news and rejected_news:

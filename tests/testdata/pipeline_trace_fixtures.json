@@ -1,0 +1,86 @@
+{
+  "mock_news_batch": [
+    {
+      "title": "Micron Technology Reports Record Revenue in Q2",
+      "content": "Micron Technology (MU) reported record revenue driven by HBM demand in data centers. The company raised guidance for next quarter.",
+      "source": "finnhub",
+      "sub_source": "company",
+      "language": "en",
+      "pub_date": "2026-03-20 10:00:00",
+      "news_hash": "test_hash_001"
+    },
+    {
+      "title": "美联储维持利率不变 市场波动加剧",
+      "content": "美联储宣布维持基准利率在当前水平不变，会后声明释放偏鸽派信号。标普500指数尾盘拉升，VIX恐慌指数回落。",
+      "source": "akshare",
+      "sub_source": "cls",
+      "language": "zh",
+      "pub_date": "2026-03-20 08:30:00",
+      "news_hash": "test_hash_002"
+    },
+    {
+      "title": "油价小幅上涨 OPEC+维持减产",
+      "content": "WTI原油期货收涨0.8%，OPEC+会议决定维持当前减产规模至下季度。",
+      "source": "akshare",
+      "sub_source": "10jqka",
+      "language": "zh",
+      "pub_date": "2026-03-20 09:00:00",
+      "news_hash": "test_hash_003"
+    },
+    {
+      "title": "",
+      "content": "某明星离婚后首次公开亮相，引发网友热议",
+      "source": "akshare",
+      "sub_source": "sina",
+      "language": "zh",
+      "pub_date": "2026-03-20 07:00:00",
+      "news_hash": "test_hash_004"
+    },
+    {
+      "title": "Google Announces New AI Model Gemini 3.0",
+      "content": "Alphabet's Google unveiled Gemini 3.0, the next generation AI model with improved reasoning and multimodal capabilities. The model is expected to be integrated across Google products.",
+      "source": "finnhub",
+      "sub_source": "general",
+      "language": "en",
+      "pub_date": "2026-03-20 11:00:00",
+      "news_hash": "test_hash_005"
+    }
+  ],
+  "mock_embedding_vectors": {
+    "MU_profile": [0.1, 0.2, 0.3, 0.4, 0.5],
+    "GOOGL_profile": [0.5, 0.4, 0.3, 0.2, 0.1],
+    "news_001": [0.12, 0.22, 0.28, 0.38, 0.48],
+    "news_002": [0.3, 0.3, 0.3, 0.3, 0.3],
+    "news_003": [0.05, 0.05, 0.05, 0.05, 0.05],
+    "news_004": [0.01, 0.01, 0.01, 0.01, 0.01],
+    "news_005": [0.48, 0.38, 0.32, 0.22, 0.12]
+  },
+  "mock_llm_response": {
+    "results": [
+      {
+        "news_hash": "test_hash_001",
+        "keep": true,
+        "stars": 5,
+        "type": "earnings",
+        "summary": "美光科技创纪录营收，HBM 需求推动",
+        "cot_reasoning": "美光是跟踪标的，营收创纪录直接影响股价，HBM需求是半导体核心主题。重要性高。"
+      },
+      {
+        "news_hash": "test_hash_002",
+        "keep": true,
+        "stars": 4,
+        "type": "macro",
+        "summary": "美联储维持利率，偏鸽信号",
+        "cot_reasoning": "美联储决议影响全市场走向，偏鸽信号对科技股正面。但不是直接标的相关。"
+      },
+      {
+        "news_hash": "test_hash_005",
+        "keep": true,
+        "stars": 4,
+        "type": "product",
+        "summary": "Google 发布 Gemini 3.0",
+        "cot_reasoning": "Google是跟踪标的GOOGL，新AI模型发布是重要产品里程碑。"
+      }
+    ]
+  }
+}

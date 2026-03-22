@@ -1,0 +1,18 @@
+{
+  "keywords": [
+    { "id": 1, "keyword": "美联储", "keyword_type": "macro", "language": "zh", "is_active": true, "sort_order": 0 },
+    { "id": 2, "keyword": "利率", "keyword_type": "macro", "language": "zh", "is_active": true, "sort_order": 0 },
+    { "id": 3, "keyword": "通胀", "keyword_type": "macro", "language": "zh", "is_active": true, "sort_order": 0 },
+    { "id": 4, "keyword": "Fed", "keyword_type": "macro", "language": "en", "is_active": true, "sort_order": 0 },
+    { "id": 5, "keyword": "芯片", "keyword_type": "market", "language": "zh", "is_active": true, "sort_order": 0 },
+    { "id": 6, "keyword": "AI", "keyword_type": "market", "language": "en", "is_active": true, "sort_order": 0 },
+    { "id": 7, "keyword": "半导体", "keyword_type": "market", "language": "zh", "is_active": true, "sort_order": 0 },
+    { "id": 8, "keyword": "分析师", "keyword_type": "noise", "language": "zh", "is_active": true, "sort_order": 0 },
+    { "id": 9, "keyword": "评级", "keyword_type": "noise", "language": "zh", "is_active": true, "sort_order": 0 },
+    { "id": 10, "keyword": "target price", "keyword_type": "noise", "language": "en", "is_active": true, "sort_order": 0 },
+    { "id": 11, "keyword": "财报", "keyword_type": "symbol_context", "language": "zh", "is_active": true, "sort_order": 0 },
+    { "id": 12, "keyword": "earnings", "keyword_type": "symbol_context", "language": "en", "is_active": true, "sort_order": 0 },
+    { "id": 101, "keyword": "DeepSeek", "keyword_type": "market", "language": "en", "is_active": true, "sort_order": 100 },
+    { "id": 102, "keyword": "量子计算", "keyword_type": "market", "language": "zh", "is_active": true, "sort_order": 100 }
+  ]
+}

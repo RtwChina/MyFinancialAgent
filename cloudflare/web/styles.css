@@ -876,8 +876,9 @@ textarea {
   white-space: nowrap;
   border-radius: 8px;
   box-shadow: 0 4px 16px rgba(0,0,0,0.12), 0 0 0 1px rgba(0,0,0,0.04);
-  pointer-events: auto;
+  pointer-events: none;
   opacity: 0;
+  visibility: hidden;
   transition: all 0.2s cubic-bezier(0.215, 0.61, 0.355, 1);
   z-index: 10;
 }
@@ -895,11 +896,60 @@ textarea {
 
 .tip-trigger:hover .bubble {
   opacity: 1;
+  visibility: visible;
+  pointer-events: auto;
   transform: translateX(-50%) translateY(0);
 }
 
 .tip-trigger .bubble:hover {
   opacity: 1;
+  visibility: visible;
+  pointer-events: auto;
+}
+
+/* 多行富文本 tooltip，向下弹出，右对齐 */
+/* transparent bridge below icon — same width/alignment as bubble — keeps trigger
+   hovered while mouse moves diagonally across the 10px gap into the bubble */
+.tip-trigger.tip-rich::before {
+  content: "";
+  position: absolute;
+  top: 100%;
+  right: 0;
+  width: 300px;
+  height: 12px;
+  background: transparent;
+}
+
+/* JS-managed hover class replaces :hover for rich tooltips */
+.tip-trigger.tip-rich.tip-active .bubble {
+  opacity: 1;
+  visibility: visible;
+  pointer-events: auto;
+  transform: translateX(0) translateY(0);
+}
+
+.tip-trigger.tip-rich .bubble {
+  left: auto;
+  right: 0;
+  transform: translateX(0) translateY(-4px);
+  min-width: 300px;
+  max-width: 360px;
+  white-space: normal;
+  text-align: left;
+  line-height: 1.6;
+  max-height: 240px;
+  overflow-y: auto;
+}
+
+.tip-trigger.tip-rich .bubble::after {
+  left: auto;
+  right: 12px;
+  transform: none;
+}
+
+
+.tip-trigger.tip-rich:hover .bubble {
+  transform: translateX(0) translateY(0);
 }
 
 /* 面板标题 tooltip 样式 */
@@ -925,8 +975,21 @@ textarea {
   transform: none;
 }
 
+/* bridge: matches top offset — keeps hover chain connected across the 8px gap */
+.tip-trigger.tip-panel .bubble::before {
+  content: "";
+  position: absolute;
+  bottom: 100%;
+  left: 0;
+  width: 100%;
+  height: 12px;
+  background: transparent;
+}
+
 .tip-trigger.tip-panel:hover .bubble {
   transform: none;
+  visibility: visible;
+  pointer-events: auto;
 }
 
 .tip-trigger.tip-panel .bubble strong {
@@ -3036,3 +3099,107 @@ details[open] > .price-section-head::before {
   margin: 0 2px;
   opacity: 0.5;
 }
+
+/* ── Keywords Management ─────────────────────────────────── */
+.keywords-add-bar {
+  display: flex;
+  gap: 12px;
+  align-items: flex-end;
+  margin-bottom: 16px;
+  flex-wrap: wrap;
+}
+
+.keywords-add-bar .search-field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 0.8rem;
+  color: var(--muted);
+}
+
+.keywords-add-bar .search-field input,
+.keywords-add-bar .search-field select {
+  padding: 6px 10px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--surface);
+  color: var(--text);
+  font-size: 0.875rem;
+  min-width: 160px;
+  min-height: 36px;
+}
+
+.keywords-tabs {
+  display: flex;
+  gap: 6px;
+  padding: 0 16px 12px;
+  border-bottom: 1px solid var(--border);
+}
+
+.kw-tab {
+  padding: 7px 18px;
+  border-radius: 8px;
+  font-size: 0.88rem;
+  font-weight: 600;
+  background: rgba(255, 255, 255, 0.72);
+  border: 1px solid var(--line);
+  color: var(--text);
+  cursor: pointer;
+  transition: all 0.15s;
+}
+
+.kw-tab:hover {
+  background: rgba(255, 255, 255, 0.92);
+}
+
+.kw-tab.active {
+  background: linear-gradient(180deg, rgba(37, 99, 235, 0.18), rgba(37, 99, 235, 0.07));
+  border-color: rgba(37, 99, 235, 0.28);
+  color: var(--accent);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.76), 0 8px 20px rgba(37, 99, 235, 0.08);
+}
+
+.keywords-content {
+  padding: 8px 16px 16px;
+}
+
+.kw-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  cursor: pointer;
+  font-size: 0.8rem;
+  color: var(--muted);
+  user-select: none;
+}
+
+.kw-toggle input[type="checkbox"] {
+  width: 14px;
+  height: 14px;
+  cursor: pointer;
+  accent-color: var(--accent);
+}
+
+.kw-inactive td {
+  opacity: 0.45;
+}
+
+/* ── ReadMe ──────────────────────────────────────────────── */
+.readme-content {
+  padding: 16px 24px 32px;
+  max-width: 860px;
+  line-height: 1.75;
+  color: var(--text);
+}
+
+.readme-content h1 { font-size: 1.4rem; margin: 24px 0 8px; }
+.readme-content h2 { font-size: 1.15rem; margin: 20px 0 6px; border-bottom: 1px solid var(--border); padding-bottom: 4px; }
+.readme-content h3 { font-size: 1rem; margin: 16px 0 4px; }
+.readme-content p { margin: 6px 0 10px; }
+.readme-content pre { background: rgba(15,23,42,0.05); border-radius: 6px; padding: 12px 14px; font-size: 0.8rem; overflow-x: auto; white-space: pre; line-height: 1.5; }
+.readme-content code { font-family: monospace; font-size: 0.85em; background: rgba(15,23,42,0.06); padding: 1px 4px; border-radius: 3px; }
+.readme-content pre code { background: none; padding: 0; }
+.readme-content hr { border: none; border-top: 1px solid var(--border); margin: 20px 0; }
+.readme-content ul, .readme-content ol { margin: 6px 0 10px 20px; }
+.readme-content li { margin: 3px 0; }
+.readme-content strong { font-weight: 600; }

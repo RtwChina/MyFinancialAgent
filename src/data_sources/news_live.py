@@ -15,6 +15,9 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 
+import requests as _requests
+from requests.adapters import HTTPAdapter as _HTTPAdapter
+
 import akshare as ak
 import finnhub
 
@@ -22,6 +25,12 @@ from config import FINNHUB_API_KEY
 from logger_utils import get_logger
 from runtime.context import ExecutionContext
 from symbol_registry import get_tracked_symbols
+
+# 模块级共享 Session，Finnhub 并发查询时复用 TCP 连接池
+_finnhub_session = _requests.Session()
+_finnhub_adapter = _HTTPAdapter(pool_connections=10, pool_maxsize=10)
+_finnhub_session.mount("https://", _finnhub_adapter)
+_finnhub_session.mount("http://", _finnhub_adapter)
 
 
 logger = get_logger("news_live")
@@ -207,8 +216,39 @@ def _get_finnhub_symbols() -> list[str]:
     return result
 
 
+def _fetch_single_company_news(client: finnhub.Client, symbol: str, date_from: str, date_to: str) -> list[dict]:
+    """查询单个标的的 Finnhub 公司新闻，含 429 重试。"""
+    max_retries = 2
+    for attempt in range(max_retries + 1):
+        try:
+            items = client.company_news(symbol, _from=date_from, to=date_to)
+            news_list = []
+            for item in items[:10]:
+                ts = item.get("datetime", 0)
+                news_list.append({
+                    "time": _unix_to_beijing(ts) if ts else "",
+                    "title": str(item.get("headline", "") or "").strip(),
+                    "content": str(item.get("summary", "") or item.get("headline", "") or "").strip(),
+                    "url": str(item.get("url", "") or "").strip(),
+                    "source": "finnhub",
+                    "sub_source": "company",
+                    "language": "en",
+                })
+            logger.debug("[Finnhub] %s: %s 条", symbol, len(news_list))
+            return news_list
+        except Exception as exc:
+            err_str = str(exc)
+            if "429" in err_str and attempt < max_retries:
+                logger.warning("[Finnhub] %s 触发 429，%ss 后重试 (%s/%s)", symbol, 1, attempt + 1, max_retries)
+                time.sleep(1)
+                continue
+            logger.error("[Finnhub] %s 查询失败: %s", symbol, exc)
+            return []
+    return []
+
+
 def fetch_finnhub_company(context: ExecutionContext) -> list[dict]:
-    """Finnhub 个股/ETF 公司新闻 — 逐个 symbol 串行查询，限频 0.5s 间隔。"""
+    """Finnhub 个股/ETF 公司新闻 — 并发查询（ThreadPoolExecutor）。"""
     client = _get_finnhub_client()
     if client is None:
         return []
@@ -222,29 +262,20 @@ def fetch_finnhub_company(context: ExecutionContext) -> list[dict]:
     date_to = now.strftime("%Y-%m-%d")
     date_from = (now - timedelta(days=3)).strftime("%Y-%m-%d")
 
-    logger.info("[Finnhub] 开始查询 %s 个标的的公司新闻 (%s ~ %s)", len(symbols), date_from, date_to)
+    logger.info("[Finnhub] 开始并发查询 %s 个标的的公司新闻 (%s ~ %s)", len(symbols), date_from, date_to)
     all_news: list[dict] = []
 
-    for symbol in symbols:
-        try:
-            items = client.company_news(symbol, _from=date_from, to=date_to)
-            count = 0
-            for item in items[:10]:
-                ts = item.get("datetime", 0)
-                all_news.append({
-                    "time": _unix_to_beijing(ts) if ts else "",
-                    "title": str(item.get("headline", "") or "").strip(),
-                    "content": str(item.get("summary", "") or item.get("headline", "") or "").strip(),
-                    "url": str(item.get("url", "") or "").strip(),
-                    "source": "finnhub",
-                    "sub_source": "company",
-                    "language": "en",
-                })
-                count += 1
-            logger.debug("[Finnhub] %s: %s 条", symbol, count)
-        except Exception as exc:
-            logger.error("[Finnhub] %s 查询失败: %s", symbol, exc)
-        time.sleep(0.5)
+    with ThreadPoolExecutor(max_workers=5) as executor:
+        futures = {
+            executor.submit(_fetch_single_company_news, client, sym, date_from, date_to): sym
+            for sym in symbols
+        }
+        for future in as_completed(futures):
+            sym = futures[future]
+            try:
+                all_news.extend(future.result())
+            except Exception as exc:
+                logger.error("[Finnhub] %s 并发查询异常: %s", sym, exc)
 
     logger.info("[Finnhub] 公司新闻合计: %s 条", len(all_news))
     return all_news
@@ -253,10 +284,10 @@ def fetch_finnhub_company(context: ExecutionContext) -> list[dict]:
 # ─── 编排 ──────────────────────────────────────────────────────────────────────
 
 def fetch_all_news_live(context: ExecutionContext) -> list[dict]:
-    """AkShare 4 源 + Finnhub general 并发，Finnhub company 串行（限频）。"""
+    """AkShare 4 源 + Finnhub general + Finnhub company 全部并发。"""
     all_news: list[dict] = []
 
-    # 并发：AkShare 4 源 + Finnhub general
+    # 并发：AkShare 4 源 + Finnhub general + Finnhub company
     concurrent_tasks = {
         "akshare_cls": fetch_akshare_cls,
         "akshare_ths": fetch_akshare_ths,
@@ -264,19 +295,15 @@ def fetch_all_news_live(context: ExecutionContext) -> list[dict]:
         "akshare_futu": fetch_akshare_futu,
         "finnhub_general": fetch_finnhub_general,
     }
-    with ThreadPoolExecutor(max_workers=5) as executor:
+    # Finnhub company 需要 context 参数，单独提交
+    with ThreadPoolExecutor(max_workers=6) as executor:
         futures = {executor.submit(fn): name for name, fn in concurrent_tasks.items()}
+        futures[executor.submit(fetch_finnhub_company, context)] = "finnhub_company"
         for future in as_completed(futures):
             name = futures[future]
             try:
                 all_news.extend(future.result())
             except Exception as exc:
                 logger.error("%s 采集失败: %s", name, exc)
-
-    # 串行：Finnhub company（限频，每次 0.5s 间隔）
-    try:
-        all_news.extend(fetch_finnhub_company(context))
-    except Exception as exc:
-        logger.error("finnhub_company 采集失败: %s", exc)
 
     return all_news

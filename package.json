@@ -4,7 +4,10 @@
   "private": true,
   "type": "module",
   "scripts": {
+    "sync:readme": "node scripts/sync-readme.mjs",
+    "predev": "npm run sync:readme",
     "dev": "wrangler dev cloudflare/worker/src/index.js --config wrangler.toml",
+    "predeploy": "npm run sync:readme",
     "deploy": "wrangler deploy --config wrangler.toml",
     "check:worker": "node --check cloudflare/worker/src/index.js",
     "check:web": "node --check cloudflare/web/app.js"

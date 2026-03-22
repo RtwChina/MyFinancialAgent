@@ -1,0 +1,13 @@
+{
+  "symbols": [
+    { "id": 1, "symbol": "GSPC", "yahoo_symbol": "^GSPC", "display_name": "标普500", "symbol_type": "index", "aliases": ["S&P 500", "SP500", "标普500", "标普", "SPX"], "is_active": true, "sort_order": 1 },
+    { "id": 2, "symbol": "VIX", "yahoo_symbol": "^VIX", "display_name": "恐慌指数", "symbol_type": "index", "aliases": ["VIX", "恐慌指数", "波动率"], "is_active": true, "sort_order": 2 },
+    { "id": 3, "symbol": "HSI", "yahoo_symbol": "^HSI", "display_name": "恒生指数", "symbol_type": "index", "aliases": ["HSI", "恒指", "恒生"], "is_active": true, "sort_order": 3 },
+    { "id": 4, "symbol": "SOXX", "yahoo_symbol": "SOXX", "display_name": "半导体板块", "symbol_type": "sector", "aliases": ["SOXX", "半导体", "芯片ETF"], "is_active": true, "sort_order": 1 },
+    { "id": 5, "symbol": "XLK", "yahoo_symbol": "XLK", "display_name": "科技板块", "symbol_type": "sector", "aliases": ["XLK", "科技ETF"], "is_active": true, "sort_order": 2 },
+    { "id": 6, "symbol": "MU", "yahoo_symbol": "MU", "display_name": "美光科技", "symbol_type": "stock", "aliases": ["MU", "Micron", "美光"], "is_active": true, "sort_order": 1 },
+    { "id": 7, "symbol": "MSFT", "yahoo_symbol": "MSFT", "display_name": "微软", "symbol_type": "stock", "aliases": ["MSFT", "Microsoft", "微软"], "is_active": true, "sort_order": 2 },
+    { "id": 8, "symbol": "GOOGL", "yahoo_symbol": "GOOGL", "display_name": "谷歌", "symbol_type": "stock", "aliases": ["GOOGL", "Google", "谷歌"], "is_active": true, "sort_order": 3 },
+    { "id": 9, "symbol": "LITE", "yahoo_symbol": "LITE", "display_name": "Lumentum", "symbol_type": "stock", "aliases": ["LITE", "Lumentum"], "is_active": true, "sort_order": 4 }
+  ]
+}

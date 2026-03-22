@@ -55,6 +55,9 @@ const state = {
   homepageInsightSections: [],
   symbolsLoaded: false,
   symbolResolveResult: null,
+  keywordsLoaded: false,
+  activeKeywordType: "macro",
+  readmeLoaded: false,
   newsPage: 1,
   newsPageSize: 20,
   reviewsPage: 1,
@@ -156,6 +159,8 @@ const AI_BADGE_ICON = `
 const newsView = document.querySelector("#newsView");
 const reviewsView = document.querySelector("#reviewsView");
 const symbolsView = document.querySelector("#symbolsView");
+const keywordsView = document.querySelector("#keywordsView");
+const readmeView = document.querySelector("#readmeView");
 const navButtons = document.querySelectorAll(".nav-chip");
 const heroEnvironmentText = document.querySelector("#heroEnvironmentText");
 const dailyInsightCategory = document.querySelector("#dailyInsightCategory");
@@ -263,40 +268,10 @@ saveDraftBtn.addEventListener("click", async () => {
   await saveReview();
 });
 
-initializeBtn.addEventListener("click", async () => {
-  if (!state.activeDate) return;
-  if (state.reviewStatus === "reviewed") {
-    state.editMode = !state.editMode;
-    applyEditMode(state.editMode);
-    return;
-  }
-  if (!window.confirm(`确认要把 ${state.activeDate} 重新初始化吗？这会清空当前复盘内容。`)) return;
-  if (!window.confirm("请再次确认：初始化后将清空新闻汇总、操作计划和复盘结论。")) return;
-  await fetchJson(`/api/reviews/${state.activeDate}/initialize`, {
-    method: "POST",
-  });
-  setReviewStatus("initialized");
-  setReviewMode("initialized");
-  if (state.activeBootstrap?.draft) {
-    state.activeBootstrap.draft = {
-      ...state.activeBootstrap.draft,
-      review_status: "initialized",
-      reviewer_news_notes: "",
-      market_sentiment: "",
-      sector_rotation: "",
-      asset_plan: "",
-      trading_summary: "",
-    };
-  }
-  applyFormValues({
-    reviewerNewsNotes: buildDefaultNewsBrief(state.activeBootstrap?.analysis, state.activeBootstrap?.news),
-    marketSentiment: "",
-    sectorRotation: "",
-    assetPlan: "",
-    tradingSummary: "",
-  });
-  renderNewsPicker(state.activeBootstrap?.news || []);
-  await loadReviews();
+initializeBtn.addEventListener("click", () => {
+  if (!state.activeDate || state.reviewStatus !== "reviewed") return;
+  state.editMode = !state.editMode;
+  applyEditMode(state.editMode);
 });
 
 prevStepBtn.addEventListener("click", () => moveReviewStep(-1));
@@ -334,8 +309,23 @@ switchView("reviews");
 loadHeroEnvironment();
 decorateAiHeaders();
 initializeHomepageInsights();
+initRichTooltips();
 loadNewsList();
 loadReviews();
+
+function initRichTooltips() {
+  document.querySelectorAll(".tip-trigger.tip-rich").forEach((trigger) => {
+    const bubble = trigger.querySelector(".bubble");
+    if (!bubble) return;
+    let hideTimer = null;
+    const show = () => { clearTimeout(hideTimer); trigger.classList.add("tip-active"); };
+    const hide = (delay = 150) => { hideTimer = setTimeout(() => trigger.classList.remove("tip-active"), delay); };
+    trigger.addEventListener("mouseenter", show);
+    trigger.addEventListener("mouseleave", () => hide(300));
+    bubble.addEventListener("mouseenter", show);
+    bubble.addEventListener("mouseleave", () => hide(0));
+  });
+}
 
 function switchView(view) {
   state.activeView = view;
@@ -343,7 +333,11 @@ function switchView(view) {
   newsView.classList.toggle("active", view === "news");
   reviewsView.classList.toggle("active", view === "reviews");
   if (symbolsView) symbolsView.classList.toggle("active", view === "symbols");
+  if (keywordsView) keywordsView.classList.toggle("active", view === "keywords");
+  if (readmeView) readmeView.classList.toggle("active", view === "readme");
   if (view === "symbols" && !state.symbolsLoaded) loadSymbols();
+  if (view === "keywords" && !state.keywordsLoaded) loadKeywords();
+  if (view === "readme" && !state.readmeLoaded) renderReadme();
 }
 
 async function loadHeroEnvironment() {
@@ -1333,8 +1327,8 @@ function setReviewMode(status) {
     initializeBtn.textContent = state.editMode ? "退出编辑" : "编辑";
     initializeBtn.disabled = false;
   } else {
-    initializeBtn.textContent = status === "initialized" ? "已初始化" : "重新初始化";
-    initializeBtn.disabled = status === "initialized";
+    initializeBtn.textContent = "已初始化";
+    initializeBtn.disabled = true;
   }
   nextStepBtn.textContent = status === "reviewed"
     ? "已复盘"
@@ -2080,4 +2074,158 @@ async function confirmAddSymbol() {
 
 function symbolTypeLabel(type) {
   return { index: "大盘/指数", sector: "板块/ETF", stock: "个股" }[type] || type || "未知";
+}
+
+// ── Keywords Management ───────────────────────────────────────────────────────
+
+const keywordInput = document.querySelector("#keywordInput");
+const keywordTypeSelect = document.querySelector("#keywordTypeSelect");
+const keywordLangSelect = document.querySelector("#keywordLangSelect");
+const keywordAddBtn = document.querySelector("#keywordAddBtn");
+const keywordsListEl = document.querySelector("#keywordsList");
+const refreshKeywordsBtn = document.querySelector("#refreshKeywordsBtn");
+
+document.querySelectorAll(".kw-tab").forEach((tab) => {
+  tab.addEventListener("click", () => {
+    document.querySelectorAll(".kw-tab").forEach((t) => t.classList.remove("active"));
+    tab.classList.add("active");
+    state.activeKeywordType = tab.dataset.type;
+    renderKeywordsList();
+  });
+});
+
+if (refreshKeywordsBtn) {
+  refreshKeywordsBtn.addEventListener("click", () => {
+    state.keywordsLoaded = false;
+    loadKeywords();
+  });
+}
+
+if (keywordAddBtn) {
+  keywordAddBtn.addEventListener("click", addKeyword);
+}
+
+let _keywordsData = [];
+
+async function loadKeywords() {
+  try {
+    const data = await fetchJson("/api/screening-keywords");
+    _keywordsData = data.items || [];
+    state.keywordsLoaded = true;
+    renderKeywordsList();
+  } catch (err) {
+    if (keywordsListEl) keywordsListEl.innerHTML = `<tr><td colspan="4" class="muted" style="padding:12px">加载失败: ${err.message}</td></tr>`;
+  }
+}
+
+function renderKeywordsList() {
+  if (!keywordsListEl) return;
+  const filtered = _keywordsData.filter((k) => k.keyword_type === state.activeKeywordType);
+  if (!filtered.length) {
+    keywordsListEl.innerHTML = `<tr><td colspan="4" class="muted" style="padding:12px 0">暂无关键词</td></tr>`;
+    return;
+  }
+  keywordsListEl.innerHTML = filtered.map((kw) => `
+    <tr class="${kw.is_active ? "" : "kw-inactive"}">
+      <td>${escapeHtml(kw.keyword)}</td>
+      <td class="muted">${kw.language === "zh" ? "中文" : "英文"}</td>
+      <td>
+        <label class="kw-toggle">
+          <input type="checkbox" ${kw.is_active ? "checked" : ""} data-kw-id="${kw.id}" data-action="toggle" />
+          ${kw.is_active ? "启用" : "禁用"}
+        </label>
+      </td>
+      <td>
+        ${kw.sort_order >= 100 ? `<button class="ghost" style="font-size:0.75rem;padding:2px 8px" data-kw-id="${kw.id}" data-action="delete">删除</button>` : ""}
+      </td>
+    </tr>
+  `).join("");
+
+  keywordsListEl.querySelectorAll("[data-action]").forEach((el) => {
+    el.addEventListener("change", handleKeywordToggle);
+    el.addEventListener("click", handleKeywordDelete);
+  });
+}
+
+async function handleKeywordToggle(e) {
+  if (e.target.dataset.action !== "toggle") return;
+  const id = Number(e.target.dataset.kwId);
+  const is_active = e.target.checked ? 1 : 0;
+  try {
+    await fetchJson(`/api/screening-keywords/${id}`, {
+      method: "PUT",
+      auth: true,
+      authReason: "关键词状态更新",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ is_active }),
+    });
+    const kw = _keywordsData.find((k) => k.id === id);
+    if (kw) { kw.is_active = is_active; kw.updated_at = new Date().toISOString(); }
+    renderKeywordsList();
+  } catch (err) {
+    alert(`更新失败: ${err.message}`);
+  }
+}
+
+async function handleKeywordDelete(e) {
+  if (e.target.dataset.action !== "delete") return;
+  const id = Number(e.target.dataset.kwId);
+  if (!confirm("确认删除此关键词？")) return;
+  try {
+    await fetchJson(`/api/screening-keywords/${id}`, {
+      method: "DELETE",
+      auth: true,
+      authReason: "关键词删除",
+    });
+    _keywordsData = _keywordsData.filter((k) => k.id !== id);
+    renderKeywordsList();
+  } catch (err) {
+    alert(`删除失败: ${err.message}`);
+  }
+}
+
+async function addKeyword() {
+  const keyword = keywordInput?.value.trim();
+  if (!keyword) { alert("请输入关键词"); return; }
+  const keyword_type = keywordTypeSelect?.value || "market";
+  const language = keywordLangSelect?.value || "zh";
+  try {
+    const created = await fetchJson("/api/screening-keywords", {
+      method: "POST",
+      auth: true,
+      authReason: "添加关键词",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ keyword, keyword_type, language }),
+    });
+    _keywordsData.push(created);
+    if (keywordInput) keywordInput.value = "";
+    // 自动切换到新词所在 tab
+    state.activeKeywordType = keyword_type;
+    document.querySelectorAll(".kw-tab").forEach((t) => t.classList.toggle("active", t.dataset.type === keyword_type));
+    renderKeywordsList();
+  } catch (err) {
+    alert(`添加失败: ${err.message}`);
+  }
+}
+
+// ── ReadMe ────────────────────────────────────────────────────────────────────
+
+const README_ASSET_PATH = "/readme.md";
+const README_LOADING_HTML = '<p class="muted">正在加载 README...</p>';
+const README_ERROR_HTML = '<p class="muted">README 加载失败。请先运行 `npm run sync:readme`，然后重新刷新页面。</p>';
+
+async function renderReadme() {
+  const el = document.querySelector("#readmeContent");
+  if (!el) return;
+  el.innerHTML = README_LOADING_HTML;
+  try {
+    const response = await fetch(README_ASSET_PATH, { cache: "no-store" });
+    if (!response.ok) throw new Error(`Failed to load README: ${response.status}`);
+    const markdown = await response.text();
+    el.innerHTML = snarkdown(markdown);
+    state.readmeLoaded = true;
+  } catch (error) {
+    console.error("README load failed", error);
+    el.innerHTML = README_ERROR_HTML;
+  }
 }

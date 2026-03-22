@@ -155,12 +155,36 @@ def send_daily_news_ai_analysis(analysis: Dict[str, Any]) -> Optional[Dict[str, 
     return result
 
 
+FILTER_LOG_BATCH_SIZE = 20
+
+
+def send_pipeline_trace(trace: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    """写入 pipeline_trace 记录"""
+    if not trace:
+        return None
+    result = _post("/api/ingest/pipeline-trace", trace)
+    logger.info("Cloudflare pipeline_trace 写入完成: run_id=%s", trace.get("run_id", "")[:8])
+    return result
+
+
+def send_filter_logs(logs: List[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
+    """批量写入 filter_log 记录（每 20 条一批）"""
+    if not logs:
+        return None
+    result = _send_in_batches("/api/ingest/filter-logs", logs, FILTER_LOG_BATCH_SIZE)
+    logger.info("Cloudflare filter_log 写入完成: %s条", len(logs))
+    return result
+
+
 def initialize_review(archive_date: str) -> Optional[Dict[str, Any]]:
     if not archive_date:
         return None
 
     result = _post("/api/reviews/%s/initialize" % archive_date, {})
-    logger.info("Cloudflare 初始化复盘记录完成: %s", result)
+    if result and result.get("skipped"):
+        logger.warning("Cloudflare 跳过初始化复盘记录（已完成复盘）: %s reason=%s", archive_date, result.get("reason"))
+    else:
+        logger.info("Cloudflare 初始化复盘记录完成: %s", result)
     return result
 
 

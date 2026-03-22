@@ -114,6 +114,16 @@ class LLMClient:
         self.timeout = timeout
         self.max_retries = max_retries
         self.logger = logger
+        # 复用 TCP 连接池，避免多线程并发时频繁建连导致断连
+        from requests.adapters import HTTPAdapter
+        self._session = requests.Session()
+        adapter = HTTPAdapter(pool_connections=10, pool_maxsize=10)
+        self._session.mount("https://", adapter)
+        self._session.mount("http://", adapter)
+        self._session.headers.update({
+            "Authorization": f"Bearer {self.api_key}",
+            "Content-Type": "application/json",
+        })
         # 按模型累计调用统计
         self._stats: Dict[str, Dict[str, float]] = defaultdict(
             lambda: {"call_count": 0, "total_prompt_chars": 0, "total_response_chars": 0, "total_elapsed": 0.0}
@@ -211,12 +221,8 @@ class LLMClient:
                         system_chars + user_chars,
                     )
 
-                response = requests.post(
+                response = self._session.post(
                     url,
-                    headers={
-                        "Authorization": f"Bearer {self.api_key}",
-                        "Content-Type": "application/json",
-                    },
                     json=payload,
                     timeout=request_timeout,
                     stream=stream,
