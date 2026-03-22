@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import os
 import time
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 
@@ -18,6 +20,8 @@ logger = get_logger("price_live")
 # 拉取单只标的时的最大重试次数及每次重试的基础等待秒数
 PRICE_FETCH_RETRIES = 3
 PRICE_FETCH_RETRY_DELAY = 1.0
+# 并发拉取标的价格的最大线程数
+PRICE_MAX_WORKERS = int(os.getenv("PRICE_MAX_WORKERS", "8"))
 
 # 交易所收盘时间映射：yahoo_symbol 后缀 → (时区, 收盘小时, 收盘分钟)
 # 未匹配到后缀时默认使用美股（ET 16:00）
@@ -109,11 +113,6 @@ def fetch_stock_data_live(symbol_record: dict, context: ExecutionContext) -> dic
             k_date = trading_date.strftime("%Y-%m-%d")
 
             stock_name = display_name
-            try:
-                info = ticker.info
-                stock_name = info.get("shortName", info.get("longName", display_name))
-            except Exception as exc:
-                logger.warning("获取 %s 信息失败，使用默认名称: %s", yahoo_code, exc)
 
             # 优先用前一日收盘价计算涨跌幅；若只有一根 K 线则退而以开盘价估算
             change_percent = None
@@ -151,26 +150,44 @@ def fetch_stock_data_live(symbol_record: dict, context: ExecutionContext) -> dic
     return None
 
 
-def fetch_all_prices_live(context: ExecutionContext) -> list[dict]:
-    """Fetch current prices for all tracked symbols from yfinance."""
-    tracked = get_tracked_symbols()
-    all_data: list[dict] = []
-    logger.info("========== 价格采集: %s 个标的 ==========", len(tracked))
+def _make_placeholder(sym_record: dict, context: ExecutionContext) -> dict:
+    """采集失败时的占位记录，保证下游能感知到该标的本次无数据。"""
+    return {
+        "k_date": None,
+        "stock_name": sym_record.get("display_name"),
+        "symbol": sym_record["symbol"],
+        "yahoo_symbol": sym_record.get("yahoo_symbol"),
+        "current_price": None,
+        "change_percent": None,
+        "volume": None,
+        "captured_at": context.clock.now().strftime("%Y-%m-%d %H:%M:%S"),
+    }
 
-    for sym_record in tracked:
-        data = fetch_stock_data_live(sym_record, context)
-        if data:
-            all_data.append(data)
-        else:
-            # 采集失败时仍插入占位记录，保证下游能感知到该标的本次无数据
-            all_data.append({
-                "k_date": None,
-                "stock_name": sym_record.get("display_name"),
-                "symbol": sym_record["symbol"],
-                "yahoo_symbol": sym_record.get("yahoo_symbol"),
-                "current_price": None,
-                "change_percent": None,
-                "volume": None,
-                "captured_at": context.clock.now().strftime("%Y-%m-%d %H:%M:%S"),
-            })
-    return all_data
+
+def fetch_all_prices_live(context: ExecutionContext) -> list[dict]:
+    """Fetch current prices for all tracked symbols from yfinance (concurrent)."""
+    tracked = get_tracked_symbols()
+    logger.info(
+        "========== 价格采集: %s 个标的, %s 并发 ==========",
+        len(tracked), PRICE_MAX_WORKERS,
+    )
+
+    # 用 dict 保持与 tracked 列表相同的顺序
+    results: dict[str, dict] = {}
+
+    with ThreadPoolExecutor(max_workers=PRICE_MAX_WORKERS) as executor:
+        future_to_record = {
+            executor.submit(fetch_stock_data_live, rec, context): rec
+            for rec in tracked
+        }
+        for future in as_completed(future_to_record):
+            rec = future_to_record[future]
+            try:
+                data = future.result()
+                results[rec["symbol"]] = data if data else _make_placeholder(rec, context)
+            except Exception as exc:
+                logger.error("并发采集 %s 异常: %s", rec["symbol"], exc)
+                results[rec["symbol"]] = _make_placeholder(rec, context)
+
+    # 按 tracked 原始顺序输出
+    return [results[rec["symbol"]] for rec in tracked]
