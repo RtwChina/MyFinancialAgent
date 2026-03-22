@@ -45,7 +45,7 @@ def init_database(db_path: str = None):
     cursor = conn.cursor()
 
     # 读取 schema.sql
-    schema_path = os.path.join(os.path.dirname(__file__), 'schema.sql')
+    schema_path = os.path.join(os.path.dirname(__file__), '..', 'tests', 'schema.sql')
     with open(schema_path, 'r', encoding='utf-8') as f:
         schema_sql = f.read()
 
