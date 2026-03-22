@@ -32,7 +32,7 @@ def run_price_collector(context: ExecutionContext | None = None):
             remote_result = send_prices(prices_list)
             inserted_count = remote_result.get('inserted', 0)
             logger.info("Cloudflare 价格数据库写入: 新增 %s 条", inserted_count)
-        else:
+        elif context.is_local_env:
             init_database()
             inserted_count = batch_insert_prices(prices_list)
             logger.info("价格数据库写入: 新增 %s 条", inserted_count)

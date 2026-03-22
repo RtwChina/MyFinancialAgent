@@ -26,6 +26,7 @@ jobs:
 
       - name: 运行新闻采集
         env:
+          APP_ENV: "prod"
           # LLM API
           LLM_API_KEY: ${{ secrets.LLM_API_KEY }}
           LLM_BASE_URL: ${{ secrets.LLM_BASE_URL }}

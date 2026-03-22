@@ -66,7 +66,7 @@ def main():
                 inserted_count,
                 remote_result.get('ignored', 0),
             )
-        else:
+        elif context.is_local_env:
             init_database()
             inserted_count = batch_insert_prices(prices_list)
             logger.info("数据库写入完成: 新增 %s 条, 跳过重复 %s 条", inserted_count, len(prices_list) - inserted_count)

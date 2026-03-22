@@ -27,6 +27,7 @@ jobs:
 
       - name: 运行价格采集
         env:
+          APP_ENV: "prod"
           LLM_API_KEY: ${{ secrets.LLM_API_KEY }}
           LLM_BASE_URL: ${{ secrets.LLM_BASE_URL }}
           LLM_MODEL_ID: "qwen3.5-plus"

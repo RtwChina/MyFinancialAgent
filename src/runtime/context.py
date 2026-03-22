@@ -40,6 +40,11 @@ class ExecutionContext:
     clock: Clock
 
     @property
+    def is_local_env(self) -> bool:
+        """test 和 local 均视为本地环境，prod 不执行本地专属操作。"""
+        return self.app_env in ("local", "test")
+
+    @property
     def is_weekly_integration(self) -> bool:
         return self.test_mode == "integration_weekly"
 

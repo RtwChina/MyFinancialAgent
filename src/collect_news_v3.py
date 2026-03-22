@@ -12,7 +12,6 @@ from datetime import datetime
 from zoneinfo import ZoneInfo
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Any, Dict, List, Tuple
-import yfinance as yf
 import pandas as pd
 import pandas_market_calendars as mcal
 import pytz
@@ -50,10 +49,6 @@ from runtime.context import ExecutionContext, build_execution_context
 
 logger = get_logger("collect_news_v3")
 
-HEADERS = {
-    "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-}
-
 # ========== 可配置参数 ==========
 LLM_TIMEOUT = int(os.getenv("LLM_TIMEOUT", "300"))  # LLM 超时时间(秒)
 LLM_RULES_TIMEOUT = int(os.getenv("LLM_RULES_TIMEOUT", str(LLM_TIMEOUT)))
@@ -76,228 +71,6 @@ llm_client = LLMClient(
     max_retries=LLM_MAX_RETRIES,
     logger=logger,
 )
-
-
-# ========== 数据源1: 新浪财经 ==========
-def fetch_sina_finance() -> list:
-    """抓取新浪财经快讯（不筛选时间，全部采集）"""
-    url = "https://feed.sina.com.cn/api/roll/get"
-    params = {
-        'pageid': '153',
-        'lid': '2509',
-        'k': '',
-        'num': 50,
-        'page': 1,
-    }
-    try:
-        logger.info("正在抓取新浪财经...")
-        resp = requests.get(url, headers=HEADERS, params=params, timeout=15)
-        resp.raise_for_status()
-
-        data = resp.json()
-        result = data.get('result', {}).get('data', [])
-
-        news_list = []
-        for item in result:
-            timestamp = item.get('ctime', 0)
-            if isinstance(timestamp, str):
-                timestamp = int(timestamp)
-            pub_time = datetime.fromtimestamp(timestamp)
-
-            news_list.append({
-                'time': pub_time.strftime('%Y-%m-%d %H:%M:%S'),
-                'title': item.get('title', ''),
-                'content': item.get('intro', '') or item.get('title', ''),
-                'url': item.get('url', ''),
-                'source': 'sina',
-            })
-
-        logger.info("新浪财经: %s 条", len(news_list))
-        return news_list
-
-    except Exception as e:
-        logger.error("[采集] 新浪财经请求失败: %s", e)
-        return []
-
-
-# ========== 数据源2: 财联社 ==========
-def fetch_cls_cn() -> list:
-    """抓取财联社电报（不筛选时间，全部采集）"""
-    url = "https://www.cls.cn/telegraph"
-    try:
-        logger.info("正在抓取财联社...")
-        resp = requests.get(url, headers=HEADERS, timeout=15)
-        resp.raise_for_status()
-
-        # 财联社以 Next.js 服务端渲染方式将数据内嵌在 <script type="application/json"> 标签中
-        pattern = r'<script[^>]*type="application/json"[^>]*>(.+?)</script>'
-        match = re.search(pattern, resp.text, re.DOTALL)
-
-        if not match:
-            return []
-
-        # 从页面 Redux 初始状态中提取电报列表
-        data = json.loads(match.group(1))
-        telegraph_list = data.get('props', {}).get('initialState', {}).get('telegraph', {}).get('telegraphList', [])
-
-        news_list = []
-        for item in telegraph_list:
-            pub_time = datetime.fromtimestamp(item.get('ctime', 0)) if item.get('ctime') else None
-
-            news_list.append({
-                'time': pub_time.strftime('%Y-%m-%d %H:%M:%S') if pub_time else '',
-                'title': item.get('title', ''),
-                'content': item.get('content', '')[:500],
-                'source': 'cls_cn',
-            })
-
-        logger.info("财联社: %s 条", len(news_list))
-        return news_list
-
-    except Exception as e:
-        logger.error("[采集] 财联社请求失败: %s", e)
-        return []
-
-
-# ========== 数据源3: 金十数据 ==========
-def fetch_jin10() -> list:
-    """抓取金十数据快讯（不筛选时间，全部采集）"""
-    from bs4 import BeautifulSoup
-
-    url = "https://www.jin10.com/"
-    try:
-        logger.info("正在抓取金十数据...")
-        resp = requests.get(url, headers=HEADERS, timeout=15)
-        resp.raise_for_status()
-        resp.encoding = 'utf-8'
-
-        soup = BeautifulSoup(resp.text, 'html.parser')
-        # 金十快讯条目的 DOM id 以 "flash" 开头，通过此特征定位所有快讯块
-        flash_items = soup.find_all(id=lambda x: x and x.startswith('flash'))
-
-        news_list = []
-        for item in flash_items:
-            try:
-                # 提取时间
-                time_elem = item.select_one('.jin-flash_time, [class*="time"]')
-                pub_time_str = time_elem.get_text(strip=True) if time_elem else ''
-
-                # 解析时间 (格式 HH:MM:SS，需要加上日期)
-                pub_time = None
-                if pub_time_str and len(pub_time_str) == 8:
-                    today = datetime.now()
-                    pub_time = datetime.strptime(f"{today.strftime('%Y-%m-%d')} {pub_time_str}", '%Y-%m-%d %H:%M:%S')
-
-                # 提取内容
-                text = item.get_text(strip=True)
-                content_elem = item.select_one('.jin-flash_content, [class*="content"]')
-                content = content_elem.get_text(strip=True) if content_elem else text.replace(pub_time_str, '').strip()
-                content = content.replace('分享收藏详情复制', '').strip()
-
-                is_vip = bool(item.select_one('.vip, [class*="vip"], .lock')) or 'VIP' in text
-
-                if content and len(content) > 10:
-                    news_list.append({
-                        'time': pub_time.strftime('%Y-%m-%d %H:%M:%S') if pub_time else pub_time_str,
-                        'title': '',
-                        'content': content[:500],
-                        'source': 'jin10',
-                        'is_vip': is_vip,
-                    })
-            except:
-                continue
-
-        # 去重
-        seen = set()
-        unique_list = []
-        for item in news_list:
-            key = item['content'][:50]
-            if key not in seen:
-                seen.add(key)
-                unique_list.append(item)
-
-        logger.info("金十数据: %s 条", len(unique_list))
-        return unique_list
-
-    except Exception as e:
-        logger.error("[采集] 金十数据请求失败: %s", e)
-        return []
-
-
-# ========== 数据源4: Yahoo财经美股首页 ==========
-def fetch_yahoo_finance_news() -> list:
-    """抓取Yahoo财经美股首页新闻（不筛选时间，全部采集）"""
-    url = "https://finance.yahoo.com/"
-    try:
-        logger.info("正在抓取Yahoo财经...")
-        resp = requests.get(url, headers=HEADERS, timeout=15)
-        resp.raise_for_status()
-
-        soup = __import__('bs4').BeautifulSoup(resp.text, 'html.parser')
-
-        news_list = []
-
-        # 方法1: 查找新闻链接
-        news_links = soup.select('a[href*="/news/"], a[href*="news.yahoo.com"]')
-
-        for link in news_links[:30]:
-            title = link.get_text(strip=True)
-            href = link.get('href', '')
-
-            if title and len(title) > 10 and 'news' in href.lower():
-                news_list.append({
-                    'time': '',
-                    'title': title,
-                    'content': title,
-                    'url': href if href.startswith('http') else f"https://finance.yahoo.com{href}",
-                    'source': 'yahoo_finance',
-                })
-
-        # 方法2: 通过 yfinance 的 S&P 500 Ticker 补充结构化新闻（含摘要、URL 等元数据）
-        try:
-            sp500 = yf.Ticker('^GSPC')
-            yahoo_news = sp500.news
-
-            if yahoo_news:
-                for item in yahoo_news[:20]:
-                    content = item.get('content', {})
-                    title = content.get('title', '')
-                    pub_date = content.get('pubDate', '')
-
-                    # ISO 8601 时间字符串转为本地 naive datetime（去掉时区信息）
-                    pub_time = None
-                    if pub_date:
-                        try:
-                            pub_time = datetime.fromisoformat(pub_date.replace('Z', '+00:00')).replace(tzinfo=None)
-                        except:
-                            pass
-
-                    if title:
-                        news_list.append({
-                            'time': pub_time.strftime('%Y-%m-%d %H:%M:%S') if pub_time else pub_date,
-                            'title': title,
-                            'content': content.get('summary', title)[:500],
-                            'url': content.get('canonicalUrl', {}).get('url', ''),
-                            'source': 'yahoo_finance',
-                        })
-        except Exception as e:
-            logger.error("[采集] Yahoo yfinance 获取失败: %s", e)
-
-        # 去重
-        seen = set()
-        unique_list = []
-        for item in news_list:
-            key = item.get('title', '')[:50]
-            if key and key not in seen:
-                seen.add(key)
-                unique_list.append(item)
-
-        logger.info("Yahoo财经: %s 条", len(unique_list))
-        return unique_list
-
-    except Exception as e:
-        logger.error("[采集] Yahoo财经请求失败: %s", e)
-        return []
 
 
 # 标的信息从 symbol_registry 动态加载（消除硬编码）
@@ -2016,6 +1789,7 @@ def run_news_pipeline(
     use_remote = ENABLE_REMOTE_WRITE and is_remote_write_configured()
 
     inserted_count = 0
+    updated_count = 0
     if collect_fresh_news:
         t0 = time.time()
         if use_remote:
@@ -2026,12 +1800,14 @@ def run_news_pipeline(
             _attach_remote_news_ids(news_list, processed_result)
             inserted_count = screened_result.get('inserted', 0) + processed_result.get('inserted', 0)
             updated_count = screened_result.get('updated', 0) + processed_result.get('updated', 0)
-        else:
+        elif context.is_local_env:
             init_database()
             screened_stats = upsert_news_batch(screened_news)
             processed_stats = upsert_news_batch(processed_news)
             inserted_count = screened_stats["inserted"] + processed_stats["inserted"]
             updated_count = screened_stats["updated"] + processed_stats["updated"]
+        else:
+            logger.warning("[写入D1] 新闻写入被跳过: use_remote=%s, app_env=%s", use_remote, context.app_env)
         logger.info("[写入D1] 完成: 新增 %s, 更新 %s, 耗时 %.1fs", inserted_count, updated_count, time.time() - t0)
 
     # --- 写入 pipeline_trace 和 filter_logs ---
@@ -2047,8 +1823,9 @@ def run_news_pipeline(
                 logger.warning("[Trace] filter_logs 写入失败（不影响主流程）: %s", exc)
 
     # 被过滤新闻写本地 SQLite（仅用于复盘，不推送 remote）
-    if collect_fresh_news and rejected_news:
+    if collect_fresh_news and context.is_local_env and rejected_news:
         try:
+            init_database()
             rejected_stats = upsert_news_batch(rejected_news, LOCAL_DB_PATH)
             logger.info("[复盘库] 被过滤新闻写入本地: 新增 %s, 已存在 %s", rejected_stats["inserted"], rejected_stats.get("ignored", 0) + rejected_stats.get("updated", 0))
         except Exception as exc:
@@ -2061,19 +1838,23 @@ def run_news_pipeline(
         daily_record = build_daily_summary_record(window_news, analysis_date)
         if use_remote:
             send_daily_news_ai_analysis(daily_record)
-        else:
+        elif context.is_local_env:
             save_daily_news_ai_analysis(daily_record)
+        else:
+            logger.warning("[日总结] 汇总未写入: use_remote=%s, app_env=%s", use_remote, context.app_env)
         logger.info("[日总结] 完成: 已更新, 耗时 %.1fs", time.time() - t0)
     elif persist_summary:
         logger.info("[日总结] 跳过: 交易日 %s 窗口内暂无有效新闻", analysis_date)
-        if not use_remote:
+        if context.is_local_env:
             daily_record = get_daily_news_ai_analysis_by_date(analysis_date) or {}
 
     if persist_summary:
         if use_remote:
             initialize_remote_review(analysis_date)
-        else:
+        elif context.is_local_env:
             initialize_archive_record(analysis_date)
+        else:
+            logger.warning("[复盘] 复盘记录初始化被跳过: use_remote=%s, app_env=%s", use_remote, context.app_env)
         logger.info("复盘记录已初始化: %s", analysis_date)
 
     if not news_list:
