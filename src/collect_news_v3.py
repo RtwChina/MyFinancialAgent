@@ -38,6 +38,7 @@ from data_sources.news_router import fetch_all_news as fetch_source_news
 from logger_utils import get_logger
 from db_utils import (
     generate_news_hash,
+    get_archive_by_date,
     get_daily_news_ai_analysis_by_date,
     get_existing_hashes,
     get_news_by_date_range,
@@ -2076,12 +2077,20 @@ def run_news_pipeline(
 
     if persist_summary:
         if use_remote:
-            initialize_remote_review(analysis_date)
+            init_result = initialize_remote_review(analysis_date)
+            if init_result and init_result.get("skipped"):
+                logger.info("复盘记录跳过初始化: %s reason=%s", analysis_date, init_result.get("reason"))
+            else:
+                logger.info("复盘记录已初始化: %s", analysis_date)
         elif context.is_local_env:
+            existing_archive = get_archive_by_date(analysis_date)
             initialize_archive_record(analysis_date)
+            if existing_archive and existing_archive.get("review_status") == "reviewed":
+                logger.info("复盘记录跳过初始化: %s reason=already reviewed", analysis_date)
+            else:
+                logger.info("复盘记录已初始化: %s", analysis_date)
         else:
             logger.warning("[复盘] 复盘记录初始化被跳过: use_remote=%s, app_env=%s", use_remote, context.app_env)
-        logger.info("复盘记录已初始化: %s", analysis_date)
 
     if not news_list:
         news_list = window_news
