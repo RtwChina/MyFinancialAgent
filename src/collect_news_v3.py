@@ -256,18 +256,60 @@ def _format_source_counts(counts: Dict[str, int]) -> str:
     return "，".join(f"{label} {counts[label]}" for label in labels)
 
 
-def _format_source_pass_filter(kept_counts: Dict[str, int], filtered_counts: Dict[str, int]) -> str:
-    labels = [label for label in SOURCE_ORDER if kept_counts.get(label) or filtered_counts.get(label)]
-    labels.extend(sorted(
-        label for label in set(kept_counts) | set(filtered_counts)
-        if label not in SOURCE_ORDER and (kept_counts.get(label) or filtered_counts.get(label))
-    ))
-    if not labels:
-        return "无"
-    return "，".join(
-        f"{label} 保留 {kept_counts.get(label, 0)}/过滤 {filtered_counts.get(label, 0)}"
+def _ordered_source_labels(*count_maps: Dict[str, int]) -> List[str]:
+    label_set = set()
+    for count_map in count_maps:
+        label_set.update(count_map.keys())
+    labels = [label for label in SOURCE_ORDER if label in label_set]
+    labels.extend(sorted(label for label in label_set if label not in SOURCE_ORDER))
+    return labels
+
+
+def _format_source_stage_line(
+    stage_name: str,
+    kept_counts: Dict[str, int],
+    filtered_counts: Dict[str, int],
+) -> str:
+    total_kept = sum(kept_counts.values())
+    total_filtered = sum(filtered_counts.values())
+    total = total_kept + total_filtered
+    labels = _ordered_source_labels(kept_counts, filtered_counts)
+    details = "；".join(
+        f"{label} 保留 {kept_counts.get(label, 0)}/过滤 {filtered_counts.get(label, 0)}/总数 {kept_counts.get(label, 0) + filtered_counts.get(label, 0)} 条"
         for label in labels
+    ) or "无"
+    return (
+        f"[新闻总览] {stage_name}，合计：保留 {total_kept} 条/过滤 {total_filtered} 条/总数 {total} 条；{details}"
     )
+
+
+def _format_source_write_line(
+    inserted_counts: Dict[str, int],
+    updated_counts: Dict[str, int],
+    ignored_counts: Dict[str, int],
+) -> str:
+    total_inserted = sum(inserted_counts.values())
+    total_updated = sum(updated_counts.values())
+    total_ignored = sum(ignored_counts.values())
+    total = total_inserted + total_updated + total_ignored
+    labels = _ordered_source_labels(inserted_counts, updated_counts, ignored_counts)
+    details = "；".join(
+        f"{label} 新增 {inserted_counts.get(label, 0)}/更新 {updated_counts.get(label, 0)}/忽略 {ignored_counts.get(label, 0)}/总数 {inserted_counts.get(label, 0) + updated_counts.get(label, 0) + ignored_counts.get(label, 0)} 条"
+        for label in labels
+    ) or "无"
+    return (
+        f"[新闻总览] 最终入库，合计：新增 {total_inserted} 条/更新 {total_updated} 条/忽略 {total_ignored} 条/总数 {total} 条；{details}"
+    )
+
+
+def _format_source_kept_line(stage_name: str, kept_counts: Dict[str, int]) -> str:
+    total_kept = sum(kept_counts.values())
+    labels = _ordered_source_labels(kept_counts)
+    details = "；".join(
+        f"{label} 保留 {kept_counts.get(label, 0)}/过滤 0/总数 {kept_counts.get(label, 0)} 条"
+        for label in labels
+    ) or "无"
+    return f"[新闻总览] {stage_name}，合计：保留 {total_kept} 条/过滤 0 条/总数 {total_kept} 条；{details}"
 
 
 def _format_star_summary(items: List[Dict[str, Any]]) -> Tuple[str, str]:
@@ -2206,40 +2248,25 @@ def run_news_pipeline(
         star_overall_text = source_summary.get("star_overall_text", "无")
         star_by_source_text = source_summary.get("star_by_source_text", "无")
 
+        after_truncate_counts = {
+            label: source_summary.get("raw_source_counts", {}).get(label, 0) - stale_dropped_counts.get(label, 0)
+            for label in _ordered_source_labels(source_summary.get("raw_source_counts", {}), stale_dropped_counts)
+        }
+        after_prefilter_counts = {
+            label: after_truncate_counts.get(label, 0) - prefilter_skipped_counts.get(label, 0)
+            for label in _ordered_source_labels(after_truncate_counts, prefilter_skipped_counts)
+        }
+        logger.info(_format_source_stage_line("旧新闻截断", after_truncate_counts, stale_dropped_counts))
+        logger.info(_format_source_stage_line("已存在跳过", after_prefilter_counts, prefilter_skipped_counts))
+        logger.info(_format_source_stage_line("相似度筛选", embedding_kept_counts, embedding_filtered_counts))
+        logger.info(_format_source_stage_line("LLM 精筛", llm_kept_counts, llm_filtered_counts))
+        logger.info(_format_source_kept_line("最终保留", final_source_counts))
         logger.info(
-            "[新闻总览] 超过 24 小时的旧新闻去掉 %s 条：%s；还剩 %s 条",
-            sum(stale_dropped_counts.values()),
-            _format_source_counts(stale_dropped_counts),
-            source_summary.get("after_truncate_count", 0),
-        )
-        logger.info(
-            "[新闻总览] 数据库里已经有的新闻跳过 %s 条：%s；进入筛选 %s 条",
-            sum(prefilter_skipped_counts.values()),
-            _format_source_counts(prefilter_skipped_counts),
-            source_summary.get("after_prefilter_count", 0),
-        )
-        logger.info(
-            "[新闻总览] 相似度筛选后保留 %s 条，过滤掉 %s 条：%s",
-            source_summary.get("embedding_kept_count", 0),
-            source_summary.get("embedding_filtered_count", 0),
-            _format_source_pass_filter(embedding_kept_counts, embedding_filtered_counts),
-        )
-        logger.info(
-            "[新闻总览] LLM 精筛后保留 %s 条，过滤掉 %s 条：%s",
-            source_summary.get("llm_kept_count", 0),
-            source_summary.get("llm_filtered_count", 0),
-            _format_source_pass_filter(llm_kept_counts, llm_filtered_counts),
-        )
-        logger.info(
-            "[新闻总览] 最终保留 %s 条：%s",
-            len(news_list),
-            _format_source_counts(final_source_counts),
-        )
-        logger.info(
-            "[新闻总览] 实际写库：新增 %s 条，更新 %s 条，忽略 %s 条",
+            "[新闻总览] 最终入库，合计：新增 %s 条/更新 %s 条/忽略 %s 条/总数 %s 条",
             inserted_count,
             updated_count,
             ignored_count,
+            inserted_count + updated_count + ignored_count,
         )
         logger.info(
             "[新闻总览] 星级分布：%s；按来源：%s",
