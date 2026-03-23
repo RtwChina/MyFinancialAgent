@@ -24,6 +24,7 @@ from config import (
 from symbol_registry import build_aliases_lookup, get_symbol_type_map, get_tracked_symbols
 from cloudflare_ingest import (
     CloudflareIngestError,
+    fetch_daily_news_ai_analysis as fetch_remote_daily_news_ai_analysis,
     fetch_existing_hashes,
     fetch_news as fetch_remote_news,
     initialize_review as initialize_remote_review,
@@ -1244,6 +1245,31 @@ def _format_summary_markdown(parsed: Dict[str, List[str]]) -> str:
     )
 
 
+def _split_summary_field(value: Any) -> List[str]:
+    if not value:
+        return []
+    return [
+        line.strip().lstrip("-").strip()
+        for line in str(value).splitlines()
+        if line.strip()
+    ]
+
+
+def _restore_daily_record(record: Dict[str, Any] | None) -> Dict[str, Any]:
+    if not record:
+        return {}
+    restored = dict(record)
+    raw_summary = restored.get("raw_summary")
+    if not raw_summary:
+        raw_summary = _format_summary_markdown({
+            "daily_major_events": _split_summary_field(restored.get("daily_major_events")),
+            "sector_impact_map": _split_summary_field(restored.get("sector_impact_map")),
+            "linkage_logic_chain": _split_summary_field(restored.get("linkage_logic_chain")),
+        })
+    restored["raw_summary"] = raw_summary
+    return restored
+
+
 def _generate_rule_based_summary(news_list: List[Dict[str, Any]]) -> str:
     if not news_list:
         return ""
@@ -1547,7 +1573,11 @@ def load_news_for_summary(
     start_time, end_time = get_analysis_window(analysis_date)
     data_source = "remote" if use_remote else "local"
     if use_remote:
-        items = fetch_remote_news(start_time[:10], end_time[:10], limit=200)
+        items = fetch_remote_news(
+            date_time_from=start_time,
+            date_time_to=end_time,
+            paginate_all=True,
+        )
     else:
         items = get_news_by_date_range(
             datetime.strptime(start_time, "%Y-%m-%d %H:%M:%S"),
@@ -1571,21 +1601,57 @@ def load_news_for_summary(
         analysis_date, start_time, end_time, data_source, len(items), db_count, fallback_count, len(deduped),
     )
 
-    filtered = [
-        item for item in deduped.values()
-        if item.get("importance_stars", 0) >= 3
-        and item.get("rule_passed")
-        and item.get("processing_status") in {"llm_processed", "reviewed"}
-        and start_time <= item.get("pub_date", "") <= end_time
-    ]
+    filtered = []
+    excluded_items = []
+    exclusion_buckets = {
+        "time_outside_window": 0,
+        "stars_below_3": 0,
+        "rule_not_passed": 0,
+        "status_not_ready": 0,
+    }
+    for item in deduped.values():
+        pub_date = item.get("pub_date", "")
+        if not (start_time <= pub_date <= end_time):
+            exclusion_buckets["time_outside_window"] += 1
+            excluded_items.append(item)
+            continue
+        if item.get("importance_stars", 0) < 3:
+            exclusion_buckets["stars_below_3"] += 1
+            excluded_items.append(item)
+            continue
+        if not item.get("rule_passed"):
+            exclusion_buckets["rule_not_passed"] += 1
+            excluded_items.append(item)
+            continue
+        if item.get("processing_status") not in {"llm_processed", "reviewed"}:
+            exclusion_buckets["status_not_ready"] += 1
+            excluded_items.append(item)
+            continue
+        filtered.append(item)
     # 打印候选和未入选的新闻 ID
     candidate_ids = [item.get("id") for item in filtered if item.get("id")]
-    excluded_items = [item for item in deduped.values() if item not in filtered]
     excluded_ids = [item.get("id") for item in excluded_items if item.get("id")]
     logger.info(
         "[日总结] 过滤(stars>=3, rule_passed, status∈{llm_processed,reviewed}): 候选 %s条 ids=%s, 排除 %s条 ids=%s",
         len(filtered), candidate_ids, len(excluded_items), excluded_ids,
     )
+    logger.info(
+        "[日总结] 排除原因: 时间窗外=%s, 星级不足=%s, 规则未通过=%s, 状态未就绪=%s",
+        exclusion_buckets["time_outside_window"],
+        exclusion_buckets["stars_below_3"],
+        exclusion_buckets["rule_not_passed"],
+        exclusion_buckets["status_not_ready"],
+    )
+    if use_remote and not filtered and deduped:
+        pub_dates = sorted(item.get("pub_date", "") for item in deduped.values() if item.get("pub_date"))
+        if pub_dates:
+            logger.warning(
+                "[日总结] 远端候选为空诊断: 返回新闻时间范围=[%s ~ %s], 目标窗口=[%s ~ %s]",
+                pub_dates[0],
+                pub_dates[-1],
+                start_time,
+                end_time,
+            )
     if not filtered and fallback_news:
         fallback_filtered = []
         for item in fallback_news:
@@ -1984,22 +2050,29 @@ def run_news_pipeline(
         except Exception as exc:
             logger.warning("[复盘库] 被过滤新闻写入失败（不影响主流程）: %s", exc)
 
-    window_news = load_news_for_summary(analysis_date, use_remote, fallback_news=news_list)
     daily_record: Dict[str, Any] = {}
-    if persist_summary and window_news:
-        t0 = time.time()
-        daily_record = build_daily_summary_record(window_news, analysis_date)
-        if use_remote:
-            send_daily_news_ai_analysis(daily_record)
-        elif context.is_local_env:
-            save_daily_news_ai_analysis(daily_record)
+    window_news: List[Dict[str, Any]] = []
+    if persist_summary:
+        existing_daily_record = _restore_daily_record(
+            fetch_remote_daily_news_ai_analysis(analysis_date) if use_remote else get_daily_news_ai_analysis_by_date(analysis_date)
+        )
+        if existing_daily_record:
+            daily_record = existing_daily_record
+            logger.info("[日总结] 跳过重算: analysis_date=%s 已存在 summary", analysis_date)
         else:
-            logger.warning("[日总结] 汇总未写入: use_remote=%s, app_env=%s", use_remote, context.app_env)
-        logger.info("[日总结] 完成: 已更新, 耗时 %.1fs", time.time() - t0)
-    elif persist_summary:
-        logger.info("[日总结] 跳过: 交易日 %s 窗口内暂无有效新闻", analysis_date)
-        if context.is_local_env:
-            daily_record = get_daily_news_ai_analysis_by_date(analysis_date) or {}
+            window_news = load_news_for_summary(analysis_date, use_remote, fallback_news=news_list)
+            if window_news:
+                t0 = time.time()
+                daily_record = build_daily_summary_record(window_news, analysis_date)
+                if use_remote:
+                    send_daily_news_ai_analysis(daily_record)
+                elif context.is_local_env:
+                    save_daily_news_ai_analysis(daily_record)
+                else:
+                    logger.warning("[日总结] 汇总未写入: use_remote=%s, app_env=%s", use_remote, context.app_env)
+                logger.info("[日总结] 完成: 已更新, 耗时 %.1fs", time.time() - t0)
+            else:
+                logger.info("[日总结] 跳过: 交易日 %s 窗口内暂无有效新闻", analysis_date)
 
     if persist_summary:
         if use_remote:

@@ -154,6 +154,11 @@ async function handleApi(request, env, url, appEnv) {
       return json(await getNewsList(env, url), 200, request);
     }
 
+    const newsAnalysisMatch = url.pathname.match(/^\/api\/news-analysis\/(\d{4}-\d{2}-\d{2})$/);
+    if (newsAnalysisMatch && request.method === "GET") {
+      return json(await getNewsAnalysisByDate(env, newsAnalysisMatch[1]), 200, request);
+    }
+
     const newsMatch = url.pathname.match(/^\/api\/news\/(\d+)$/);
     if (newsMatch && request.method === "GET") {
       return json(await getNewsById(env, Number(newsMatch[1])), 200, request);
@@ -163,7 +168,7 @@ async function handleApi(request, env, url, appEnv) {
       return json(await getReviews(env, url), 200, request);
     }
 
-    const reviewMatch = url.pathname.match(/^\/api\/reviews\/(\d{4}-\d{2}-\d{2})(?:\/(bootstrap|complete|initialize|delete))?$/);
+    const reviewMatch = url.pathname.match(/^\/api\/reviews\/(\d{4}-\d{2}-\d{2})(?:\/(bootstrap|complete|initialize|delete|snapshot))?$/);
     if (reviewMatch) {
       const [, archiveDate, action] = reviewMatch;
       if (!action && request.method === "GET") {
@@ -178,6 +183,10 @@ async function handleApi(request, env, url, appEnv) {
       }
       if (action === "complete" && request.method === "POST") {
         return json(await completeReview(env, archiveDate), 200, request);
+      }
+      if (action === "snapshot" && request.method === "POST") {
+        const body = await request.json().catch(() => ({}));
+        return json(await createReviewSnapshots(env, archiveDate, body), 200, request);
       }
       if ((action === "initialize" || action === "delete") && request.method === "POST") {
         return json(await initializeReview(env, archiveDate), 200, request);
@@ -565,6 +574,8 @@ async function getNewsList(env, url) {
   const keyword = (url.searchParams.get("keyword") || "").trim();
   const dateFrom = url.searchParams.get("dateFrom");
   const dateTo = url.searchParams.get("dateTo");
+  const dateTimeFrom = url.searchParams.get("dateTimeFrom");
+  const dateTimeTo = url.searchParams.get("dateTimeTo");
   const source = url.searchParams.get("source");
   const type = url.searchParams.get("type");
   const symbol = url.searchParams.get("symbol");
@@ -597,11 +608,17 @@ async function getNewsList(env, url) {
     const like = `%${keyword}%`;
     params.push(like, like, like, like);
   }
-  if (dateFrom) {
+  if (dateTimeFrom) {
+    clauses.push("pub_date >= ?");
+    params.push(dateTimeFrom);
+  } else if (dateFrom) {
     clauses.push("pub_date >= ?");
     params.push(`${dateFrom} 00:00:00`);
   }
-  if (dateTo) {
+  if (dateTimeTo) {
+    clauses.push("pub_date <= ?");
+    params.push(dateTimeTo);
+  } else if (dateTo) {
     clauses.push("pub_date <= ?");
     params.push(`${dateTo} 23:59:59`);
   }
@@ -667,8 +684,17 @@ async function getNewsList(env, url) {
   return {
     items,
     total: items.length,
-    filters: { keyword, dateFrom, dateTo, source, type, symbol, stars },
+    filters: { keyword, dateFrom, dateTo, dateTimeFrom, dateTimeTo, source, type, symbol, stars },
   };
+}
+
+async function getNewsAnalysisByDate(env, analysisDate) {
+  const item = await env.DB.prepare(
+    `SELECT * FROM daily_news_ai_analysis WHERE analysis_date = ? LIMIT 1`,
+  )
+    .bind(analysisDate)
+    .first();
+  return { item: item || null };
 }
 
 async function getNewsById(env, id) {
@@ -1223,6 +1249,130 @@ async function initializeReview(env, archiveDate) {
     .run();
 
   return { ok: true, archiveDate, reviewStatus: "initialized" };
+}
+
+async function createReviewSnapshots(env, archiveDate, body = {}) {
+  const snapshotReason = normalizeOptionalText(body.snapshotReason);
+  const [reviewRecord, analysisRecord] = await Promise.all([
+    env.DB.prepare(`SELECT * FROM daily_review_archive WHERE archive_date = ? LIMIT 1`)
+      .bind(archiveDate)
+      .first(),
+    env.DB.prepare(`SELECT * FROM daily_news_ai_analysis WHERE analysis_date = ? LIMIT 1`)
+      .bind(archiveDate)
+      .first(),
+  ]);
+
+  if (!reviewRecord && !analysisRecord) {
+    const error = new Error(`archive_date=${archiveDate} 的当前复盘记录和 AI 总结都不存在，无法创建快照`);
+    error.statusCode = 404;
+    throw error;
+  }
+
+  const result = {
+    ok: true,
+    archiveDate,
+    snapshotReason,
+    reviewSnapshot: null,
+    analysisSnapshot: null,
+    skipped: [],
+  };
+
+  if (reviewRecord) {
+    const versionNo = await getNextSnapshotVersionNo(env, "daily_review_snapshots", "archive_date", archiveDate);
+    const snapshotCreatedAt = isoNow();
+    await env.DB.prepare(
+      `INSERT INTO daily_review_snapshots (
+        archive_date, version_no, snapshot_reason, review_status, reviewer_news_notes,
+        market_sentiment, sector_rotation, asset_plan, trading_summary,
+        reviewed_at, source_updated_at, snapshot_created_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    )
+      .bind(
+        archiveDate,
+        versionNo,
+        snapshotReason,
+        reviewRecord.review_status || "initialized",
+        reviewRecord.reviewer_news_notes || "",
+        reviewRecord.market_sentiment || "",
+        reviewRecord.sector_rotation || "",
+        reviewRecord.asset_plan || "",
+        reviewRecord.trading_summary || "",
+        reviewRecord.reviewed_at || null,
+        reviewRecord.updated_at || null,
+        snapshotCreatedAt,
+      )
+      .run();
+    result.reviewSnapshot = {
+      archive_date: archiveDate,
+      version_no: versionNo,
+      snapshot_created_at: snapshotCreatedAt,
+    };
+  } else {
+    result.skipped.push({
+      table: "daily_review_archive",
+      reason: "current record not found",
+    });
+  }
+
+  if (analysisRecord) {
+    const versionNo = await getNextSnapshotVersionNo(
+      env,
+      "daily_news_ai_analysis_snapshots",
+      "analysis_date",
+      archiveDate,
+    );
+    const snapshotCreatedAt = isoNow();
+    await env.DB.prepare(
+      `INSERT INTO daily_news_ai_analysis_snapshots (
+        analysis_date, version_no, snapshot_reason, daily_major_events,
+        sector_impact_map, linkage_logic_chain, source_news_ids,
+        source_updated_at, snapshot_created_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    )
+      .bind(
+        archiveDate,
+        versionNo,
+        snapshotReason,
+        analysisRecord.daily_major_events || "",
+        analysisRecord.sector_impact_map || "",
+        analysisRecord.linkage_logic_chain || "",
+        analysisRecord.source_news_ids || null,
+        analysisRecord.updated_at || null,
+        snapshotCreatedAt,
+      )
+      .run();
+    result.analysisSnapshot = {
+      analysis_date: archiveDate,
+      version_no: versionNo,
+      snapshot_created_at: snapshotCreatedAt,
+    };
+  } else {
+    result.skipped.push({
+      table: "daily_news_ai_analysis",
+      reason: "current record not found",
+    });
+  }
+
+  result.message = result.skipped.length
+    ? "快照已创建；缺失主表的数据已按表独立跳过"
+    : "快照已创建";
+  return result;
+}
+
+async function getNextSnapshotVersionNo(env, tableName, dateColumn, dateValue) {
+  const row = await env.DB.prepare(
+    `SELECT COALESCE(MAX(version_no), 0) + 1 AS next_version
+     FROM ${tableName}
+     WHERE ${dateColumn} = ?`,
+  )
+    .bind(dateValue)
+    .first();
+  return Number(row?.next_version || 1);
+}
+
+function normalizeOptionalText(value) {
+  const text = String(value || "").trim();
+  return text || null;
 }
 
 // 以 GSPC（S&P 500）作为 NYSE 收盘日代理：当 GSPC 有价格记录时，说明 NYSE 当天已收盘。

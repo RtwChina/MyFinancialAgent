@@ -583,6 +583,44 @@ Stage 3：LLM 深度分析（每批次完成后立即写库）
 - `draft`：已经有人工编辑内容，处于进行中
 - `reviewed`：这一天的复盘已完成
 
+### 手动归档当前版本
+
+如果你担心 bug 或误操作覆盖掉当前复盘内容，可以在任意复盘日手动创建一次快照。系统不会自动归档，只有显式调用接口时才会把当前主表内容复制到快照表。
+
+当前使用的两张快照表：
+
+- `daily_review_snapshots`
+- `daily_news_ai_analysis_snapshots`
+
+版本号字段统一为整数 `version_no`，按同一日期递增：
+
+- 第一次归档：`version_no = 1`
+- 第二次归档：`version_no = 2`
+
+当前支持的接口：
+
+```bash
+curl -X POST "$INGEST_API_BASE_URL/api/reviews/2026-03-20/snapshot" \
+  -H "Authorization: Bearer $INGEST_API_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"snapshotReason":"修复前手动备份"}'
+```
+
+接口说明：
+
+- 方法：`POST`
+- 路径：`/api/reviews/<archive_date>/snapshot`
+- 示例：`/api/reviews/2026-03-20/snapshot`
+- 请求体：可选，当前支持 `snapshotReason`
+- 行为：按 `archive_date` 分别从 `daily_review_archive` 与 `daily_news_ai_analysis` 读取当前记录，并写入各自的快照表
+- 返回：分别给出 `reviewSnapshot` / `analysisSnapshot` 的 `version_no`；如果其中一张主表不存在，会在 `skipped` 中说明
+
+说明：
+
+- 同一个 `archive_date` 会分别对 `daily_review_archive` 和 `daily_news_ai_analysis` 计算下一个 `version_no`
+- 两张主表互不依赖；如果其中一张当天没有记录，另一张仍会成功归档
+- 第一版只负责保存快照，不提供自动恢复 UI；如果后续要恢复，需要再单独增加恢复能力
+
 <a id="testing"></a>
 ## 测试
 

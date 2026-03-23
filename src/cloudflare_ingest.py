@@ -188,17 +188,82 @@ def initialize_review(archive_date: str) -> Optional[Dict[str, Any]]:
     return result
 
 
-def fetch_news(date_from: str, date_to: str, limit: int = 200) -> List[Dict[str, Any]]:
-    """从 Workers API 拉取指定日期区间新闻，用于滚动重算日期级 summary"""
-    result = _get(
-        "/api/news",
-        {
-            "dateFrom": date_from,
-            "dateTo": date_to,
-            "isRelevantToReview": "true",
-            "limit": limit,
-        },
-    )
+def create_review_snapshot(archive_date: str, snapshot_reason: str | None = None) -> Optional[Dict[str, Any]]:
+    """通过 Workers API 手动归档指定复盘日的当前版本快照。"""
+    if not archive_date:
+        return None
+
+    payload: Dict[str, Any] = {}
+    if snapshot_reason:
+        payload["snapshotReason"] = snapshot_reason
+    result = _post("/api/reviews/%s/snapshot" % archive_date, payload)
+    logger.info("Cloudflare 复盘快照创建完成: %s", result)
+    return result
+
+
+def fetch_daily_news_ai_analysis(analysis_date: str) -> Optional[Dict[str, Any]]:
+    """从 Workers API 拉取指定 analysis_date 的日期级新闻分析。"""
+    if not analysis_date:
+        return None
+
+    result = _get(f"/api/news-analysis/{analysis_date}")
+    return result.get("item")
+
+
+def fetch_news(
+    date_from: str | None = None,
+    date_to: str | None = None,
+    limit: int = 200,
+    *,
+    date_time_from: str | None = None,
+    date_time_to: str | None = None,
+    paginate_all: bool = False,
+) -> List[Dict[str, Any]]:
+    """从 Workers API 拉取新闻。
+
+    - 兼容旧调用：按 date_from/date_to + limit 拉取
+    - 新调用：按精确时间窗 date_time_from/date_time_to 查询
+    - paginate_all=True 时自动翻页拉取全部匹配结果，避免 limit 截断
+    """
+    if paginate_all:
+        page = 1
+        page_size = 100
+        items: List[Dict[str, Any]] = []
+        total_pages = 1
+        while page <= total_pages:
+            query: Dict[str, Any] = {
+                "isRelevantToReview": "true",
+                "page": page,
+                "pageSize": page_size,
+            }
+            if date_time_from:
+                query["dateTimeFrom"] = date_time_from
+            elif date_from:
+                query["dateFrom"] = date_from
+            if date_time_to:
+                query["dateTimeTo"] = date_time_to
+            elif date_to:
+                query["dateTo"] = date_to
+            result = _get("/api/news", query)
+            batch = result.get("items", [])
+            items.extend(batch)
+            total_pages = max(1, int(result.get("totalPages") or 1))
+            page += 1
+        return items
+
+    query = {
+        "isRelevantToReview": "true",
+        "limit": limit,
+    }
+    if date_time_from:
+        query["dateTimeFrom"] = date_time_from
+    elif date_from:
+        query["dateFrom"] = date_from
+    if date_time_to:
+        query["dateTimeTo"] = date_time_to
+    elif date_to:
+        query["dateTo"] = date_to
+    result = _get("/api/news", query)
     return result.get("items", [])
 
 
