@@ -163,12 +163,15 @@ def _fetch_keywords_from_api() -> Dict[str, List[str]] | None:
         return None
 
 
-def _truncate_stale_news(all_news: List[Dict[str, Any]], cutoff_hours: int = 24) -> List[Dict[str, Any]]:
-    """丢弃 pub_date 早于 now - cutoff_hours 的新闻；pub_date 为空或无法解析时保留。"""
+def _calc_stale_cutoff(cutoff_hours: int = 24) -> str:
     from datetime import datetime as _dt, timedelta as _td
     from zoneinfo import ZoneInfo as _ZI
-    cutoff = _dt.now(_ZI("Asia/Shanghai")) - _td(hours=cutoff_hours)
-    cutoff_str = cutoff.strftime("%Y-%m-%d %H:%M:%S")
+    return (_dt.now(_ZI("Asia/Shanghai")) - _td(hours=cutoff_hours)).strftime("%Y-%m-%d %H:%M:%S")
+
+
+def _truncate_stale_news(all_news: List[Dict[str, Any]], cutoff_hours: int = 24, *, cutoff_str: str | None = None) -> List[Dict[str, Any]]:
+    """丢弃 pub_date 早于 now - cutoff_hours 的新闻；pub_date 为空或无法解析时保留。"""
+    cutoff_str = cutoff_str or _calc_stale_cutoff(cutoff_hours)
     kept, dropped = [], 0
     for news in all_news:
         pub = (news.get("time") or news.get("pub_date") or "").strip()
@@ -182,6 +185,111 @@ def _truncate_stale_news(all_news: List[Dict[str, Any]], cutoff_hours: int = 24)
     if dropped:
         logger.info("[截断] 丢弃超龄 %s 条（pub_date < %s），剩余 %s 条", dropped, cutoff_str, len(kept))
     return kept
+
+
+def _split_stale_news(
+    all_news: List[Dict[str, Any]],
+    cutoff_hours: int = 24,
+    *,
+    cutoff_str: str | None = None,
+) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]]]:
+    """按最近 cutoff_hours 将新闻分成保留和超龄两组，统计逻辑与 _truncate_stale_news 保持一致。"""
+    cutoff_str = cutoff_str or _calc_stale_cutoff(cutoff_hours)
+    kept: List[Dict[str, Any]] = []
+    dropped: List[Dict[str, Any]] = []
+    for news in all_news:
+        pub = (news.get("time") or news.get("pub_date") or "").strip()
+        if not pub or pub[:19] >= cutoff_str:
+            kept.append(news)
+        else:
+            dropped.append(news)
+    return kept, dropped
+
+
+SOURCE_ORDER = [
+    "财联社",
+    "同花顺",
+    "新浪",
+    "富途",
+    "Finnhub大盘",
+    "Finnhub个股",
+]
+
+
+def _source_label(news: Dict[str, Any]) -> str:
+    source = str(news.get("source") or "").strip().lower()
+    sub_source = str(news.get("sub_source") or "").strip().lower()
+    if source == "akshare":
+        if sub_source == "cls":
+            return "财联社"
+        if sub_source == "10jqka":
+            return "同花顺"
+        if sub_source == "sina":
+            return "新浪"
+        if sub_source == "futu":
+            return "富途"
+    if source == "finnhub":
+        if sub_source == "general":
+            return "Finnhub大盘"
+        if sub_source == "company":
+            return "Finnhub个股"
+        return "Finnhub"
+    if sub_source:
+        return f"{source}.{sub_source}"
+    return source or "未知来源"
+
+
+def _count_by_source(items: List[Dict[str, Any]]) -> Dict[str, int]:
+    counts: Dict[str, int] = {}
+    for item in items:
+        label = _source_label(item)
+        counts[label] = counts.get(label, 0) + 1
+    return counts
+
+
+def _format_source_counts(counts: Dict[str, int]) -> str:
+    ordered_labels = [label for label in SOURCE_ORDER if counts.get(label)]
+    extra_labels = sorted(label for label in counts.keys() if label not in SOURCE_ORDER and counts.get(label))
+    labels = ordered_labels + extra_labels
+    if not labels:
+        return "无"
+    return "，".join(f"{label} {counts[label]}" for label in labels)
+
+
+def _format_source_pass_filter(kept_counts: Dict[str, int], filtered_counts: Dict[str, int]) -> str:
+    labels = [label for label in SOURCE_ORDER if kept_counts.get(label) or filtered_counts.get(label)]
+    labels.extend(sorted(
+        label for label in set(kept_counts) | set(filtered_counts)
+        if label not in SOURCE_ORDER and (kept_counts.get(label) or filtered_counts.get(label))
+    ))
+    if not labels:
+        return "无"
+    return "，".join(
+        f"{label} 保留 {kept_counts.get(label, 0)}/过滤 {filtered_counts.get(label, 0)}"
+        for label in labels
+    )
+
+
+def _format_star_summary(items: List[Dict[str, Any]]) -> Tuple[str, str]:
+    overall = {5: 0, 4: 0, 3: 0}
+    by_source: Dict[str, Dict[int, int]] = {}
+    for item in items:
+        stars = int(item.get("importance_stars") or 0)
+        if stars not in overall:
+            continue
+        overall[stars] += 1
+        label = _source_label(item)
+        bucket = by_source.setdefault(label, {5: 0, 4: 0, 3: 0})
+        bucket[stars] += 1
+
+    overall_text = "，".join(f"{stars}星 {overall[stars]} 条" for stars in [5, 4, 3] if overall[stars] > 0) or "无"
+    labels = [label for label in SOURCE_ORDER if label in by_source]
+    labels.extend(sorted(label for label in by_source if label not in SOURCE_ORDER))
+    by_source_text = "，".join(
+        f"{label} " + "/".join(f"{stars}星{by_source[label][stars]}" for stars in [5, 4, 3] if by_source[label][stars] > 0)
+        for label in labels
+    ) or "无"
+    return overall_text, by_source_text
 
 
 def merge_and_deduplicate(all_news: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
@@ -1725,6 +1833,7 @@ def collect_all_news(context: ExecutionContext | None = None) -> Dict[str, Any]:
         "error_message": "",
     }
     filter_logs: List[Dict[str, Any]] = []
+    source_summary: Dict[str, Any] = {}
 
     logger.info("========== 新闻采集 v6.0 启动 (run_id=%s) ==========", run_id[:8])
     logger.info(
@@ -1741,8 +1850,13 @@ def collect_all_news(context: ExecutionContext | None = None) -> Dict[str, Any]:
     try:
         # --- 采集阶段 ---
         t0 = time.time()
-        all_news.extend(fetch_source_news(context))
-        all_news = _truncate_stale_news(all_news)
+        raw_news = fetch_source_news(context)
+        all_news.extend(raw_news)
+        raw_source_counts = _count_by_source(raw_news)
+        stale_cutoff_str = _calc_stale_cutoff()
+        truncated_news, stale_dropped_news = _split_stale_news(all_news, cutoff_str=stale_cutoff_str)
+        all_news = _truncate_stale_news(all_news, cutoff_str=stale_cutoff_str)
+        stale_dropped_counts = _count_by_source(stale_dropped_news)
         unique_news = merge_and_deduplicate(all_news)
         trace["fetch_duration"] = round(time.time() - t0, 2)
         trace["total_fetched"] = len(all_news)
@@ -1772,11 +1886,13 @@ def collect_all_news(context: ExecutionContext | None = None) -> Dict[str, Any]:
             existing_hashes = set()
         if existing_hashes:
             before_count = len(unique_news)
+            prefilter_skipped_news = [n for n in unique_news if n.get("news_hash") in existing_hashes]
             unique_news = [n for n in unique_news if n.get("news_hash") not in existing_hashes]
             skipped = before_count - len(unique_news)
             trace["prefilter_skipped"] = skipped
             logger.info("[预过滤] 跳过已存在 %s 条，剩余 %s 条进入 Stage 1", skipped, len(unique_news))
         else:
+            prefilter_skipped_news = []
             logger.info("[预过滤] hash 集合为空，全量 %s 条进入 Stage 1", len(unique_news))
 
         # --- Stage 1: 关键词软加分（不过滤，全量进入 Stage 2）---
@@ -1939,6 +2055,28 @@ def collect_all_news(context: ExecutionContext | None = None) -> Dict[str, Any]:
             "focus_topics": [],
         }, ensure_ascii=False)
 
+        final_source_counts = _count_by_source(final_news)
+        star_overall_text, star_by_source_text = _format_star_summary(final_news)
+        source_summary = {
+            "raw_source_counts": raw_source_counts,
+            "stale_dropped_counts": stale_dropped_counts,
+            "stale_cutoff_str": stale_cutoff_str,
+            "prefilter_skipped_counts": _count_by_source(prefilter_skipped_news),
+            "embedding_kept_counts": _count_by_source(embedding_passed),
+            "embedding_filtered_counts": _count_by_source(embedding_filtered),
+            "llm_kept_counts": final_source_counts,
+            "llm_filtered_counts": _count_by_source([item for item in processed_news if item.get("processing_status") == "llm_discarded"]),
+            "final_source_counts": final_source_counts,
+            "star_overall_text": star_overall_text,
+            "star_by_source_text": star_by_source_text,
+            "after_truncate_count": len(all_news),
+            "after_prefilter_count": len(unique_news),
+            "embedding_kept_count": len(embedding_passed),
+            "embedding_filtered_count": len(embedding_filtered),
+            "llm_kept_count": len(final_news),
+            "llm_filtered_count": len([item for item in processed_news if item.get("processing_status") == "llm_discarded"]),
+        }
+
     except Exception as exc:
         trace["status"] = "failed"
         trace["error_message"] = str(exc)[:500]
@@ -1965,6 +2103,7 @@ def collect_all_news(context: ExecutionContext | None = None) -> Dict[str, Any]:
         "batch_analysis_records": batch_analysis_records,
         "pipeline_trace": trace,
         "filter_logs": filter_logs,
+        "source_summary": source_summary,
         "news_already_persisted": True,
     }
 
@@ -1990,6 +2129,7 @@ def run_news_pipeline(
 
     pipeline_trace = None
     filter_logs_data = []
+    source_summary: Dict[str, Any] = {}
 
     if collect_fresh_news:
         collected = collect_all_news(context)
@@ -2001,11 +2141,13 @@ def run_news_pipeline(
         batch_analysis_records = collected["batch_analysis_records"]
         pipeline_trace = collected.get("pipeline_trace")
         filter_logs_data = collected.get("filter_logs", [])
+        source_summary = collected.get("source_summary", {})
 
     use_remote = ENABLE_REMOTE_WRITE and is_remote_write_configured()
 
     inserted_count = 0
     updated_count = 0
+    ignored_count = 0
     if collect_fresh_news:
         if collected.get("news_already_persisted"):
             # screened_news 和 processed_news 已在 Stage 3 过程中逐批写入，无需重复写入
@@ -2020,12 +2162,14 @@ def run_news_pipeline(
                 _attach_remote_news_ids(news_list, processed_result)
                 inserted_count = screened_result.get('inserted', 0) + processed_result.get('inserted', 0)
                 updated_count = screened_result.get('updated', 0) + processed_result.get('updated', 0)
+                ignored_count = screened_result.get('ignored', 0) + processed_result.get('ignored', 0)
             elif context.is_local_env:
                 init_database()
                 screened_stats = upsert_news_batch(screened_news)
                 processed_stats = upsert_news_batch(processed_news)
                 inserted_count = screened_stats["inserted"] + processed_stats["inserted"]
                 updated_count = screened_stats["updated"] + processed_stats["updated"]
+                ignored_count = screened_stats.get("ignored", 0) + processed_stats.get("ignored", 0)
             else:
                 logger.warning("[写入D1] 新闻写入被跳过: use_remote=%s, app_env=%s", use_remote, context.app_env)
             logger.info("[写入D1] 完成: 新增 %s, 更新 %s, 耗时 %.1fs", inserted_count, updated_count, time.time() - t0)
@@ -2050,6 +2194,58 @@ def run_news_pipeline(
             logger.info("[复盘库] 被过滤新闻写入本地: 新增 %s, 已存在 %s", rejected_stats["inserted"], rejected_stats.get("ignored", 0) + rejected_stats.get("updated", 0))
         except Exception as exc:
             logger.warning("[复盘库] 被过滤新闻写入失败（不影响主流程）: %s", exc)
+
+    if collect_fresh_news and source_summary:
+        stale_dropped_counts = source_summary.get("stale_dropped_counts", {})
+        prefilter_skipped_counts = source_summary.get("prefilter_skipped_counts", {})
+        embedding_kept_counts = source_summary.get("embedding_kept_counts", {})
+        embedding_filtered_counts = source_summary.get("embedding_filtered_counts", {})
+        llm_kept_counts = source_summary.get("llm_kept_counts", {})
+        llm_filtered_counts = source_summary.get("llm_filtered_counts", {})
+        final_source_counts = source_summary.get("final_source_counts", {})
+        star_overall_text = source_summary.get("star_overall_text", "无")
+        star_by_source_text = source_summary.get("star_by_source_text", "无")
+
+        logger.info(
+            "[新闻总览] 超过 24 小时的旧新闻去掉 %s 条：%s；还剩 %s 条",
+            sum(stale_dropped_counts.values()),
+            _format_source_counts(stale_dropped_counts),
+            source_summary.get("after_truncate_count", 0),
+        )
+        logger.info(
+            "[新闻总览] 数据库里已经有的新闻跳过 %s 条：%s；进入筛选 %s 条",
+            sum(prefilter_skipped_counts.values()),
+            _format_source_counts(prefilter_skipped_counts),
+            source_summary.get("after_prefilter_count", 0),
+        )
+        logger.info(
+            "[新闻总览] 相似度筛选后保留 %s 条，过滤掉 %s 条：%s",
+            source_summary.get("embedding_kept_count", 0),
+            source_summary.get("embedding_filtered_count", 0),
+            _format_source_pass_filter(embedding_kept_counts, embedding_filtered_counts),
+        )
+        logger.info(
+            "[新闻总览] LLM 精筛后保留 %s 条，过滤掉 %s 条：%s",
+            source_summary.get("llm_kept_count", 0),
+            source_summary.get("llm_filtered_count", 0),
+            _format_source_pass_filter(llm_kept_counts, llm_filtered_counts),
+        )
+        logger.info(
+            "[新闻总览] 最终保留 %s 条：%s",
+            len(news_list),
+            _format_source_counts(final_source_counts),
+        )
+        logger.info(
+            "[新闻总览] 实际写库：新增 %s 条，更新 %s 条，忽略 %s 条",
+            inserted_count,
+            updated_count,
+            ignored_count,
+        )
+        logger.info(
+            "[新闻总览] 星级分布：%s；按来源：%s",
+            star_overall_text,
+            star_by_source_text,
+        )
 
     daily_record: Dict[str, Any] = {}
     window_news: List[Dict[str, Any]] = []
@@ -2103,6 +2299,8 @@ def run_news_pipeline(
         "filepath": None,
         "news_count": len(news_list),
         "inserted_count": inserted_count,
+        "updated_count": updated_count,
+        "ignored_count": ignored_count,
         "summary": summary_text,
         "analysis_date": analysis_date,
         "batch_count": len(batch_analysis_records),
