@@ -59,7 +59,7 @@ LLM_RULES_TIMEOUT = int(os.getenv("LLM_RULES_TIMEOUT", str(LLM_TIMEOUT)))
 LLM_BATCH_TIMEOUT = int(os.getenv("LLM_BATCH_TIMEOUT", str(LLM_TIMEOUT)))
 LLM_SUMMARY_TIMEOUT = int(os.getenv("LLM_SUMMARY_TIMEOUT", str(LLM_TIMEOUT)))
 LLM_DAILY_SUMMARY_MODEL_ID = os.getenv("LLM_DAILY_SUMMARY_MODEL_ID", LLM_SUMMARY_MODEL_ID)
-LLM_DAILY_SUMMARY_TIMEOUT = int(os.getenv("LLM_DAILY_SUMMARY_TIMEOUT", str(LLM_SUMMARY_TIMEOUT)))
+LLM_DAILY_SUMMARY_TIMEOUT = int(os.getenv("LLM_DAILY_SUMMARY_TIMEOUT", "120"))
 LLM_MAX_WORKERS = int(os.getenv("LLM_MAX_WORKERS", "5"))  # 并发数（Session 连接池复用，支持高并发）
 LLM_BATCH_SIZE = max(1, int(os.getenv("LLM_BATCH_SIZE", "8")))
 LLM_RULES_SAMPLE_SIZE = max(8, int(os.getenv("LLM_RULES_SAMPLE_SIZE", "12")))
@@ -1409,7 +1409,7 @@ DAILY_SUMMARY_BUCKET_FLOORS = {
     "sector": 5,
     "stock": 5,
 }
-DAILY_SUMMARY_TOTAL_CAP = 40
+DAILY_SUMMARY_TOTAL_CAP = int(os.getenv("DAILY_SUMMARY_TOTAL_CAP", "30"))
 
 
 def _split_summary_field(value: Any) -> List[str]:
@@ -1650,25 +1650,37 @@ def _call_daily_summary_bucket(bucket_type: str, news_list: List[Dict[str, Any]]
         }
 
     if EFFECTIVE_SKIP_LLM:
-        markdown = _generate_rule_based_summary(news_list)
-    else:
-        llm_result = llm_client.call_chat(
-            _build_daily_bucket_messages(news_list, analysis_date, bucket_type),
-            log_label="日期级%s桶分析 %s" % (DAILY_SUMMARY_BUCKET_LABELS[bucket_type], analysis_date),
-            model=LLM_DAILY_SUMMARY_MODEL_ID,
-            max_tokens=900,
-            timeout=LLM_DAILY_SUMMARY_TIMEOUT,
+        raise RuntimeError(
+            "[日总结] %s桶分析失败: 日期级日总结必须依赖 LLM，SKIP_LLM=true 不允许继续"
+            % DAILY_SUMMARY_BUCKET_LABELS[bucket_type]
         )
-        logger.info(
-            "[日总结] %s桶 AI出参(前300字): %s",
-            DAILY_SUMMARY_BUCKET_LABELS[bucket_type],
-            llm_result.response_text[:300],
+
+    llm_result = llm_client.call_chat(
+        _build_daily_bucket_messages(news_list, analysis_date, bucket_type),
+        log_label="日期级%s桶分析 %s" % (DAILY_SUMMARY_BUCKET_LABELS[bucket_type], analysis_date),
+        model=LLM_DAILY_SUMMARY_MODEL_ID,
+        max_tokens=900,
+        timeout=LLM_DAILY_SUMMARY_TIMEOUT,
+    )
+    logger.info(
+        "[日总结] %s桶 AI出参(前300字): %s",
+        DAILY_SUMMARY_BUCKET_LABELS[bucket_type],
+        llm_result.response_text[:300],
+    )
+    if not llm_result.success:
+        raise RuntimeError(
+            "[日总结] %s桶分析失败: model=%s, timeout=%ss, error=%s"
+            % (
+                DAILY_SUMMARY_BUCKET_LABELS[bucket_type],
+                LLM_DAILY_SUMMARY_MODEL_ID,
+                LLM_DAILY_SUMMARY_TIMEOUT,
+                llm_result.error or "unknown error",
+            )
         )
-        markdown = llm_result.response_text if llm_result.success else _generate_rule_based_summary(news_list)
 
     return {
         "bucket_type": bucket_type,
-        "parsed": _parse_summary_output(markdown),
+        "parsed": _parse_summary_output(llm_result.response_text),
     }
 
 
@@ -2481,7 +2493,7 @@ def run_news_pipeline(
 
     if not news_list:
         news_list = window_news
-    summary_text = daily_record.get("raw_summary") or _generate_rule_based_summary(news_list[:10])
+    summary_text = daily_record.get("raw_summary") or ""
 
     # LLM 调用汇总
     llm_client.log_summary()
