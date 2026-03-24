@@ -1608,14 +1608,24 @@ def _build_daily_bucket_messages(news_list: List[Dict[str, Any]], analysis_date:
         "stock": "[个股]",
     }[bucket_type]
     bucket_focus = {
-        "index": "只聚焦宏观、流动性、利率、汇率、商品、指数、风险偏好与跨市场定价，不要展开具体个股点评。",
-        "sector": "只聚焦行业、主题、产业链、ETF 与资金轮动，不要把宏观主线重复写成长篇大盘分析。",
-        "stock": "只聚焦具体公司、财报、指引、订单、产品、监管、资本开支和交易催化，不要泛化成宏观结论。",
+        "index": "你是大盘桶，只聚焦宏观、流动性、利率、汇率、商品、指数、风险偏好与跨市场定价。你的重点是回答今天最重要的市场主线是什么。不要展开行业轮动细节，不要输出大量个股点评。",
+        "sector": "你是板块桶，只聚焦行业、主题、产业链、ETF 与资金轮动。你的重点是回答哪些板块受影响、方向是什么、为什么。不要把宏观主线重复写成长篇大盘分析，不要展开大量个股点评。",
+        "stock": "你是个股桶，只聚焦具体公司、财报、指引、订单、产品、监管、资本开支和交易催化。你的重点是回答哪些标的值得复盘、催化是什么、标的层逻辑链是什么。不要泛化成宏观结论或整个板块结论。",
     }[bucket_type]
     bucket_major_events_hint = {
-        "index": "daily_major_events 需要提炼当天真正改变市场主线的大盘事件，通常 1-4 条。",
-        "sector": "daily_major_events 需要提炼最重要的板块/主题演化，通常 1-3 条。",
-        "stock": "daily_major_events 需要提炼最值得复盘的个股催化或个股群体变化，通常 1-3 条。",
+        "index": "daily_major_events 是你的主输出，提炼当天真正改变市场主线的大盘事件，通常 1-3 条。",
+        "sector": "daily_major_events 只补充最重要的板块/主题演化，通常 0-2 条，不要重复宏观主线。",
+        "stock": "daily_major_events 只补充最值得复盘的个股催化或个股群体变化，通常 0-2 条，不要复述大盘主线。",
+    }[bucket_type]
+    bucket_impact_hint = {
+        "index": "sector_impact_map 只输出少量大盘级影响，每条必须以 [大盘] 开头，通常 1-2 条。",
+        "sector": "sector_impact_map 是你的主输出，每条必须以 [板块] 开头，重点写板块方向、受影响原因与轮动关系，通常 2-4 条。",
+        "stock": "sector_impact_map 只补充少量个股级影响，每条必须以 [个股] 开头，通常 1-2 条。",
+    }[bucket_type]
+    bucket_chain_hint = {
+        "index": "linkage_logic_chain 只输出大盘层逻辑链，每条必须以 [大盘] 开头，通常 1-2 条。",
+        "sector": "linkage_logic_chain 只输出板块层逻辑链，每条必须以 [板块] 开头，通常 1-2 条。",
+        "stock": "linkage_logic_chain 是你的主输出，只输出个股或标的层逻辑链，每条必须以 [个股] 开头，通常 1-3 条。",
     }[bucket_type]
 
     return [
@@ -1640,11 +1650,15 @@ def _build_daily_bucket_messages(news_list: List[Dict[str, Any]], analysis_date:
                 '  "linkage_logic_chain": ["..."]\n'
                 "}\n\n"
                 "要求：\n"
-                f"1. sector_impact_map 中每条都必须以 {bucket_output_prefix} 开头。\n"
-                f"2. {bucket_major_events_hint}\n"
-                "3. linkage_logic_chain 必须体现“事件 -> 中间变量 -> 市场结果”的链式关系。\n"
-                "4. 只输出合法 JSON，不要输出 Markdown，不要输出代码块。\n"
-                "5. daily_major_events、sector_impact_map、linkage_logic_chain 必须是字符串数组；没有内容时返回空数组。\n\n"
+                f"1. daily_major_events 中每条都必须以 {bucket_output_prefix} 开头。\n"
+                f"2. sector_impact_map 中每条都必须以 {bucket_output_prefix} 开头。\n"
+                f"3. linkage_logic_chain 中每条都必须以 {bucket_output_prefix} 开头，并体现“事件 -> 中间变量 -> 市场结果”的链式关系。\n"
+                f"4. {bucket_major_events_hint}\n"
+                f"5. {bucket_impact_hint}\n"
+                f"6. {bucket_chain_hint}\n"
+                "7. 避免与其他桶重叠：大盘桶不要展开板块/个股细节，板块桶不要重复宏观主线，个股桶不要复述整体市场主线。\n"
+                "8. 只输出合法 JSON，不要输出 Markdown，不要输出代码块。\n"
+                "9. daily_major_events、sector_impact_map、linkage_logic_chain 必须是字符串数组；没有内容时返回空数组。\n\n"
                 f"{json.dumps(payload, ensure_ascii=False)}"
             ),
         },
@@ -1689,7 +1703,7 @@ def _call_daily_summary_bucket(bucket_type: str, news_list: List[Dict[str, Any]]
 
     return {
         "bucket_type": bucket_type,
-        "parsed": _parse_summary_output(llm_result.response_text),
+        "parsed": _normalize_bucket_summary_output(bucket_type, _parse_summary_output(llm_result.response_text)),
     }
 
 
@@ -1708,11 +1722,99 @@ def _merge_summary_lists(bucket_results: Dict[str, Dict[str, List[str]]], field_
     return merged
 
 
+def _normalize_summary_line_prefix(bucket_type: str, line: str) -> str:
+    text = str(line or "").strip()
+    if not text:
+        return ""
+    text = re.sub(r"^\[(大盘|板块|个股|index|sector|stock)\]\s*", "", text, flags=re.IGNORECASE)
+    prefix = {
+        "index": "[大盘]",
+        "sector": "[板块]",
+        "stock": "[个股]",
+    }[bucket_type]
+    return f"{prefix} {text}".strip()
+
+
+def _summary_line_dedupe_key(line: str) -> str:
+    text = str(line or "").strip()
+    text = re.sub(r"^\[(大盘|板块|个股|index|sector|stock)\]\s*", "", text, flags=re.IGNORECASE)
+    return re.sub(r"\s+", " ", text).strip()
+
+
+def _normalize_bucket_summary_output(bucket_type: str, parsed: Dict[str, Any]) -> Dict[str, List[str]]:
+    normalized: Dict[str, List[str]] = {}
+    for field_name in ("daily_major_events", "sector_impact_map", "linkage_logic_chain"):
+        lines = parsed.get(field_name) or []
+        normalized[field_name] = [
+            normalized_line
+            for normalized_line in (
+                _normalize_summary_line_prefix(bucket_type, line) for line in lines
+            )
+            if normalized_line
+        ]
+    return normalized
+
+
+def _assemble_summary_section(
+    bucket_results: Dict[str, Dict[str, List[str]]],
+    field_name: str,
+    primary_caps: List[tuple[str, int]],
+    limit: int,
+) -> List[str]:
+    merged: List[str] = []
+    seen: set[str] = set()
+
+    def append_from_bucket(bucket: str, cap: int | None = None) -> None:
+        count = 0
+        for item in bucket_results.get(bucket, {}).get(field_name, []):
+            normalized = item.strip()
+            if not normalized:
+                continue
+            dedupe_key = _summary_line_dedupe_key(normalized)
+            if dedupe_key in seen:
+                continue
+            seen.add(dedupe_key)
+            merged.append(normalized)
+            count += 1
+            if len(merged) >= limit or (cap is not None and count >= cap):
+                return
+
+    for bucket, cap in primary_caps:
+        if len(merged) >= limit:
+            break
+        append_from_bucket(bucket, cap)
+
+    if len(merged) >= limit:
+        return merged[:limit]
+
+    for bucket in DAILY_SUMMARY_BUCKET_ORDER:
+        if len(merged) >= limit:
+            break
+        append_from_bucket(bucket, None)
+
+    return merged[:limit]
+
+
 def _assemble_daily_summary(bucket_results: Dict[str, Dict[str, List[str]]]) -> Dict[str, List[str]]:
     return {
-        "daily_major_events": _merge_summary_lists(bucket_results, "daily_major_events", 6),
-        "sector_impact_map": _merge_summary_lists(bucket_results, "sector_impact_map", 12),
-        "linkage_logic_chain": _merge_summary_lists(bucket_results, "linkage_logic_chain", 8),
+        "daily_major_events": _assemble_summary_section(
+            bucket_results,
+            "daily_major_events",
+            [("index", 2), ("sector", 1), ("stock", 1)],
+            4,
+        ),
+        "sector_impact_map": _assemble_summary_section(
+            bucket_results,
+            "sector_impact_map",
+            [("sector", 3), ("index", 2), ("stock", 1)],
+            6,
+        ),
+        "linkage_logic_chain": _assemble_summary_section(
+            bucket_results,
+            "linkage_logic_chain",
+            [("index", 2), ("sector", 2), ("stock", 2)],
+            6,
+        ),
     }
 
 

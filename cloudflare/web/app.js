@@ -1028,7 +1028,7 @@ function renderAnalysis(analysis, news) {
   eyebrow.className = "eyebrow";
   eyebrow.append("每日新闻总结", buildAiBadge());
   const paragraph = document.createElement("p");
-  paragraph.textContent = formatBulletStyleText(effective?.daily_major_events || "暂无");
+  paragraph.textContent = formatHashNumberedText(effective?.daily_major_events || "暂无");
   summary.append(eyebrow, paragraph);
   analysisBox.appendChild(summary);
 
@@ -1052,7 +1052,7 @@ function renderAnalysis(analysis, news) {
         ...split.untagged.map((l) => l),
       ];
       const body = document.createElement("p");
-      body.textContent = formatBulletStyleText(allLines.join("\n"));
+      body.textContent = formatNumberedText(allLines.join("\n"));
       card.append(title, body);
       outline.appendChild(card);
     }
@@ -1063,7 +1063,7 @@ function renderAnalysis(analysis, news) {
       const title = document.createElement("strong");
       title.append("逻辑链", buildAiBadge());
       const body = document.createElement("p");
-      body.textContent = formatBulletStyleText(chain);
+      body.textContent = formatNumberedText(chain);
       card.append(title, body);
       outline.appendChild(card);
     }
@@ -1351,17 +1351,28 @@ function getEffectiveAnalysis(analysis, news) {
     .some((value) => String(value || "").trim() && !isGarbageAnalysisSummary(value));
   if (hasContent) return sections;
 
+  const taggedLine = (item, text) => {
+    const label = {
+      index: "[大盘]",
+      sector: "[板块]",
+      stock: "[个股]",
+    }[normalizeNewsType(item?.type)] || "[大盘]";
+    const normalized = String(text || "").trim();
+    if (!normalized) return "";
+    if (/^\[(大盘|板块|个股)\]/.test(normalized)) return normalized;
+    return `${label} ${normalized}`;
+  };
   const pick = (predicate) => (news || [])
     .filter(predicate)
     .slice(0, 4)
-    .map((item) => item.ai_summary || item.title || item.content || "")
+    .map((item) => taggedLine(item, item.ai_summary || item.title || item.content || ""))
     .filter(Boolean)
     .join("\n");
   return {
     daily_major_events: pick(() => true),
     sector_impact_map: (news || [])
       .slice(0, 3)
-      .map((item) => item.market_impact || item.ai_summary || item.title || "")
+      .map((item) => taggedLine(item, item.market_impact || item.ai_summary || item.title || ""))
       .filter(Boolean)
       .join("\n") || "暂无新闻分析，请先运行新闻采集。",
     linkage_logic_chain: pick((item) => normalizeNewsType(item.type) === "stock") || pick(() => true),
@@ -1375,7 +1386,7 @@ function buildDefaultNewsBrief(analysis, news) {
 function buildAiSummaryText(analysis, news) {
   const effective = getEffectiveAnalysis(analysis, news);
   const candidate = String(effective.daily_major_events || "").trim();
-  if (candidate && !isGarbageAnalysisSummary(candidate)) return formatBulletStyleText(candidate);
+  if (candidate && !isGarbageAnalysisSummary(candidate)) return formatHashNumberedText(candidate);
 
   const parts = [];
   const macroLine = splitLines(effective.daily_major_events)[0] || splitLines(effective.sector_impact_map)[0];
@@ -1385,19 +1396,44 @@ function buildAiSummaryText(analysis, news) {
   if (macroLine) parts.push(`宏观主线：${macroLine}`);
   if (symbolLine) parts.push(`标的主线：${symbolLine}`);
   if (impactLine) parts.push(`市场影响：${impactLine}`);
-  return formatBulletStyleText(parts.join("\n")) || "暂无新闻分析，请先运行新闻采集。";
+  return formatHashNumberedText(parts.join("\n")) || "暂无新闻分析，请先运行新闻采集。";
 }
 
-function formatBulletStyleText(value) {
+function stripLeadingListMarker(value) {
+  return String(value || "")
+    .trim()
+    .replace(/^#\s*/, "")
+    .replace(/^\d+[.)]\s*/, "")
+    .replace(/^[•·▪◦\-]\s*/, "");
+}
+
+function ensureDisplayTag(value, fallbackLabel = "[大盘]") {
+  const normalized = stripLeadingListMarker(value);
+  if (!normalized) return "";
+  if (/^\[(大盘|板块|个股)\]/.test(normalized)) return normalized;
+  return `${fallbackLabel} ${normalized}`;
+}
+
+function formatHashNumberedText(value, fallbackLabel = "[大盘]") {
   const text = String(value || "").trim();
   if (!text) return "";
   const items = splitLines(text)
     .map((item) => item.trim())
     .filter(Boolean)
     .map((item, i) => {
-      const stripped = item.replace(/^[•·▪◦\-]\s*/, "");
-      return `# ${i + 1}.${stripped}`;
+      const stripped = ensureDisplayTag(item, fallbackLabel);
+      return `# ${i + 1}. ${stripped}`;
     });
+  return items.join("\n");
+}
+
+function formatNumberedText(value, fallbackLabel = "[大盘]") {
+  const text = String(value || "").trim();
+  if (!text) return "";
+  const items = splitLines(text)
+    .map((item) => item.trim())
+    .filter(Boolean)
+    .map((item, i) => `${i + 1}. ${ensureDisplayTag(item, fallbackLabel)}`);
   return items.join("\n");
 }
 
@@ -1431,18 +1467,18 @@ function splitAnalysisByType(text) {
   const result = { index: [], sector: [], stock: [], untagged: [] };
   for (const line of lines) {
     if (/^\[(大盘|index)\]/i.test(line)) {
-      result.index.push(line.replace(/^\[(大盘|index)\]\s*/i, ""));
+      result.index.push(line.replace(/^\[(index)\]\s*/i, "[大盘] "));
     } else if (/^\[(板块|sector)\]/i.test(line)) {
-      result.sector.push(line.replace(/^\[(板块|sector)\]\s*/i, ""));
+      result.sector.push(line.replace(/^\[(sector)\]\s*/i, "[板块] "));
     } else if (/^\[(个股|stock)\]/i.test(line)) {
-      result.stock.push(line.replace(/^\[(个股|stock)\]\s*/i, ""));
+      result.stock.push(line.replace(/^\[(stock)\]\s*/i, "[个股] "));
     } else {
       result.untagged.push(line);
     }
   }
   // If nothing is tagged, fall back: put all lines in index
   if (!result.index.length && !result.sector.length && !result.stock.length) {
-    result.index = result.untagged;
+    result.index = result.untagged.map((line) => ensureDisplayTag(line, "[大盘]"));
     result.untagged = [];
   }
   return result;

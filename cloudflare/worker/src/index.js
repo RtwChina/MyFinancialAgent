@@ -1013,19 +1013,32 @@ function normalizeReviewAnalysis(analysis, newsItems) {
   };
   const summaryLine = (item) => item.ai_summary || item.title || item.content || "";
   const impactLine = (item) => item.market_impact || item.rule_reason || "";
-  const buildLines = (items) => items.map((item) => summaryLine(item)).filter(Boolean).map((item) => `- ${item}`).join("\n");
+  const buildTaggedLine = (item, text) => {
+    const label = {
+      index: "[大盘]",
+      sector: "[板块]",
+      stock: "[个股]",
+    }[normalizeNewsType(item?.type)] || "[大盘]";
+    const normalized = String(text || "").trim();
+    if (!normalized) return "";
+    if (/^\[(大盘|板块|个股)\]/.test(normalized)) return normalized;
+    return `${label} ${normalized}`;
+  };
+  const buildLines = (items) => items
+    .map((item) => buildTaggedLine(item, summaryLine(item)))
+    .filter(Boolean)
+    .join("\n");
   const topImpacts = newsItems
     .slice(0, 3)
-    .map((item) => impactLine(item))
+    .map((item) => buildTaggedLine(item, impactLine(item)))
     .filter(Boolean)
-    .map((item) => `- ${item}`)
     .join("\n");
 
   return {
     ...(analysis || {}),
     daily_major_events: buildLines(grouped.major),
-    sector_impact_map: topImpacts || "- 暂无可用的大盘与板块影响，请先更新新闻数据。",
-    linkage_logic_chain: buildLines(grouped.symbol) || topImpacts || "- 暂无可用的联动逻辑链，请先更新新闻数据。",
+    sector_impact_map: topImpacts || "[大盘] 暂无可用的大盘与板块影响，请先更新新闻数据。",
+    linkage_logic_chain: buildLines(grouped.symbol) || topImpacts || "[个股] 暂无可用的联动逻辑链，请先更新新闻数据。",
   };
 }
 
