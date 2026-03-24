@@ -84,7 +84,7 @@ def build_structured_prompt(items: List[Dict[str, Any]], long_content: bool = Fa
         "    {\n"
         '      "news_hash": "原样返回",\n'
         '      "keep": true,\n'
-        '      "type": "macro|market|symbol",\n'
+        '      "type": "index|sector|stock",\n'
         '      "ai_summary": "一句中文摘要",\n'
         '      "market_impact": "一句中文说明",\n'
         '      "importance_stars": 3,\n'

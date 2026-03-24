@@ -325,7 +325,7 @@ async function ingestNews(env, items) {
         item.content || "",
         item.url || "",
         item.source || "",
-        item.type || "market",
+        normalizeCanonicalNewsType(item.type),
         item.rule_passed ? 1 : 0,
         item.rule_reason || "",
         item.processing_status || "rule_screened",
@@ -627,15 +627,13 @@ async function getNewsList(env, url) {
     params.push(source);
   }
   if (type) {
-    // 兼容新旧 type 值：macro/market/symbol → index/sector/stock
-    const typeMap = { macro: "index", market: "sector", symbol: "stock" };
-    const normalizedType = typeMap[type] || type;
+    const normalizedType = normalizeCanonicalNewsType(type);
     if (normalizedType === "index") {
-      clauses.push("type IN ('index', 'macro')");
+      clauses.push("type = 'index'");
     } else if (normalizedType === "sector") {
-      clauses.push("type IN ('sector', 'market')");
+      clauses.push("type = 'sector'");
     } else if (normalizedType === "stock") {
-      clauses.push("type IN ('stock', 'symbol')");
+      clauses.push("type = 'stock'");
     } else {
       clauses.push("type = ?");
       params.push(normalizedType);
@@ -943,6 +941,7 @@ function enrichNewsItem(item) {
 
   return {
     ...item,
+    type: normalizeCanonicalNewsType(item.type),
     primary_symbol: primarySymbol,
     related_symbols: relatedSymbols,
     is_relevant_to_review: isRelevantToReview,
@@ -983,6 +982,14 @@ function parseStoredIds(value) {
   }
 }
 
+function normalizeCanonicalNewsType(type) {
+  const value = String(type || "").trim().toLowerCase();
+  if (value === "sector") return "sector";
+  if (value === "stock" || value === "symbol") return "stock";
+  if (value === "index" || value === "macro" || value === "market") return "index";
+  return "index";
+}
+
 function normalizeReviewStatus(status) {
   if (status === "completed") return "reviewed";
   if (status === "deleted") return "initialized";
@@ -1002,7 +1009,7 @@ function normalizeReviewAnalysis(analysis, newsItems) {
 
   const grouped = {
     major: newsItems.slice(0, 3),
-    symbol: newsItems.filter((item) => item.type === "stock" || item.type === "symbol").slice(0, 3),
+    symbol: newsItems.filter((item) => item.type === "stock").slice(0, 3),
   };
   const summaryLine = (item) => item.ai_summary || item.title || item.content || "";
   const impactLine = (item) => item.market_impact || item.rule_reason || "";
@@ -1104,12 +1111,12 @@ async function completeReview(env, archiveDate) {
       `UPDATE news_raw_data
        SET processing_status = 'reviewed'
        WHERE pub_date >= ? AND pub_date <= ?
-         AND COALESCE(importance_stars, 0) >= 3
-         AND (
-           COALESCE(rule_passed, 0) = 1
-           OR type IN ('index', 'sector', 'stock', 'macro', 'market', 'symbol')
-           OR COALESCE(ai_summary, '') != ''
-         )`,
+           AND COALESCE(importance_stars, 0) >= 3
+           AND (
+             COALESCE(rule_passed, 0) = 1
+             OR type IN ('index', 'sector', 'stock')
+             OR COALESCE(ai_summary, '') != ''
+           )`,
     )
       .bind(newsWindow.start, newsWindow.end)
       .run();
@@ -1134,7 +1141,7 @@ async function completeReview(env, archiveDate) {
            AND COALESCE(importance_stars, 0) >= 3
            AND (
              COALESCE(rule_passed, 0) = 1
-             OR type IN ('index', 'sector', 'stock', 'macro', 'market', 'symbol')
+             OR type IN ('index', 'sector', 'stock')
              OR COALESCE(ai_summary, '') != ''
            )
          ORDER BY pub_date DESC, id DESC`;
@@ -1180,7 +1187,7 @@ async function completeReview(env, archiveDate) {
         item.content || "",
         item.url || "",
         item.source || "",
-        item.type || "market",
+        normalizeCanonicalNewsType(item.type),
         item.rule_passed ? 1 : 0,
         item.rule_reason || "",
         item.processing_status || "",

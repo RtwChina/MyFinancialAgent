@@ -78,9 +78,6 @@ const NEWS_TYPE_LABELS = {
   index: "大盘",
   sector: "板块",
   stock: "个股",
-  macro: "大盘",
-  market: "板块",
-  symbol: "个股",
 };
 
 const REVIEW_STATUS_LABELS = {
@@ -1367,7 +1364,7 @@ function getEffectiveAnalysis(analysis, news) {
       .map((item) => item.market_impact || item.ai_summary || item.title || "")
       .filter(Boolean)
       .join("\n") || "暂无新闻分析，请先运行新闻采集。",
-    linkage_logic_chain: pick((item) => item.type === "symbol" || item.type === "stock") || pick(() => true),
+    linkage_logic_chain: pick((item) => normalizeNewsType(item.type) === "stock") || pick(() => true),
   };
 }
 
@@ -1424,7 +1421,8 @@ function sortNewsByStars(news) {
 
 function normalizeNewsType(type) {
   if (type === "stock" || type === "symbol") return "stock";
-  if (type === "sector" || type === "market") return "sector";
+  if (type === "sector") return "sector";
+  if (type === "market" || type === "macro") return "index";
   return "index";
 }
 
@@ -1620,7 +1618,7 @@ function normalizeHeadlineText(value) {
 }
 
 function formatNewsType(type) {
-  return NEWS_TYPE_LABELS[type] || type || "未分类";
+  return NEWS_TYPE_LABELS[normalizeNewsType(type)] || normalizeNewsType(type) || "未分类";
 }
 
 function formatReviewStatus(status) {

@@ -329,10 +329,14 @@ Stage 3：LLM 深度分析（每批次完成后立即写库）
   - 大盘新闻
   - 板块新闻
   - 个股新闻
-- 前端会兼容旧值：
-  - `macro` 会被视作 `index`
-  - `market` 会被视作 `sector`
-  - `symbol` 会被视作 `stock`
+- 系统标准类型仅保留：
+  - `index`
+  - `sector`
+  - `stock`
+- 历史数据迁移规则：
+  - `macro` 会被归并为 `index`
+  - `market` 会被归并为 `index`
+  - `symbol` 会被归并为 `stock`
 
 所以，`type` 不只是给用户看的标签，它直接决定了这条新闻在复盘工作台出现在哪个大类里。
 

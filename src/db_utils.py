@@ -214,7 +214,7 @@ def upsert_news_data(data: Dict[str, Any], db_path: str = None) -> str:
             data.get('content'),
             data.get('url'),
             data.get('source'),
-            data.get('type', 'market'),
+            data.get('type', 'index'),
             1 if data.get('rule_passed') else 0,
             data.get('rule_reason'),
             data.get('processing_status', 'rule_screened'),

@@ -58,6 +58,8 @@ LLM_TIMEOUT = int(os.getenv("LLM_TIMEOUT", "300"))  # LLM 超时时间(秒)
 LLM_RULES_TIMEOUT = int(os.getenv("LLM_RULES_TIMEOUT", str(LLM_TIMEOUT)))
 LLM_BATCH_TIMEOUT = int(os.getenv("LLM_BATCH_TIMEOUT", str(LLM_TIMEOUT)))
 LLM_SUMMARY_TIMEOUT = int(os.getenv("LLM_SUMMARY_TIMEOUT", str(LLM_TIMEOUT)))
+LLM_DAILY_SUMMARY_MODEL_ID = os.getenv("LLM_DAILY_SUMMARY_MODEL_ID", LLM_SUMMARY_MODEL_ID)
+LLM_DAILY_SUMMARY_TIMEOUT = int(os.getenv("LLM_DAILY_SUMMARY_TIMEOUT", str(LLM_SUMMARY_TIMEOUT)))
 LLM_MAX_WORKERS = int(os.getenv("LLM_MAX_WORKERS", "5"))  # 并发数（Session 连接池复用，支持高并发）
 LLM_BATCH_SIZE = max(1, int(os.getenv("LLM_BATCH_SIZE", "8")))
 LLM_RULES_SAMPLE_SIZE = max(8, int(os.getenv("LLM_RULES_SAMPLE_SIZE", "12")))
@@ -1120,7 +1122,7 @@ def _call_batch_llm(news_batch: List[Dict[str, Any]], batch_id: str) -> Dict[str
 
 
 def _normalize_type(value: str | None, fallback: str) -> str:
-    """规范化新闻类型字段，兼容旧版枚举值（macro/market/symbol -> index/sector/stock）"""
+    """规范化新闻类型字段，只保留 index/sector/stock 三类标准值。"""
     # 新值
     if value in {"index", "sector", "stock"}:
         return value
@@ -1128,10 +1130,10 @@ def _normalize_type(value: str | None, fallback: str) -> str:
     if value == "macro":
         return "index"
     if value == "market":
-        return "sector"
+        return "index"
     if value == "symbol":
         return "stock"
-    return fallback
+    return fallback if fallback in {"index", "sector", "stock"} else "index"
 
 
 def _normalize_importance_stars(value: Any, fallback: int) -> int:
@@ -1396,6 +1398,20 @@ def _format_summary_markdown(parsed: Dict[str, List[str]]) -> str:
     )
 
 
+DAILY_SUMMARY_BUCKET_ORDER = ("index", "sector", "stock")
+DAILY_SUMMARY_BUCKET_LABELS = {
+    "index": "大盘",
+    "sector": "板块",
+    "stock": "个股",
+}
+DAILY_SUMMARY_BUCKET_FLOORS = {
+    "index": 8,
+    "sector": 5,
+    "stock": 5,
+}
+DAILY_SUMMARY_TOTAL_CAP = 40
+
+
 def _split_summary_field(value: Any) -> List[str]:
     if not value:
         return []
@@ -1448,7 +1464,7 @@ def _generate_rule_based_summary(news_list: List[Dict[str, Any]]) -> str:
                 parsed["sector_impact_map"].append(
                     f"{prefix} {label}：偏多。原因是{item.get('market_impact') or item.get('rule_reason') or '相关事件改善了该方向的交易预期。'}"
                 )
-        elif item_type in {"index", "macro", "market"} and "美股大盘" not in seen_market_labels:
+        elif _normalize_type(item_type, "index") == "index" and "美股大盘" not in seen_market_labels:
             seen_market_labels.add("美股大盘")
             parsed["sector_impact_map"].append(
                 "[大盘] 美股大盘：中性。原因是宏观与市场事件交织，短线方向仍取决于后续定价。"
@@ -1456,7 +1472,99 @@ def _generate_rule_based_summary(news_list: List[Dict[str, Any]]) -> str:
     return _format_summary_markdown(parsed)
 
 
-def _build_daily_summary_payload(news_list: List[Dict[str, Any]], analysis_date: str) -> Dict[str, Any]:
+def _daily_summary_sort_key(item: Dict[str, Any]) -> Tuple[Any, ...]:
+    return (
+        item.get("importance_stars", 0),
+        item.get("pub_date", ""),
+        int(item.get("id") or 0),
+    )
+
+
+def _bucket_summary_candidates(news_list: List[Dict[str, Any]]) -> Dict[str, List[Dict[str, Any]]]:
+    buckets: Dict[str, List[Dict[str, Any]]] = {bucket: [] for bucket in DAILY_SUMMARY_BUCKET_ORDER}
+    for item in sorted(news_list, key=_daily_summary_sort_key, reverse=True):
+        bucket = _normalize_type(item.get("type"), "index")
+        buckets.setdefault(bucket, []).append(item)
+    return buckets
+
+
+def _select_daily_summary_inputs(news_list: List[Dict[str, Any]]) -> Dict[str, List[Dict[str, Any]]]:
+    buckets = _bucket_summary_candidates(news_list)
+    selected: Dict[str, List[Dict[str, Any]]] = {bucket: [] for bucket in DAILY_SUMMARY_BUCKET_ORDER}
+    selected_ids: set[int] = set()
+
+    for bucket in DAILY_SUMMARY_BUCKET_ORDER:
+        floor = DAILY_SUMMARY_BUCKET_FLOORS[bucket]
+        for item in buckets.get(bucket, [])[:floor]:
+            item_id = int(item.get("id") or 0)
+            if item_id and item_id not in selected_ids:
+                selected[bucket].append(item)
+                selected_ids.add(item_id)
+
+    remaining_slots = max(0, DAILY_SUMMARY_TOTAL_CAP - sum(len(items) for items in selected.values()))
+    if remaining_slots <= 0:
+        return selected
+
+    remainder_pool: List[Dict[str, Any]] = []
+    for bucket in DAILY_SUMMARY_BUCKET_ORDER:
+        floor = min(DAILY_SUMMARY_BUCKET_FLOORS[bucket], len(buckets.get(bucket, [])))
+        remainder_pool.extend(buckets.get(bucket, [])[floor:])
+
+    for item in sorted(remainder_pool, key=_daily_summary_sort_key, reverse=True):
+        if remaining_slots <= 0:
+            break
+        item_id = int(item.get("id") or 0)
+        if item_id and item_id in selected_ids:
+            continue
+        bucket = _normalize_type(item.get("type"), "index")
+        selected[bucket].append(item)
+        if item_id:
+            selected_ids.add(item_id)
+        remaining_slots -= 1
+
+    return selected
+
+
+def _daily_summary_ids(news_list: List[Dict[str, Any]]) -> List[int]:
+    return [int(item["id"]) for item in news_list if item.get("id") is not None]
+
+
+def _log_daily_summary_bucket_selection(stage_label: str, buckets: Dict[str, List[Dict[str, Any]]]) -> None:
+    for bucket in DAILY_SUMMARY_BUCKET_ORDER:
+        items = buckets.get(bucket, [])
+        logger.info(
+            "[日总结] %s：%s桶 %s条 ids=%s",
+            stage_label,
+            DAILY_SUMMARY_BUCKET_LABELS[bucket],
+            len(items),
+            _daily_summary_ids(items),
+        )
+
+
+def _log_daily_summary_selection_breakdown(
+    qualified_buckets: Dict[str, List[Dict[str, Any]]],
+    selected_buckets: Dict[str, List[Dict[str, Any]]],
+) -> None:
+    for bucket in DAILY_SUMMARY_BUCKET_ORDER:
+        qualified_count = len(qualified_buckets.get(bucket, []))
+        floor_selected = min(qualified_count, DAILY_SUMMARY_BUCKET_FLOORS[bucket])
+        final_selected = len(selected_buckets.get(bucket, []))
+        flexible_added = max(0, final_selected - floor_selected)
+        logger.info(
+            "[日总结] %s桶选入明细：候选 %s条/保底选入 %s条/弹性补位 %s条/最终选入 %s条",
+            DAILY_SUMMARY_BUCKET_LABELS[bucket],
+            qualified_count,
+            floor_selected,
+            flexible_added,
+            final_selected,
+        )
+
+
+def _build_daily_summary_payload(
+    news_list: List[Dict[str, Any]],
+    analysis_date: str,
+    bucket_type: str,
+) -> Dict[str, Any]:
     items: List[Dict[str, Any]] = []
     for index, item in enumerate(news_list, start=1):
         items.append({
@@ -1475,8 +1583,115 @@ def _build_daily_summary_payload(news_list: List[Dict[str, Any]], analysis_date:
         })
     return {
         "analysis_date": analysis_date,
+        "bucket_type": bucket_type,
+        "bucket_label": DAILY_SUMMARY_BUCKET_LABELS[bucket_type],
         "item_count": len(items),
         "items": items,
+    }
+
+
+def _build_daily_bucket_messages(news_list: List[Dict[str, Any]], analysis_date: str, bucket_type: str) -> List[Dict[str, str]]:
+    payload = _build_daily_summary_payload(news_list, analysis_date, bucket_type)
+    bucket_label = DAILY_SUMMARY_BUCKET_LABELS[bucket_type]
+    bucket_output_prefix = {
+        "index": "[大盘]",
+        "sector": "[板块]",
+        "stock": "[个股]",
+    }[bucket_type]
+    bucket_focus = {
+        "index": "只聚焦宏观、流动性、利率、汇率、商品、指数、风险偏好与跨市场定价，不要展开具体个股点评。",
+        "sector": "只聚焦行业、主题、产业链、ETF 与资金轮动，不要把宏观主线重复写成长篇大盘分析。",
+        "stock": "只聚焦具体公司、财报、指引、订单、产品、监管、资本开支和交易催化，不要泛化成宏观结论。",
+    }[bucket_type]
+    bucket_major_events_hint = {
+        "index": "daily_major_events 需要提炼当天真正改变市场主线的大盘事件，通常 1-4 条。",
+        "sector": "daily_major_events 需要提炼最重要的板块/主题演化，通常 1-3 条。",
+        "stock": "daily_major_events 需要提炼最值得复盘的个股催化或个股群体变化，通常 1-3 条。",
+    }[bucket_type]
+
+    return [
+        {
+            "role": "system",
+            "content": (
+                "你是一位拥有20年实战经验的首席策略分析师与资深股票经纪人。"
+                f"你当前只负责处理“{bucket_label}桶”新闻。"
+                "你必须只输出合法 JSON，不能输出任何 JSON 之外的解释。"
+                "你必须基于输入新闻事实进行分析，不得编造输入中不存在的事实。"
+                "如果多条新闻属于同一主题，必须合并表达，避免重复。"
+            ),
+        },
+        {
+            "role": "user",
+            "content": (
+                f"请对{bucket_label}桶新闻做子总结。{bucket_focus}\n\n"
+                "输出格式必须为 JSON：\n"
+                "{\n"
+                '  "daily_major_events": ["..."],\n'
+                '  "sector_impact_map": ["..."],\n'
+                '  "linkage_logic_chain": ["..."]\n'
+                "}\n\n"
+                "要求：\n"
+                f"1. sector_impact_map 中每条都必须以 {bucket_output_prefix} 开头。\n"
+                f"2. {bucket_major_events_hint}\n"
+                "3. linkage_logic_chain 必须体现“事件 -> 中间变量 -> 市场结果”的链式关系。\n"
+                "4. 只输出合法 JSON，不要输出 Markdown，不要输出代码块。\n"
+                "5. daily_major_events、sector_impact_map、linkage_logic_chain 必须是字符串数组；没有内容时返回空数组。\n\n"
+                f"{json.dumps(payload, ensure_ascii=False)}"
+            ),
+        },
+    ]
+
+
+def _call_daily_summary_bucket(bucket_type: str, news_list: List[Dict[str, Any]], analysis_date: str) -> Dict[str, Any]:
+    if not news_list:
+        return {
+            "bucket_type": bucket_type,
+            "parsed": {"daily_major_events": [], "sector_impact_map": [], "linkage_logic_chain": []},
+        }
+
+    if EFFECTIVE_SKIP_LLM:
+        markdown = _generate_rule_based_summary(news_list)
+    else:
+        llm_result = llm_client.call_chat(
+            _build_daily_bucket_messages(news_list, analysis_date, bucket_type),
+            log_label="日期级%s桶分析 %s" % (DAILY_SUMMARY_BUCKET_LABELS[bucket_type], analysis_date),
+            model=LLM_DAILY_SUMMARY_MODEL_ID,
+            max_tokens=900,
+            timeout=LLM_DAILY_SUMMARY_TIMEOUT,
+        )
+        logger.info(
+            "[日总结] %s桶 AI出参(前300字): %s",
+            DAILY_SUMMARY_BUCKET_LABELS[bucket_type],
+            llm_result.response_text[:300],
+        )
+        markdown = llm_result.response_text if llm_result.success else _generate_rule_based_summary(news_list)
+
+    return {
+        "bucket_type": bucket_type,
+        "parsed": _parse_summary_output(markdown),
+    }
+
+
+def _merge_summary_lists(bucket_results: Dict[str, Dict[str, List[str]]], field_name: str, limit: int) -> List[str]:
+    merged: List[str] = []
+    seen: set[str] = set()
+    for bucket in DAILY_SUMMARY_BUCKET_ORDER:
+        for item in bucket_results.get(bucket, {}).get(field_name, []):
+            normalized = item.strip()
+            if not normalized or normalized in seen:
+                continue
+            seen.add(normalized)
+            merged.append(normalized)
+            if len(merged) >= limit:
+                return merged
+    return merged
+
+
+def _assemble_daily_summary(bucket_results: Dict[str, Dict[str, List[str]]]) -> Dict[str, List[str]]:
+    return {
+        "daily_major_events": _merge_summary_lists(bucket_results, "daily_major_events", 6),
+        "sector_impact_map": _merge_summary_lists(bucket_results, "sector_impact_map", 12),
+        "linkage_logic_chain": _merge_summary_lists(bucket_results, "linkage_logic_chain", 8),
     }
 
 
@@ -1586,86 +1801,38 @@ def build_daily_summary_record(news_list: List[Dict[str, Any]], analysis_date: s
         len(news_list),
         [item.get("news_hash", "")[:8] for item in news_list[:20]],
     )
+    qualified_buckets = _bucket_summary_candidates(news_list)
+    _log_daily_summary_bucket_selection("符合要求", qualified_buckets)
 
-    summary_news = sorted(
-        news_list,
-        key=lambda item: (
-            item.get("importance_stars", 0),
-            item.get("pub_date", ""),
-        ),
-        reverse=True,
-    )[:20]
+    selected_buckets = _select_daily_summary_inputs(news_list)
+    _log_daily_summary_selection_breakdown(qualified_buckets, selected_buckets)
+    _log_daily_summary_bucket_selection("进入LLM", selected_buckets)
 
-    # 打印 AI 入参摘要
-    titles = [item.get("title", "")[:30] for item in summary_news]
-    logger.info("[日总结] AI入参: %s条候选, titles=%s", len(summary_news), titles)
+    bucket_titles = {
+        bucket: [item.get("title", "")[:40] for item in selected_buckets.get(bucket, [])]
+        for bucket in DAILY_SUMMARY_BUCKET_ORDER
+    }
+    logger.info("[日总结] AI入参摘要: %s", bucket_titles)
 
-    if EFFECTIVE_SKIP_LLM:
-        markdown = _generate_rule_based_summary(summary_news)
-    else:
-        payload = _build_daily_summary_payload(summary_news, analysis_date)
-        messages = [
-            {
-                "role": "system",
-                "content": (
-                    "你是一位拥有20年实战经验的首席策略分析师与资深股票经纪人。"
-                    "你擅长从海量碎片化新闻中提取核心叙事，并推导底层逻辑对二级市场的传导机制。"
-                    "你会把输入新闻视为一个整体进行综合研判，而不是逐条复述。"
-                    "你必须只输出合法 JSON，不能输出任何 JSON 之外的解释。"
-                    "你必须基于输入新闻事实进行分析，不得编造输入中不存在的事实。"
-                    "如果多条新闻属于同一主题，必须合并表达，避免重复。"
-                ),
-            },
-            {
-                "role": "user",
-                "content": (
-                    "我会为你提供一组当日最重要的候选新闻。"
-                    "请将这些新闻视为一个整体进行综合研判，并返回一个唯一的、可直接存入数据库的 JSON 对象。\n\n"
-                    "分析维度如下：\n"
-                    "1. daily_major_events：从全部候选新闻中提炼出当天真正改变市场格局、风险偏好或交易主线的核心大事。"
-                    "必须做综合归纳，不允许只是复述新闻标题。每一条都应说明今天发生了什么，以及为什么它重要。\n"
-                    "2. sector_impact_map: 必须先判断这些事件对中美大盘整体的影响，再分析受到影响的板块和个股。"
-                    "每一条必须以 [大盘]、[板块] 或 [个股] 开头，再写标的名和方向。"
-                    "例如: [大盘] 美股大盘：偏空。原因是... / [板块] 半导体：偏多。原因是... / [个股] MU：中性。原因是...\n"
-                    "3. linkage_logic_chain：这是核心部分。"
-                    "请解释这些新闻如何通过一条条市场传导链影响资产价格。"
-                    "每条逻辑链都必须体现\"事件 -> 中间变量 -> 市场结果\"的链式关系，"
-                    "并体现流动性、利率与美债收益率、风险偏好、估值模型、盈利预期、政策预期、汇率、商品供需、通胀预期、产业链景气度等专业视角。\n\n"
-                    "约束如下：\n"
-                    "1. 严禁逐条列举新闻，必须是综合全部候选新闻后的整体产出。\n"
-                    "2. 所有输出必须为自然中文，适合直接展示给用户阅读。\n"
-                    "3. 不允许为了凑条数而重复表达、拆分同一逻辑或制造空泛结论。\n"
-                    "4. daily_major_events 根据新闻密度提炼最重要的大事，通常为 2-5 条；如果有效主线不足，可以更少，但不要凑数。\n"
-                    "5. sector_impact_map 必须优先覆盖中美大盘整体影响，再补充真正受到影响的重点板块。每条都必须明确方向，方向只能使用：偏多、偏空、中性。\n"
-                    "6. 如果某些板块影响不明显，可以不展开，不要凑数。\n"
-                    "7. linkage_logic_chain 根据当日主线输出最重要的逻辑链，通常为 2-5 条；宁可少而深，不要多而散。\n\n"
-                    "请基于下面按重要性倒排的 20 条候选新闻，输出一个 JSON 对象，格式必须为：\n"
-                    "{\n"
-                    '  "daily_major_events": ["..."],\n'
-                    '  "sector_impact_map": ["..."],\n'
-                    '  "linkage_logic_chain": ["..."]\n'
-                    "}\n\n"
-                    "要求：\n"
-                    "1. 只输出合法 JSON，不要输出 Markdown，不要输出代码块。\n"
-                    "2. daily_major_events、sector_impact_map、linkage_logic_chain 必须是字符串数组；没有内容时返回空数组。\n"
-                    "3. 判断时优先依据 title + content；ai_summary 和 market_impact 仅作为辅助。\n"
-                    "4. 不要输出空泛评论，必须落到具体事件、方向和影响。\n\n"
-                    f"{json.dumps(payload, ensure_ascii=False)}"
-                ),
-            },
-        ]
-        llm_result = llm_client.call_chat(
-            messages,
-            log_label="日期级综合分析 %s" % analysis_date,
-            model=LLM_SUMMARY_MODEL_ID,
-            max_tokens=1400,
-            timeout=LLM_SUMMARY_TIMEOUT,
-        )
-        # 打印 AI 出参摘要
-        logger.info("[日总结] AI出参(前300字): %s", llm_result.response_text[:300])
-        markdown = llm_result.response_text if llm_result.success else _generate_rule_based_summary(summary_news)
+    bucket_results: Dict[str, Dict[str, List[str]]] = {
+        bucket: {"daily_major_events": [], "sector_impact_map": [], "linkage_logic_chain": []}
+        for bucket in DAILY_SUMMARY_BUCKET_ORDER
+    }
+    with ThreadPoolExecutor(max_workers=3) as executor:
+        future_to_bucket = {
+            executor.submit(_call_daily_summary_bucket, bucket, selected_buckets.get(bucket, []), analysis_date): bucket
+            for bucket in DAILY_SUMMARY_BUCKET_ORDER
+            if selected_buckets.get(bucket)
+        }
+        for future in as_completed(future_to_bucket):
+            result = future.result()
+            bucket_results[result["bucket_type"]] = result["parsed"]
 
-    parsed = _parse_summary_output(markdown)
+    parsed = _assemble_daily_summary(bucket_results)
+    source_news_ids: List[int] = []
+    for bucket in DAILY_SUMMARY_BUCKET_ORDER:
+        source_news_ids.extend(_daily_summary_ids(selected_buckets.get(bucket, [])))
+    logger.info("[日总结] source_news_ids：%s条 ids=%s", len(source_news_ids), source_news_ids)
     return {
         "analysis_date": analysis_date,
         "analysis_scope": "daily_summary",
@@ -1673,10 +1840,7 @@ def build_daily_summary_record(news_list: List[Dict[str, Any]], analysis_date: s
         "daily_major_events": "\n".join(parsed["daily_major_events"]),
         "sector_impact_map": "\n".join(parsed["sector_impact_map"]),
         "linkage_logic_chain": "\n".join(parsed["linkage_logic_chain"]),
-        "source_news_ids": json.dumps(
-            [int(item["id"]) for item in summary_news if item.get("id") is not None],
-            ensure_ascii=False,
-        ),
+        "source_news_ids": json.dumps(source_news_ids, ensure_ascii=False),
         "raw_summary": _format_summary_markdown(parsed),
     }
 
@@ -1696,7 +1860,7 @@ def _normalize_loaded_news_item(item: Dict[str, Any]) -> Dict[str, Any]:
     has_structured_enrichment = bool(
         normalized.get("ai_summary")
         or normalized.get("market_impact")
-        or normalized.get("type") in {"macro", "market", "symbol"}
+        or _normalize_type(normalized.get("type"), "index") in {"index", "sector", "stock"}
     )
     # 历史数据可能缺少 rule_passed 字段，通过 LLM 结构化字段反推，避免将旧数据误排除在汇总之外
     if raw_rule_passed is None and normalized["importance_stars"] >= 3 and has_structured_enrichment:
@@ -1741,7 +1905,7 @@ def load_news_for_summary(
     if fallback_news:
         items.extend(fallback_news)
 
-    # 以复合 key 去重后过滤：只保留经 LLM 处理且重要性 >=3 星的新闻参与汇总
+    # 以复合 key 去重后过滤：只保留经 LLM 处理且重要性 >=4 星的新闻参与汇总
     deduped: Dict[str, Dict[str, Any]] = {}
     for item in items:
         normalized = _normalize_loaded_news_item(item)
@@ -1756,7 +1920,7 @@ def load_news_for_summary(
     excluded_items = []
     exclusion_buckets = {
         "time_outside_window": 0,
-        "stars_below_3": 0,
+        "stars_below_4": 0,
         "rule_not_passed": 0,
         "status_not_ready": 0,
     }
@@ -1766,8 +1930,8 @@ def load_news_for_summary(
             exclusion_buckets["time_outside_window"] += 1
             excluded_items.append(item)
             continue
-        if item.get("importance_stars", 0) < 3:
-            exclusion_buckets["stars_below_3"] += 1
+        if item.get("importance_stars", 0) < 4:
+            exclusion_buckets["stars_below_4"] += 1
             excluded_items.append(item)
             continue
         if not item.get("rule_passed"):
@@ -1783,13 +1947,13 @@ def load_news_for_summary(
     candidate_ids = [item.get("id") for item in filtered if item.get("id")]
     excluded_ids = [item.get("id") for item in excluded_items if item.get("id")]
     logger.info(
-        "[日总结] 过滤(stars>=3, rule_passed, status∈{llm_processed,reviewed}): 候选 %s条 ids=%s, 排除 %s条 ids=%s",
+        "[日总结] 过滤(stars>=4, rule_passed, status∈{llm_processed,reviewed}): 候选 %s条 ids=%s, 排除 %s条 ids=%s",
         len(filtered), candidate_ids, len(excluded_items), excluded_ids,
     )
     logger.info(
         "[日总结] 排除原因: 时间窗外=%s, 星级不足=%s, 规则未通过=%s, 状态未就绪=%s",
         exclusion_buckets["time_outside_window"],
-        exclusion_buckets["stars_below_3"],
+        exclusion_buckets["stars_below_4"],
         exclusion_buckets["rule_not_passed"],
         exclusion_buckets["status_not_ready"],
     )
@@ -1879,12 +2043,12 @@ def collect_all_news(context: ExecutionContext | None = None) -> Dict[str, Any]:
 
     logger.info("========== 新闻采集 v6.0 启动 (run_id=%s) ==========", run_id[:8])
     logger.info(
-        "分析日: %s | LLM: rules=%s, batch=%s, summary=%s",
-        analysis_date, LLM_RULES_MODEL_ID, LLM_BATCH_MODEL_ID, LLM_SUMMARY_MODEL_ID,
+        "分析日: %s | LLM: rules=%s, batch=%s, daily_summary=%s",
+        analysis_date, LLM_RULES_MODEL_ID, LLM_BATCH_MODEL_ID, LLM_DAILY_SUMMARY_MODEL_ID,
     )
     logger.info(
-        "超时: rules=%ss, batch=%ss, summary=%ss | 并发=%s | 批量=%s | 策略=%s | SKIP_LLM=%s",
-        LLM_RULES_TIMEOUT, LLM_BATCH_TIMEOUT, LLM_SUMMARY_TIMEOUT,
+        "超时: rules=%ss, batch=%ss, daily_summary=%ss | 并发=%s | 批量=%s | 策略=%s | SKIP_LLM=%s",
+        LLM_RULES_TIMEOUT, LLM_BATCH_TIMEOUT, LLM_DAILY_SUMMARY_TIMEOUT,
         LLM_MAX_WORKERS, LLM_BATCH_SIZE, RULE_ACTIVE_STRATEGY, EFFECTIVE_SKIP_LLM,
     )
     logger.info("==========================================")
