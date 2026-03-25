@@ -1312,6 +1312,7 @@ function setReviewMode(status) {
   const readOnly = status === "reviewed" && !state.editMode;
   reviewActionGroup.classList.toggle("hidden", false);
   reviewModalFooter.classList.toggle("hidden", readOnly);
+  reviewDrawer.classList.toggle("review-readonly", readOnly);
   prevStepBtn.disabled = readOnly || REVIEW_STEPS.findIndex((step) => step.key === state.reviewStep) <= 0;
   nextStepBtn.disabled = readOnly ? true : false;
   syncMdPreviews(readOnly);

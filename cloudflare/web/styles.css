@@ -1823,6 +1823,11 @@ textarea[name="reviewerNewsNotes"] {
   min-height: 42vh;
 }
 
+.review-modal.review-readonly .review-field.wide textarea,
+.review-modal.review-readonly textarea[name="reviewerNewsNotes"] {
+  min-height: 0;
+}
+
 /* Markdown edit/preview tabs */
 .md-tab-bar {
   display: flex;
@@ -1856,6 +1861,11 @@ textarea[name="reviewerNewsNotes"] {
   white-space: pre-wrap;
   word-break: break-word;
   overflow-y: auto;
+}
+
+.review-modal.review-readonly .md-preview {
+  min-height: 0;
+  overflow-y: visible;
 }
 .md-preview h1 {
   margin: 0.6em 0 0.3em;
