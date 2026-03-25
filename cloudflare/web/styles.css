@@ -1815,12 +1815,12 @@ details.review-news-overview > .empty-state {
 }
 
 .review-field.wide textarea {
-  min-height: 420px;
+  min-height: 56vh;
   line-height: 1.75;
 }
 
 textarea[name="reviewerNewsNotes"] {
-  min-height: 320px;
+  min-height: 42vh;
 }
 
 /* Markdown edit/preview tabs */
@@ -1845,7 +1845,7 @@ textarea[name="reviewerNewsNotes"] {
   border-color: rgba(15, 23, 42, 0.12);
 }
 .md-preview {
-  min-height: 80px;
+  min-height: 56vh;
   padding: 10px 12px;
   border-radius: 12px;
   background: #f8fafc;
@@ -1855,6 +1855,7 @@ textarea[name="reviewerNewsNotes"] {
   color: #334155;
   white-space: pre-wrap;
   word-break: break-word;
+  overflow-y: auto;
 }
 .md-preview h1 {
   margin: 0.6em 0 0.3em;
