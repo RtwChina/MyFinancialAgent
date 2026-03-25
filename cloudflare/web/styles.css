@@ -1814,6 +1814,15 @@ details.review-news-overview > .empty-state {
   grid-column: 1 / -1;
 }
 
+.review-field.wide textarea {
+  min-height: 420px;
+  line-height: 1.75;
+}
+
+textarea[name="reviewerNewsNotes"] {
+  min-height: 320px;
+}
+
 /* Markdown edit/preview tabs */
 .md-tab-bar {
   display: flex;
