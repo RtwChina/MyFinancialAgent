@@ -5,8 +5,6 @@ import argparse
 import sys
 from pathlib import Path
 from datetime import datetime
-import os
-import json
 
 sys.path.insert(0, str(Path(__file__).parent / 'src'))
 
@@ -135,62 +133,6 @@ def run_price_repair_job(context: ExecutionContext | None = None):
         return None
 
 
-def run_akshare_probe_job(context: ExecutionContext | None = None):
-    """只打日志的 AKShare 探针，不读写数据库。"""
-    context = context or build_execution_context()
-    logger.info("[Probe] 正在执行 AKShare 探针...")
-    try:
-        from repair_prices import run_akshare_probe
-
-        cases_env = os.getenv("PRICE_PROBE_CASES", "").strip()
-        if cases_env:
-            raw_cases = json.loads(cases_env)
-        else:
-            raw_cases = [
-                {"symbol": "上证指数", "yahoo_symbol": "000001.SS", "k_date": "2026-04-02"},
-                {"symbol": "通信ETF", "yahoo_symbol": "515880.SS", "k_date": "2026-04-02"},
-                {"symbol": "机器人ETF", "yahoo_symbol": "562500.SS", "k_date": "2026-04-02"},
-                {"symbol": "贵州茅台", "yahoo_symbol": "600519.SS", "k_date": "2026-04-02"},
-                {"symbol": "五粮液", "yahoo_symbol": "000858.SZ", "k_date": "2026-04-02"},
-            ]
-
-        hits = 0
-        total = 0
-        for item in raw_cases:
-            symbol = str(item.get("symbol") or item.get("stock_name") or item.get("display_name") or "").strip()
-            yahoo_symbol = str(item.get("yahoo_symbol") or "").strip()
-            k_date = str(item.get("k_date") or "").strip()
-            if not symbol or not yahoo_symbol or not k_date:
-                logger.warning("[Probe] 跳过非法 case: %s", item)
-                continue
-            total += 1
-            price_record = {
-                "symbol": symbol,
-                "stock_name": symbol,
-                "display_name": symbol,
-                "yahoo_symbol": yahoo_symbol,
-                "k_date": k_date,
-                "current_price": None,
-            }
-            probe_result = run_akshare_probe(price_record, context)
-            if probe_result.get("hit"):
-                hits += 1
-            logger.info(
-                "[Probe] 单项完成: hit=%s source=%s target=%s/%s/%s",
-                probe_result.get("hit"),
-                probe_result.get("source"),
-                symbol,
-                yahoo_symbol,
-                k_date,
-            )
-
-        logger.info("[Probe] 批量完成: total=%s hits=%s misses=%s", total, hits, max(total - hits, 0))
-        return True
-    except Exception as e:
-        logger.error("AKShare 探针失败: %s", e, exc_info=True)
-        return None
-
-
 def parse_args() -> argparse.Namespace:
     """解析命令行参数，mode 默认为 full（全量采集）"""
     parser = argparse.ArgumentParser(description="My Financial Agent 任务入口")
@@ -198,8 +140,8 @@ def parse_args() -> argparse.Namespace:
         "mode",
         nargs="?",
         default="full",
-        choices=["full", "hourly-news", "close-summary", "repair-prices", "repair-probe-akshare"],
-        help="full=手动全量，hourly-news=每小时新闻采集，close-summary=收盘后价格+日期汇总，repair-prices=修复最近3天空价格，repair-probe-akshare=只打日志验证 AKShare 指定日期取价",
+        choices=["full", "hourly-news", "close-summary", "repair-prices"],
+        help="full=手动全量，hourly-news=每小时新闻采集，close-summary=收盘后价格+日期汇总，repair-prices=修复最近3天空价格",
     )
     return parser.parse_args()
 
@@ -216,8 +158,6 @@ def main():
         results = run_hourly_news_job(context)
     elif args.mode == "repair-prices":
         results = {"repair-prices": run_price_repair_job(context)}
-    elif args.mode == "repair-probe-akshare":
-        results = {"repair-probe-akshare": run_akshare_probe_job(context)}
     elif args.mode == "close-summary":
         results = run_close_summary_job(context)
     else:
