@@ -8,9 +8,12 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 
+import akshare as ak
+import finnhub
 import pandas as pd
 import yfinance as yf
 
+from config import FINNHUB_API_KEY
 from logger_utils import get_logger
 from runtime.context import ExecutionContext
 from symbol_registry import get_tracked_symbols, get_yahoo_symbol
@@ -40,6 +43,15 @@ _SYMBOL_EXCHANGE_CLOSE: dict[str, tuple[str, int, int]] = {
     "3067.HK":   ("Asia/Hong_Kong",  16,  0),
 }
 _DEFAULT_EXCHANGE_CLOSE = ("America/New_York", 16, 0)
+REPAIR_FALLBACK_AKSHARE = "akshare"
+REPAIR_FALLBACK_FINNHUB = "finnhub"
+
+
+def _find_symbol_record_by_yahoo(yahoo_symbol: str) -> dict | None:
+    for record in get_tracked_symbols():
+        if get_yahoo_symbol(record) == yahoo_symbol:
+            return record
+    return None
 
 
 def _date_from_index(index_value) -> datetime.date:
@@ -81,6 +93,31 @@ def _build_price_payload(
     }
 
 
+def _build_repair_payload(
+    *,
+    system_symbol: str,
+    yahoo_code: str,
+    display_name: str,
+    k_date: str,
+    current_price: float | None,
+    change_percent: float | None,
+    volume: int | None,
+    captured_at: str,
+) -> dict | None:
+    if not k_date or current_price is None:
+        return None
+    return {
+        "k_date": k_date,
+        "stock_name": display_name,
+        "symbol": system_symbol,
+        "yahoo_symbol": yahoo_code,
+        "current_price": float(current_price),
+        "change_percent": float(change_percent) if change_percent is not None else None,
+        "volume": int(volume) if volume is not None else None,
+        "captured_at": captured_at,
+    }
+
+
 def _resolve_exchange_close(yahoo_symbol: str) -> tuple[str, int, int]:
     """根据 yahoo_symbol 返回 (时区字符串, 收盘小时, 收盘分钟)。"""
     if yahoo_symbol in _SYMBOL_EXCHANGE_CLOSE:
@@ -89,6 +126,128 @@ def _resolve_exchange_close(yahoo_symbol: str) -> tuple[str, int, int]:
         if yahoo_symbol.endswith(suffix):
             return info
     return _DEFAULT_EXCHANGE_CLOSE
+
+
+def resolve_repair_fallback_source(price_record: dict) -> str:
+    yahoo_code = (price_record.get("yahoo_symbol") or "").strip().upper()
+    if yahoo_code.endswith(".SS") or yahoo_code.endswith(".SZ"):
+        return REPAIR_FALLBACK_AKSHARE
+    return REPAIR_FALLBACK_FINNHUB
+
+
+def _is_mainland_index(price_record: dict) -> bool:
+    yahoo_code = (price_record.get("yahoo_symbol") or "").strip().upper()
+    system_symbol = str(price_record.get("symbol") or "").strip().upper()
+    display_name = str(price_record.get("stock_name") or price_record.get("display_name") or "")
+    return system_symbol in {"SSE", "HSI"} or "指数" in display_name or yahoo_code in {"000001.SS", "399001.SZ"}
+
+
+def _is_mainland_etf(price_record: dict) -> bool:
+    yahoo_code = (price_record.get("yahoo_symbol") or "").strip().upper()
+    base_code = yahoo_code.split(".", 1)[0]
+    display_name = str(price_record.get("stock_name") or price_record.get("display_name") or "")
+    return base_code.startswith(("15", "16", "50", "51", "56", "58")) or "ETF" in display_name.upper()
+
+
+def _get_finnhub_client() -> finnhub.Client | None:
+    if not FINNHUB_API_KEY:
+        logger.warning("[Finnhub] FINNHUB_API_KEY 未配置，跳过 repair fallback")
+        return None
+    return finnhub.Client(api_key=FINNHUB_API_KEY)
+
+
+def _pick_finnhub_fetcher(yahoo_code: str) -> tuple[str, str] | None:
+    upper_code = yahoo_code.upper()
+    if upper_code.endswith(".HK"):
+        return ("stock", yahoo_code)
+    if upper_code.endswith(".SS") or upper_code.endswith(".SZ"):
+        return None
+    if upper_code.endswith("-USD"):
+        # 保守起见，crypto 代码映射先不猜交易所，避免错源写回
+        return None
+    if upper_code.endswith("=X") or upper_code.endswith("=F") or upper_code.startswith("^"):
+        return None
+    return ("stock", yahoo_code)
+
+
+def _finnhub_payload_from_candles(
+    *,
+    candles: dict,
+    price_record: dict,
+    target_k_date: str,
+    source_label: str,
+    context: ExecutionContext,
+) -> dict | None:
+    status = candles.get("s")
+    if status != "ok":
+        logger.warning(
+            "修复跳过 %s (%s): %s 返回状态=%s",
+            price_record.get("stock_name") or price_record.get("symbol"),
+            price_record.get("yahoo_symbol") or price_record.get("symbol"),
+            source_label,
+            status,
+        )
+        return None
+
+    timestamps = candles.get("t") or []
+    closes = candles.get("c") or []
+    opens = candles.get("o") or []
+    volumes = candles.get("v") or []
+    if not timestamps or not closes:
+        return None
+
+    target_date = datetime.strptime(target_k_date, "%Y-%m-%d").date()
+    matched_idx = None
+    for idx, ts in enumerate(timestamps):
+        candle_date = datetime.fromtimestamp(ts, tz=ZoneInfo("UTC")).date()
+        if candle_date == target_date:
+            matched_idx = idx
+    if matched_idx is None:
+        logger.warning(
+            "修复跳过 %s (%s): %s 未返回目标 k_date=%s",
+            price_record.get("stock_name") or price_record.get("symbol"),
+            price_record.get("yahoo_symbol") or price_record.get("symbol"),
+            source_label,
+            target_k_date,
+        )
+        return None
+
+    current_price = closes[matched_idx]
+    if current_price is None:
+        logger.warning(
+            "修复跳过 %s (%s): %s 返回目标 k_date=%s 但价格为空",
+            price_record.get("stock_name") or price_record.get("symbol"),
+            price_record.get("yahoo_symbol") or price_record.get("symbol"),
+            source_label,
+            target_k_date,
+        )
+        return None
+
+    change_percent = None
+    if matched_idx >= 1 and closes[matched_idx - 1]:
+        prev_close = closes[matched_idx - 1]
+        if prev_close:
+            change_percent = round(((current_price - prev_close) / prev_close) * 100, 2)
+    elif matched_idx < len(opens) and opens[matched_idx]:
+        open_price = opens[matched_idx]
+        if open_price:
+            change_percent = round(((current_price - open_price) / open_price) * 100, 2)
+
+    volume = None
+    if matched_idx < len(volumes):
+        volume = volumes[matched_idx]
+
+    display_name = price_record.get("stock_name") or price_record.get("display_name") or price_record.get("symbol")
+    return _build_repair_payload(
+        system_symbol=price_record["symbol"],
+        yahoo_code=(price_record.get("yahoo_symbol") or price_record["symbol"]).strip(),
+        display_name=display_name,
+        k_date=target_k_date,
+        current_price=current_price,
+        change_percent=change_percent,
+        volume=volume,
+        captured_at=context.clock.now().strftime("%Y-%m-%d %H:%M:%S"),
+    )
 
 
 def _is_market_closed(candle_date, tz_str: str, close_hour: int, close_minute: int) -> bool:
@@ -185,21 +344,25 @@ def fetch_price_for_k_date_live(price_record: dict, context: ExecutionContext) -
     last_error = None
     for attempt in range(1, PRICE_FETCH_RETRIES + 1):
         try:
-            logger.info("修复重查 %s (%s) %s 的 Yahoo 价格...", display_name, yahoo_code, target_k_date)
-            ticker = yf.Ticker(yahoo_code)
             start_dt = target_date - timedelta(days=5)
             end_dt = target_date + timedelta(days=2)
+            logger.info(
+                "修复重查 %s (%s) %s 的 Yahoo 价格... window=%s~%s",
+                display_name, yahoo_code, target_k_date, start_dt.isoformat(), end_dt.isoformat(),
+            )
+            ticker = yf.Ticker(yahoo_code)
             hist = ticker.history(start=start_dt.isoformat(), end=end_dt.isoformat())
             if hist.empty:
-                logger.warning("修复重查 %s (%s) 失败: Yahoo 返回空数据", display_name, target_k_date)
+                logger.warning("修复重查 %s (%s) 失败: Yahoo 返回空数据 target=%s", display_name, yahoo_code, target_k_date)
                 return None
 
             normalized_dates = [_date_from_index(index_value) for index_value in hist.index]
             target_positions = [idx for idx, date_value in enumerate(normalized_dates) if date_value == target_date]
             if not target_positions:
                 logger.warning(
-                    "修复跳过 %s (%s): Yahoo 未返回目标 k_date=%s",
+                    "修复跳过 %s (%s): Yahoo 未返回目标 k_date=%s available=%s",
                     display_name, yahoo_code, target_k_date,
+                    ",".join(str(date_value) for date_value in normalized_dates[-3:]),
                 )
                 return None
 
@@ -248,6 +411,118 @@ def fetch_price_for_k_date_live(price_record: dict, context: ExecutionContext) -
     if last_error:
         logger.error("修复重查最终失败 %s (%s) %s: %s", display_name, yahoo_code, target_k_date, last_error)
     return None
+
+
+def fetch_price_for_k_date_akshare(price_record: dict, context: ExecutionContext) -> dict | None:
+    """按目标 k_date 查询中国市场 AKShare 日线，仅命中同日且价格非空时返回。"""
+    system_symbol = price_record["symbol"]
+    yahoo_code = (price_record.get("yahoo_symbol") or system_symbol).strip()
+    display_name = price_record.get("stock_name") or price_record.get("display_name") or system_symbol
+    target_k_date = str(price_record["k_date"])
+    target_date = datetime.strptime(target_k_date, "%Y-%m-%d").date()
+    code = yahoo_code.split(".", 1)[0]
+    start_date = (target_date - timedelta(days=5)).strftime("%Y%m%d")
+    end_date = (target_date + timedelta(days=2)).strftime("%Y%m%d")
+
+    try:
+        source_kind = "index" if _is_mainland_index(price_record) else "etf" if _is_mainland_etf(price_record) else "stock"
+        logger.info(
+            "修复重查 %s (%s) %s 的 AKShare 价格... kind=%s window=%s~%s",
+            display_name, yahoo_code, target_k_date, source_kind, start_date, end_date,
+        )
+        if _is_mainland_index(price_record):
+            df = ak.index_zh_a_hist(symbol=code, period="daily", start_date=start_date, end_date=end_date)
+        elif _is_mainland_etf(price_record):
+            df = ak.fund_etf_hist_em(symbol=code, period="daily", start_date=start_date, end_date=end_date, adjust="")
+        else:
+            df = ak.stock_zh_a_hist(symbol=code, period="daily", start_date=start_date, end_date=end_date, adjust="")
+        if df is None or df.empty:
+            logger.warning("修复跳过 %s (%s): AKShare 返回空数据", display_name, yahoo_code)
+            return None
+
+        target_rows = df[df["日期"].astype(str) == target_k_date]
+        if target_rows.empty:
+            available_dates = df["日期"].astype(str).tail(3).tolist() if "日期" in df.columns else []
+            logger.warning(
+                "修复跳过 %s (%s): AKShare 未返回目标 k_date=%s available=%s",
+                display_name, yahoo_code, target_k_date, ",".join(available_dates),
+            )
+            return None
+
+        row = target_rows.iloc[-1]
+        close_value = row.get("收盘")
+        if pd.isna(close_value):
+            logger.warning("修复跳过 %s (%s): AKShare 返回目标 k_date=%s 但价格为空", display_name, yahoo_code, target_k_date)
+            return None
+
+        volume_value = row.get("成交量")
+        change_percent = row.get("涨跌幅")
+        data = _build_repair_payload(
+            system_symbol=system_symbol,
+            yahoo_code=yahoo_code,
+            display_name=display_name,
+            k_date=target_k_date,
+            current_price=float(close_value),
+            change_percent=float(change_percent) if pd.notna(change_percent) else None,
+            volume=int(volume_value) if pd.notna(volume_value) else None,
+            captured_at=context.clock.now().strftime("%Y-%m-%d %H:%M:%S"),
+        )
+        logger.info(
+            "修复命中 %s (%s) %s: 来源=AKShare 价格=%s, 涨跌幅=%s%%",
+            display_name, yahoo_code, target_k_date, data["current_price"], data["change_percent"],
+        )
+        return data
+    except Exception as exc:
+        logger.error("修复重查 %s (%s) %s 的 AKShare 价格失败: %s", display_name, yahoo_code, target_k_date, exc)
+        return None
+
+
+def fetch_price_for_k_date_finnhub(price_record: dict, context: ExecutionContext) -> dict | None:
+    """按目标 k_date 查询 Finnhub 国际链路价格，仅命中同日且价格非空时返回。"""
+    system_symbol = price_record["symbol"]
+    yahoo_code = (price_record.get("yahoo_symbol") or system_symbol).strip()
+    display_name = price_record.get("stock_name") or price_record.get("display_name") or system_symbol
+    target_k_date = str(price_record["k_date"])
+    target_date = datetime.strptime(target_k_date, "%Y-%m-%d").date()
+
+    client = _get_finnhub_client()
+    if client is None:
+        return None
+    fetcher = _pick_finnhub_fetcher(yahoo_code)
+    if fetcher is None:
+        logger.warning("修复跳过 %s (%s): Finnhub 暂不支持该代码模式", display_name, yahoo_code)
+        return None
+
+    source_type, finnhub_symbol = fetcher
+    start_ts = int(datetime.combine(target_date - timedelta(days=5), datetime.min.time(), tzinfo=ZoneInfo("UTC")).timestamp())
+    end_ts = int(datetime.combine(target_date + timedelta(days=2), datetime.min.time(), tzinfo=ZoneInfo("UTC")).timestamp())
+
+    try:
+        logger.info(
+            "修复重查 %s (%s) %s 的 Finnhub 价格... type=%s symbol=%s window=%s~%s",
+            display_name, yahoo_code, target_k_date, source_type, finnhub_symbol, start_ts, end_ts,
+        )
+        if source_type == "stock":
+            candles = client.stock_candles(finnhub_symbol, "D", start_ts, end_ts)
+        else:
+            logger.warning("修复跳过 %s (%s): Finnhub source_type=%s 未实现", display_name, yahoo_code, source_type)
+            return None
+        data = _finnhub_payload_from_candles(
+            candles=candles,
+            price_record=price_record,
+            target_k_date=target_k_date,
+            source_label="Finnhub",
+            context=context,
+        )
+        if data:
+            logger.info(
+                "修复命中 %s (%s) %s: 来源=Finnhub 价格=%s, 涨跌幅=%s%%",
+                display_name, yahoo_code, target_k_date, data["current_price"], data["change_percent"],
+            )
+        return data
+    except Exception as exc:
+        logger.error("修复重查 %s (%s) %s 的 Finnhub 价格失败: %s", display_name, yahoo_code, target_k_date, exc)
+        return None
 
 
 def _make_placeholder(sym_record: dict, context: ExecutionContext) -> dict:
