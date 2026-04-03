@@ -1,0 +1,37 @@
+name: AKShare 价格探针
+
+on:
+  workflow_dispatch:
+    inputs:
+      cases_json:
+        description: "可选 JSON 数组；为空则使用默认样本（指数/ETF/个股）"
+        required: false
+        default: ""
+
+jobs:
+  probe-akshare:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v4
+
+      - name: 设置 Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: 安装依赖
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: 运行 AKShare 探针
+        env:
+          APP_ENV: "prod"
+          ENABLE_REMOTE_WRITE: "false"
+          LOG_LEVEL: "INFO"
+          PYTHONUNBUFFERED: "1"
+          PRICE_PROBE_CASES: ${{ inputs.cases_json }}
+        run: |
+          python main.py repair-probe-akshare

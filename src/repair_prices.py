@@ -14,9 +14,7 @@ from cloudflare_ingest import (
 from config import ENABLE_REMOTE_WRITE
 from data_sources.price_live import (
     REPAIR_FALLBACK_AKSHARE,
-    REPAIR_FALLBACK_FINNHUB,
     fetch_price_for_k_date_akshare,
-    fetch_price_for_k_date_finnhub,
     fetch_price_for_k_date_live,
     resolve_repair_fallback_source,
 )
@@ -52,6 +50,39 @@ def apply_repaired_price(context: ExecutionContext, repaired: dict[str, Any]) ->
     return repair_price_data(repaired)
 
 
+def run_akshare_probe(
+    price_record: dict[str, Any],
+    context: ExecutionContext | None = None,
+) -> dict[str, Any]:
+    """Run a log-only AKShare probe for one mainland record without any DB writes."""
+    context = context or build_execution_context()
+    symbol = price_record.get("symbol")
+    yahoo_symbol = price_record.get("yahoo_symbol") or symbol
+    target_k_date = price_record.get("k_date")
+    logger.info(
+        "[Probe] 开始执行 AKShare 探针: symbol=%s yahoo=%s k_date=%s",
+        symbol, yahoo_symbol, target_k_date,
+    )
+    repaired = fetch_price_for_k_date_akshare(price_record, context)
+    if repaired:
+        logger.info(
+            "[Probe] AKShare 命中: symbol=%s yahoo=%s k_date=%s price=%s change=%s volume=%s",
+            symbol,
+            yahoo_symbol,
+            repaired.get("k_date"),
+            repaired.get("current_price"),
+            repaired.get("change_percent"),
+            repaired.get("volume"),
+        )
+        return {"hit": True, "source": "akshare", "price": repaired}
+
+    logger.warning(
+        "[Probe] AKShare 未命中: symbol=%s yahoo=%s k_date=%s",
+        symbol, yahoo_symbol, target_k_date,
+    )
+    return {"hit": False, "source": "akshare", "price": None}
+
+
 def _repair_with_fallback(candidate: dict[str, Any], context: ExecutionContext) -> tuple[dict[str, Any] | None, str | None]:
     symbol = candidate.get("symbol")
     target_k_date = candidate.get("k_date")
@@ -83,19 +114,10 @@ def _repair_with_fallback(candidate: dict[str, Any], context: ExecutionContext) 
                 symbol, yahoo_symbol, target_k_date, fallback_source,
             )
         return repaired, fallback_source
-    if fallback_source == REPAIR_FALLBACK_FINNHUB:
-        repaired = fetch_price_for_k_date_finnhub(candidate, context)
-        if repaired:
-            logger.info(
-                "备用源修复命中: symbol=%s yahoo=%s k_date=%s source=%s price=%s",
-                symbol, yahoo_symbol, target_k_date, fallback_source, repaired.get("current_price"),
-            )
-        else:
-            logger.warning(
-                "备用源修复未命中: symbol=%s yahoo=%s k_date=%s source=%s",
-                symbol, yahoo_symbol, target_k_date, fallback_source,
-            )
-        return repaired, fallback_source
+    logger.warning(
+        "国际链路未配置可用备用源，跳过实际重试: symbol=%s yahoo=%s k_date=%s planned_fallback=%s",
+        symbol, yahoo_symbol, target_k_date, fallback_source,
+    )
     logger.warning(
         "修复跳过: symbol=%s yahoo=%s k_date=%s 未识别到可用备用源",
         symbol, yahoo_symbol, target_k_date,
