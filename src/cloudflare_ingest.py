@@ -84,7 +84,8 @@ def _get(path: str, query: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
 
     for attempt in range(1, DEFAULT_MAX_RETRIES + 1):
         try:
-            response = requests.get(url, timeout=DEFAULT_TIMEOUT)
+            headers = _headers() if is_remote_write_configured() else None
+            response = requests.get(url, headers=headers, timeout=DEFAULT_TIMEOUT)
             response.raise_for_status()
             return response.json()
         except requests.RequestException as exc:
@@ -134,6 +135,21 @@ def send_prices(prices: List[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
 
     result = _send_in_batches("/api/ingest/prices", prices, PRICE_BATCH_SIZE)
     logger.info("Cloudflare 价格写入完成: %s", result)
+    return result
+
+
+def fetch_price_repair_candidates(date_from: str) -> List[Dict[str, Any]]:
+    if not date_from:
+        return []
+    result = _get("/api/prices/repair-candidates", {"dateFrom": date_from})
+    return result.get("items", [])
+
+
+def repair_price_record(price: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    if not price:
+        return None
+    result = _post("/api/repair/prices", price)
+    logger.info("Cloudflare 价格修复写入完成: %s", result)
     return result
 
 

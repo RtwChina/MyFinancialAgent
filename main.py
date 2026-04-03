@@ -112,6 +112,27 @@ def run_close_summary_job(context: ExecutionContext | None = None):
     return {"prices": prices_file, "news": news_file}
 
 
+def run_price_repair_job(context: ExecutionContext | None = None):
+    """延迟重试修复最近 3 天的空价格记录。"""
+    context = context or build_execution_context()
+    logger.info("[Repair] 正在执行价格修复任务...")
+    try:
+        from repair_prices import run_price_repair
+
+        stats = run_price_repair(context)
+        logger.info(
+            "[Repair] 完成: candidates=%s repaired=%s skipped=%s failed=%s",
+            stats.get("candidates"),
+            stats.get("repaired"),
+            stats.get("skipped"),
+            stats.get("failed"),
+        )
+        return True
+    except Exception as e:
+        logger.error("价格修复失败: %s", e, exc_info=True)
+        return None
+
+
 def parse_args() -> argparse.Namespace:
     """解析命令行参数，mode 默认为 full（全量采集）"""
     parser = argparse.ArgumentParser(description="My Financial Agent 任务入口")
@@ -119,8 +140,8 @@ def parse_args() -> argparse.Namespace:
         "mode",
         nargs="?",
         default="full",
-        choices=["full", "hourly-news", "close-summary"],
-        help="full=手动全量，hourly-news=每小时新闻采集，close-summary=收盘后价格+日期汇总",
+        choices=["full", "hourly-news", "close-summary", "repair-prices"],
+        help="full=手动全量，hourly-news=每小时新闻采集，close-summary=收盘后价格+日期汇总，repair-prices=修复最近3天空价格",
     )
     return parser.parse_args()
 
@@ -135,6 +156,8 @@ def main():
 
     if args.mode == "hourly-news":
         results = run_hourly_news_job(context)
+    elif args.mode == "repair-prices":
+        results = {"repair-prices": run_price_repair_job(context)}
     elif args.mode == "close-summary":
         results = run_close_summary_job(context)
     else:

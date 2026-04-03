@@ -61,6 +61,15 @@ async function handleApi(request, env, url, appEnv) {
       const body = await request.json();
       return json(await ingestPrices(env, body.items || []), 200, request);
     }
+    if (url.pathname === "/api/prices/repair-candidates" && request.method === "GET") {
+      requireWriteAuth(request, env, appEnv);
+      return json(await getPriceRepairCandidates(env, url), 200, request);
+    }
+    if (url.pathname === "/api/repair/prices" && request.method === "POST") {
+      requireWriteAuth(request, env, appEnv);
+      const body = await request.json();
+      return json(await repairPrice(env, body), 200, request);
+    }
 
     if (url.pathname === "/api/ingest/news" && request.method === "POST") {
       requireWriteAuth(request, env, appEnv);
@@ -276,6 +285,52 @@ async function ingestPrices(env, items) {
   }
 
   return { inserted, ignored, total: items.length };
+}
+
+async function getPriceRepairCandidates(env, url) {
+  const dateFrom = String(url.searchParams.get("dateFrom") || "").trim();
+  if (!dateFrom) {
+    return { items: [], total: 0 };
+  }
+  const { results } = await env.DB.prepare(
+    `SELECT symbol, yahoo_symbol, stock_name, k_date
+     FROM stock_raw
+     WHERE k_date IS NOT NULL
+       AND current_price IS NULL
+       AND k_date >= ?
+     ORDER BY k_date DESC, symbol`,
+  )
+    .bind(dateFrom)
+    .all();
+  return { items: results || [], total: (results || []).length };
+}
+
+async function repairPrice(env, item) {
+  const result = await env.DB.prepare(
+    `UPDATE stock_raw
+     SET yahoo_symbol = COALESCE(?, yahoo_symbol),
+         stock_name = COALESCE(?, stock_name),
+         current_price = ?,
+         change_percent = ?,
+         volume = ?,
+         captured_at = ?
+     WHERE symbol = ?
+       AND k_date = ?
+       AND current_price IS NULL`,
+  )
+    .bind(
+      item.yahoo_symbol || null,
+      item.stock_name || null,
+      item.current_price,
+      item.change_percent,
+      item.volume,
+      item.captured_at || isoNow(),
+      item.symbol,
+      item.k_date,
+    )
+    .run();
+
+  return { updated: Number(result.meta.changes || 0), symbol: item.symbol, k_date: item.k_date };
 }
 
 async function ingestNews(env, items) {

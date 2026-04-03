@@ -142,6 +142,64 @@ def get_price_by_date(k_date: str, db_path: str = None) -> List[Dict]:
     return [dict(row) for row in rows]
 
 
+def get_recent_empty_price_records(date_from: str, db_path: str = None) -> List[Dict[str, Any]]:
+    """查询指定起始日期以来，已存在 k_date 但 current_price 为空的价格记录。"""
+    conn = get_db_connection(db_path)
+    cursor = conn.cursor()
+    cursor.execute(
+        '''
+        SELECT symbol, yahoo_symbol, stock_name, k_date
+        FROM stock_raw
+        WHERE k_date IS NOT NULL
+          AND current_price IS NULL
+          AND k_date >= ?
+        ORDER BY k_date DESC, symbol
+        ''',
+        (date_from,),
+    )
+    rows = cursor.fetchall()
+    conn.close()
+    return [dict(row) for row in rows]
+
+
+def repair_price_data(data: Dict[str, Any], db_path: str = None) -> bool:
+    """按 (symbol, k_date) 更新已有空价格记录，不插入新行。"""
+    try:
+        conn = get_db_connection(db_path)
+        cursor = conn.cursor()
+        cursor.execute(
+            '''
+            UPDATE stock_raw
+            SET yahoo_symbol = COALESCE(?, yahoo_symbol),
+                stock_name = COALESCE(?, stock_name),
+                current_price = ?,
+                change_percent = ?,
+                volume = ?,
+                captured_at = ?
+            WHERE symbol = ?
+              AND k_date = ?
+              AND current_price IS NULL
+            ''',
+            (
+                data.get('yahoo_symbol'),
+                data.get('stock_name'),
+                data.get('current_price'),
+                data.get('change_percent'),
+                data.get('volume'),
+                data.get('captured_at'),
+                data.get('symbol'),
+                data.get('k_date'),
+            ),
+        )
+        updated = cursor.rowcount > 0
+        conn.commit()
+        conn.close()
+        return updated
+    except Exception as e:
+        logger.error("修复价格数据失败: %s", str(e))
+        return False
+
+
 # ========== 新闻数据操作 ==========
 
 def upsert_news_data(data: Dict[str, Any], db_path: str = None) -> str:

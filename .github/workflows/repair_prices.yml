@@ -1,0 +1,36 @@
+name: 修复股票空价格数据
+
+on:
+  schedule:
+    # 每天北京时间 08:00 执行 (UTC 00:00)
+    - cron: '0 0 * * *'
+  workflow_dispatch:
+
+jobs:
+  repair-prices:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v4
+
+      - name: 设置 Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: 安装依赖
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: 运行价格修复
+        env:
+          APP_ENV: "prod"
+          ENABLE_REMOTE_WRITE: "true"
+          INGEST_API_BASE_URL: ${{ secrets.INGEST_API_BASE_URL }}
+          INGEST_API_TOKEN: ${{ secrets.INGEST_API_TOKEN }}
+          LOG_LEVEL: "INFO"
+          PYTHONUNBUFFERED: "1"
+        run: |
+          python main.py repair-prices
