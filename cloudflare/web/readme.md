@@ -78,6 +78,8 @@ Web 前端
 - `daily_review_archive`：复盘主表
 - `daily_news_ai_analysis`：日期级 AI 新闻分析
 - `daily_review_archive_news`：复盘新闻快照
+- `daily_review_snapshots`：复盘正文历史快照
+- `daily_news_ai_analysis_snapshots`：AI 日总结历史快照
 
 <a id="project-structure"></a>
 ## 目录结构

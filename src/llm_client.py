@@ -26,6 +26,9 @@ class LLMCallResult:
     prompt_chars: int
     system_chars: int
     user_chars: int
+    prompt_tokens: Optional[int]
+    completion_tokens: Optional[int]
+    total_tokens: Optional[int]
     prompt_preview: str                    # 仅取前 200 字符，用于日志快速预览
     error: str = ""
 
@@ -98,6 +101,19 @@ def _extract_stream_content_line(line: str) -> str:
     return ""
 
 
+def _extract_usage(payload: Dict[str, Any]) -> Dict[str, Optional[int]]:
+    """从响应 JSON 中提取 token usage。兼容缺失字段的情况。"""
+    usage = payload.get("usage") or {}
+    prompt_tokens = usage.get("prompt_tokens")
+    completion_tokens = usage.get("completion_tokens")
+    total_tokens = usage.get("total_tokens")
+    return {
+        "prompt_tokens": int(prompt_tokens) if isinstance(prompt_tokens, (int, float)) else None,
+        "completion_tokens": int(completion_tokens) if isinstance(completion_tokens, (int, float)) else None,
+        "total_tokens": int(total_tokens) if isinstance(total_tokens, (int, float)) else None,
+    }
+
+
 class LLMClient:
     def __init__(
         self,
@@ -126,7 +142,16 @@ class LLMClient:
         })
         # 按模型累计调用统计
         self._stats: Dict[str, Dict[str, float]] = defaultdict(
-            lambda: {"call_count": 0, "total_prompt_chars": 0, "total_response_chars": 0, "total_elapsed": 0.0}
+            lambda: {
+                "call_count": 0,
+                "total_prompt_chars": 0,
+                "total_response_chars": 0,
+                "total_prompt_tokens": 0,
+                "total_completion_tokens": 0,
+                "total_tokens": 0,
+                "usage_call_count": 0,
+                "total_elapsed": 0.0,
+            }
         )
 
     def _record_stats(self, result: LLMCallResult) -> LLMCallResult:
@@ -135,17 +160,37 @@ class LLMClient:
         s["call_count"] += 1
         s["total_prompt_chars"] += result.prompt_chars
         s["total_response_chars"] += result.response_chars
+        if result.prompt_tokens is not None:
+            s["total_prompt_tokens"] += result.prompt_tokens
+        if result.completion_tokens is not None:
+            s["total_completion_tokens"] += result.completion_tokens
+        if result.total_tokens is not None:
+            s["total_tokens"] += result.total_tokens
+        if result.total_tokens is not None or result.prompt_tokens is not None or result.completion_tokens is not None:
+            s["usage_call_count"] += 1
         s["total_elapsed"] += result.elapsed_seconds
         # 每次调用完成后打印详细日志
         if self.logger:
             if result.success:
-                self.logger.info(
-                    "LLM 完成: model=%s, 耗时 %.1fs, prompt %s字, response %s字",
-                    result.model,
-                    result.elapsed_seconds,
-                    result.prompt_chars,
-                    result.response_chars,
-                )
+                if result.total_tokens is not None or result.prompt_tokens is not None or result.completion_tokens is not None:
+                    self.logger.info(
+                        "LLM 完成: model=%s, 耗时 %.1fs, prompt %s字, response %s字, tokens(prompt=%s, completion=%s, total=%s)",
+                        result.model,
+                        result.elapsed_seconds,
+                        result.prompt_chars,
+                        result.response_chars,
+                        result.prompt_tokens if result.prompt_tokens is not None else "?",
+                        result.completion_tokens if result.completion_tokens is not None else "?",
+                        result.total_tokens if result.total_tokens is not None else "?",
+                    )
+                else:
+                    self.logger.info(
+                        "LLM 完成: model=%s, 耗时 %.1fs, prompt %s字, response %s字, tokens=unavailable",
+                        result.model,
+                        result.elapsed_seconds,
+                        result.prompt_chars,
+                        result.response_chars,
+                    )
             else:
                 self.logger.error(
                     "LLM 失败: model=%s, 耗时 %.1fs, error=%s",
@@ -160,14 +205,29 @@ class LLMClient:
         if not self.logger or not self._stats:
             return
         for model, s in self._stats.items():
-            self.logger.info(
-                "[LLM汇总] %s: 调用 %s次, prompt %.1fk字, response %.1fk字, 耗时 %.1fs",
-                model,
-                int(s["call_count"]),
-                s["total_prompt_chars"] / 1000,
-                s["total_response_chars"] / 1000,
-                s["total_elapsed"],
-            )
+            if s["usage_call_count"] > 0:
+                self.logger.info(
+                    "[LLM汇总] %s: 调用 %s次, prompt %.1fk字, response %.1fk字, tokens(prompt=%s, completion=%s, total=%s, usage_calls=%s/%s), 耗时 %.1fs",
+                    model,
+                    int(s["call_count"]),
+                    s["total_prompt_chars"] / 1000,
+                    s["total_response_chars"] / 1000,
+                    int(s["total_prompt_tokens"]),
+                    int(s["total_completion_tokens"]),
+                    int(s["total_tokens"]),
+                    int(s["usage_call_count"]),
+                    int(s["call_count"]),
+                    s["total_elapsed"],
+                )
+            else:
+                self.logger.info(
+                    "[LLM汇总] %s: 调用 %s次, prompt %.1fk字, response %.1fk字, tokens=unavailable, 耗时 %.1fs",
+                    model,
+                    int(s["call_count"]),
+                    s["total_prompt_chars"] / 1000,
+                    s["total_response_chars"] / 1000,
+                    s["total_elapsed"],
+                )
 
     def call_chat(
         self,
@@ -233,6 +293,7 @@ class LLMClient:
                     if response.ok:
                         response_json = response.json()
                         response_text = extract_message_content(response_json)
+                        usage = _extract_usage(response_json)
                         return self._record_stats(LLMCallResult(
                             success=True,
                             model=model_name,
@@ -246,6 +307,9 @@ class LLMClient:
                             prompt_chars=system_chars + user_chars,
                             system_chars=system_chars,
                             user_chars=user_chars,
+                            prompt_tokens=usage["prompt_tokens"],
+                            completion_tokens=usage["completion_tokens"],
+                            total_tokens=usage["total_tokens"],
                             prompt_preview=prompt_preview,
                         ))
 
@@ -255,6 +319,11 @@ class LLMClient:
                 response.raise_for_status()
                 first_chunk_seconds: Optional[float] = None
                 chunks: List[str] = []
+                usage_payload: Dict[str, Optional[int]] = {
+                    "prompt_tokens": None,
+                    "completion_tokens": None,
+                    "total_tokens": None,
+                }
                 # 逐行读取 SSE 流，记录首个 chunk 耗时并拼接全部文本增量
                 for raw_line in response.iter_lines(decode_unicode=True):
                     if not raw_line:
@@ -265,6 +334,13 @@ class LLMClient:
                         content = _extract_stream_content_line(raw_line)
                     except json.JSONDecodeError:
                         content = ""
+                    try:
+                        if raw_line.startswith("data:"):
+                            payload = raw_line[5:].strip()
+                            if payload and payload != "[DONE]":
+                                usage_payload = _extract_usage(json.loads(payload)) or usage_payload
+                    except Exception:
+                        pass
                     if content:
                         chunks.append(content)
 
@@ -283,6 +359,9 @@ class LLMClient:
                     prompt_chars=system_chars + user_chars,
                     system_chars=system_chars,
                     user_chars=user_chars,
+                    prompt_tokens=usage_payload["prompt_tokens"],
+                    completion_tokens=usage_payload["completion_tokens"],
+                    total_tokens=usage_payload["total_tokens"],
                     prompt_preview=prompt_preview,
                 ))
 
@@ -304,6 +383,9 @@ class LLMClient:
                         prompt_chars=system_chars + user_chars,
                         system_chars=system_chars,
                         user_chars=user_chars,
+                        prompt_tokens=None,
+                        completion_tokens=None,
+                        total_tokens=None,
                         prompt_preview=prompt_preview,
                         error=str(exc),
                     ))
@@ -326,6 +408,9 @@ class LLMClient:
                         prompt_chars=system_chars + user_chars,
                         system_chars=system_chars,
                         user_chars=user_chars,
+                        prompt_tokens=None,
+                        completion_tokens=None,
+                        total_tokens=None,
                         prompt_preview=prompt_preview,
                         error=str(exc),
                     ))
@@ -345,6 +430,9 @@ class LLMClient:
                     prompt_chars=system_chars + user_chars,
                     system_chars=system_chars,
                     user_chars=user_chars,
+                    prompt_tokens=None,
+                    completion_tokens=None,
+                    total_tokens=None,
                     prompt_preview=prompt_preview,
                     error=str(exc),
                 ))
@@ -363,6 +451,9 @@ class LLMClient:
             prompt_chars=system_chars + user_chars,
             system_chars=system_chars,
             user_chars=user_chars,
+            prompt_tokens=None,
+            completion_tokens=None,
+            total_tokens=None,
             prompt_preview=prompt_preview,
             error="unexpected retry exit",
         ))
