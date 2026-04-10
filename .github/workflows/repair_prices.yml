@@ -2,8 +2,9 @@ name: 修复股票空价格数据
 
 on:
   schedule:
-    # 每天北京时间 08:00 执行 (UTC 00:00)
+    # 每天北京时间 08:00、09:00 执行 (UTC 00:00、01:00)
     - cron: '0 0 * * *'
+    - cron: '0 1 * * *'
   workflow_dispatch:
 
 jobs:
