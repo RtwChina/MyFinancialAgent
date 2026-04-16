@@ -61,6 +61,7 @@ LLM_BATCH_TIMEOUT = int(os.getenv("LLM_BATCH_TIMEOUT", str(LLM_TIMEOUT)))
 LLM_SUMMARY_TIMEOUT = int(os.getenv("LLM_SUMMARY_TIMEOUT", str(LLM_TIMEOUT)))
 LLM_DAILY_SUMMARY_MODEL_ID = os.getenv("LLM_DAILY_SUMMARY_MODEL_ID", LLM_SUMMARY_MODEL_ID)
 LLM_DAILY_SUMMARY_TIMEOUT = int(os.getenv("LLM_DAILY_SUMMARY_TIMEOUT", "120"))
+LLM_DAILY_SUMMARY_STOCK_TIMEOUT = int(os.getenv("LLM_DAILY_SUMMARY_STOCK_TIMEOUT", "180"))
 LLM_MAX_WORKERS = int(os.getenv("LLM_MAX_WORKERS", "5"))  # 并发数（Session 连接池复用，支持高并发）
 LLM_BATCH_SIZE = max(1, int(os.getenv("LLM_BATCH_SIZE", "8")))
 LLM_RULES_SAMPLE_SIZE = max(8, int(os.getenv("LLM_RULES_SAMPLE_SIZE", "12")))
@@ -1678,12 +1679,13 @@ def _call_daily_summary_bucket(bucket_type: str, news_list: List[Dict[str, Any]]
             % DAILY_SUMMARY_BUCKET_LABELS[bucket_type]
         )
 
+    bucket_timeout = LLM_DAILY_SUMMARY_STOCK_TIMEOUT if bucket_type == "stock" else LLM_DAILY_SUMMARY_TIMEOUT
     llm_result = llm_client.call_chat(
         _build_daily_bucket_messages(news_list, analysis_date, bucket_type),
         log_label="日期级%s桶分析 %s" % (DAILY_SUMMARY_BUCKET_LABELS[bucket_type], analysis_date),
         model=LLM_DAILY_SUMMARY_MODEL_ID,
         max_tokens=900,
-        timeout=LLM_DAILY_SUMMARY_TIMEOUT,
+        timeout=bucket_timeout,
     )
     logger.info(
         "[日总结] %s桶 AI出参(前300字): %s",
@@ -1696,7 +1698,7 @@ def _call_daily_summary_bucket(bucket_type: str, news_list: List[Dict[str, Any]]
             % (
                 DAILY_SUMMARY_BUCKET_LABELS[bucket_type],
                 LLM_DAILY_SUMMARY_MODEL_ID,
-                LLM_DAILY_SUMMARY_TIMEOUT,
+                bucket_timeout,
                 llm_result.error or "unknown error",
             )
         )
@@ -1948,8 +1950,22 @@ def build_daily_summary_record(news_list: List[Dict[str, Any]], analysis_date: s
             if selected_buckets.get(bucket)
         }
         for future in as_completed(future_to_bucket):
-            result = future.result()
-            bucket_results[result["bucket_type"]] = result["parsed"]
+            bucket = future_to_bucket[future]
+            try:
+                result = future.result()
+                bucket_results[result["bucket_type"]] = result["parsed"]
+            except Exception as exc:
+                logger.error(
+                    "[日总结] %s桶降级为空结果: analysis_date=%s, error=%s",
+                    DAILY_SUMMARY_BUCKET_LABELS[bucket],
+                    analysis_date,
+                    exc,
+                )
+                bucket_results[bucket] = {
+                    "daily_major_events": [],
+                    "sector_impact_map": [],
+                    "linkage_logic_chain": [],
+                }
 
     parsed = _assemble_daily_summary(bucket_results)
     source_news_ids: List[int] = []
