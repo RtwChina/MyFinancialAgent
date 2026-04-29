@@ -29,16 +29,16 @@
 
 - [x] 4.1 Create a private backup clone or branch before rewriting history.
 - [x] 4.2 Prepare a history rewrite plan covering known secret values and sensitive file paths.
-- [ ] 4.3 Run git history cleanup with `git-filter-repo` or an equivalent tool across all relevant refs.
-- [ ] 4.4 Verify removed secrets no longer appear in rewritten history.
+- [x] 4.3 Run git history cleanup with `git-filter-repo` or an equivalent tool across all relevant refs.
+- [x] 4.4 Verify removed secrets no longer appear in rewritten history.
 - [ ] 4.5 Force-push the rewritten history while the repository remains private.
 - [x] 4.6 Communicate that old clones must be re-cloned or carefully realigned to avoid reintroducing old history.
 
 ## 5. Scanning And Verification
 
 - [x] 5.1 Run targeted regex scanning against the current tree for provider keys, Bearer tokens, private keys, and local tokens.
-- [ ] 5.2 Run a full-history scanner such as `gitleaks` or `trufflehog` on the rewritten repository.
-- [ ] 5.3 Check for committed databases, logs, exports, spreadsheets, or generated artifacts in current tree and rewritten history.
+- [x] 5.2 Run a full-history scanner such as `gitleaks` or `trufflehog` on the rewritten repository.
+- [x] 5.3 Check for committed databases, logs, exports, spreadsheets, or generated artifacts in current tree and rewritten history.
 - [ ] 5.4 Inspect recent GitHub Actions logs for leaked secrets, request headers, environment dumps, or sensitive prompts.
 - [x] 5.5 Run `python -m py_compile` or equivalent smoke checks for files touched during sanitization.
 - [x] 5.6 Run existing focused tests affected by configuration changes.
@@ -55,7 +55,7 @@
 ## 7. Public Conversion Readiness
 
 - [ ] 7.1 Confirm secret retention risk is accepted and retained secrets are absent from current tree, rewritten history, and retained logs.
-- [ ] 7.2 Confirm current-tree scan and full-history scan are clean.
+- [x] 7.2 Confirm current-tree scan and full-history scan are clean.
 - [ ] 7.3 Confirm required GitHub Actions and Cloudflare Worker secrets are populated with intended retained values.
 - [ ] 7.4 Confirm scheduled workflows can start successfully after billing-independent public-readiness changes.
 - [ ] 7.5 Confirm the repository is still private immediately before changing visibility.
