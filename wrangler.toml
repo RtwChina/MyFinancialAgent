@@ -1,0 +1,16 @@
+name = "my-financial-agent"
+main = "cloudflare/worker/src/index.js"
+compatibility_date = "2026-03-15"
+
+[vars]
+APP_ENV = "prod"
+
+[assets]
+directory = "cloudflare/web"
+binding = "ASSETS"
+
+[[d1_databases]]
+binding = "DB"
+database_name = "my-financial-agent"
+database_id = "b9a4be38-668d-4143-8355-6146c2610f82"
+migrations_dir = "cloudflare/migrations"
