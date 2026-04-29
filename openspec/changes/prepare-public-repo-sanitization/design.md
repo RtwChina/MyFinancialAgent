@@ -54,8 +54,8 @@ Placement:
 | `LLM_BASE_URL` | yes or repo variable | optional Worker var/secret | `.env` / `.dev.vars` |
 | `FINNHUB_API_KEY` | yes | no | `.env` |
 | `INGEST_API_BASE_URL` | yes | no | `.env` |
-| `INGEST_API_TOKEN` | yes | yes | `.env` / `.dev.vars` |
-| `APP_API_TOKEN` | no | yes | `.dev.vars` |
+| `INGEST_API_TOKEN` | yes | yes, retained runtime binding | `.env` / `.dev.vars` |
+| `APP_API_TOKEN` | no | optional; falls back to `INGEST_API_TOKEN` if unset | `.dev.vars` |
 | `LLM_MODEL_ID` | optional | optional Worker var/secret | `.env` / `.dev.vars` |
 
 ### 3. Keep `wrangler.toml` non-sensitive
@@ -73,7 +73,7 @@ This is intentionally separated from the final visibility change. The repository
 - current tree scan passes,
 - full history scan passes,
 - key non-rotation risk has been accepted and retained values are absent from repository-visible surfaces,
-- GitHub Actions secrets and Cloudflare Worker secrets are populated,
+- GitHub Actions secrets and Cloudflare Worker runtime bindings are populated,
 - scheduled jobs pass with the new secrets.
 
 ### 5. Verify Actions and Worker after sanitization
@@ -92,7 +92,7 @@ The public-readiness verification must cover each runtime path:
 - [Secret still present in Actions logs or artifacts] -> Inspect recent workflow runs and delete risky logs/artifacts before switching public.
 - [Missed key pattern] -> Run more than one scanner style: targeted regex scan plus a history scanner such as `gitleaks` or `trufflehog`.
 - [Sanitization breaks scheduled jobs] -> Re-run `workflow_dispatch` for each workflow while the repo is still private and confirm success.
-- [Cloudflare Worker loses write auth] -> Set Worker `INGEST_API_TOKEN` before updating GitHub Actions `INGEST_API_TOKEN`; verify with a non-destructive authenticated endpoint or a controlled write path.
+- [Cloudflare Worker loses write auth] -> Keep GitHub Actions `INGEST_API_TOKEN` aligned with the Worker `INGEST_API_TOKEN` runtime binding; verify with a non-destructive authenticated endpoint or a controlled write path.
 - [Public repository reveals operational URLs] -> Treat service URLs and D1 binding names as low sensitivity, but verify no private admin-only endpoint or token is embedded.
 
 ## Migration Plan

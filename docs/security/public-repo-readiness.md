@@ -14,7 +14,7 @@ Tracked files with credential-like values or secret references found during the 
 
 - `src/config.py`: previously had real DashScope/Bailian and Tavily fallback values; now reads those values only from environment variables.
 - `tests/news_quality_test.py`: previously had a real Finnhub fallback value; now reads it only from `FINNHUB_API_KEY`.
-- `wrangler.toml`: previously had `INGEST_API_TOKEN` under `[vars]`; Worker tokens must be configured as secrets instead.
+- `wrangler.toml`: previously had `INGEST_API_TOKEN` under checked-in vars; the current tree no longer stores it.
 - `.github/workflows/collect_news.yml`: consumes GitHub Actions secrets for LLM, Finnhub, and Worker ingest.
 - `.github/workflows/collect_prices.yml`: consumes GitHub Actions secrets for LLM, Finnhub, and Worker ingest.
 - `.github/workflows/repair_prices.yml`: consumes GitHub Actions secrets for Worker ingest.
@@ -33,13 +33,13 @@ GitHub Actions repository secrets:
 | `INGEST_API_BASE_URL` | all production ingestion workflows | Production Worker URL. |
 | `INGEST_API_TOKEN` | all production ingestion workflows | Retained by operator decision; must not appear in current tree, rewritten history, or retained logs. |
 
-Cloudflare Worker secrets:
+Cloudflare Worker runtime bindings:
 
 | Name | Used by | Notes |
 | --- | --- | --- |
-| `INGEST_API_TOKEN` | Python ingest write authentication | Must match the GitHub Actions `INGEST_API_TOKEN`. |
-| `APP_API_TOKEN` | Front-end write authentication | Retained by operator decision if already configured; Worker can fall back to `INGEST_API_TOKEN` if unset. |
-| `LLM_API_KEY` | Worker-side symbol resolution | Only needed if Worker LLM symbol resolution remains enabled. |
+| `INGEST_API_TOKEN` | Python ingest write authentication | Retained Worker binding; must match the GitHub Actions `INGEST_API_TOKEN`. |
+| `APP_API_TOKEN` | Front-end write authentication | Optional; omitted if Worker front-end writes intentionally fall back to `INGEST_API_TOKEN`. |
+| `LLM_API_KEY` | Worker-side symbol resolution | Configured as a Worker secret if Worker LLM symbol resolution remains enabled. |
 
 Cloudflare Worker non-secret vars:
 
