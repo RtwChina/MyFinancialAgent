@@ -1,0 +1,8 @@
+# Cloudflare Worker local secret template.
+# Copy this file to .dev.vars for `wrangler dev`; never commit .dev.vars.
+
+INGEST_API_TOKEN=replace_with_secure_random_token
+APP_API_TOKEN=replace_with_optional_ui_write_token
+
+# Optional: only needed if Worker-side symbol resolution uses the LLM.
+LLM_API_KEY=your_llm_api_key_here

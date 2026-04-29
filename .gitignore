@@ -44,6 +44,8 @@ logs/
 node_modules/
 .wrangler/
 .dev.vars
+.dev.vars.*
+!.dev.vars.example
 npm-debug.log*
 
 # 环境变量
