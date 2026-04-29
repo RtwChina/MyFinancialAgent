@@ -31,7 +31,7 @@
 - [x] 4.2 Prepare a history rewrite plan covering known secret values and sensitive file paths.
 - [x] 4.3 Run git history cleanup with `git-filter-repo` or an equivalent tool across all relevant refs.
 - [x] 4.4 Verify removed secrets no longer appear in rewritten history.
-- [ ] 4.5 Force-push the rewritten history while the repository remains private.
+- [x] 4.5 Force-push the rewritten history while the repository remains private.
 - [x] 4.6 Communicate that old clones must be re-cloned or carefully realigned to avoid reintroducing old history.
 
 ## 5. Scanning And Verification
