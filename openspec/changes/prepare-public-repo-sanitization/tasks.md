@@ -45,10 +45,10 @@
 
 ## 6. Runtime Validation
 
-- [ ] 6.1 Run `采集新闻数据` via `workflow_dispatch` using GitHub Actions secrets.
-- [ ] 6.2 Run `采集股票价格数据` via `workflow_dispatch` using GitHub Actions secrets.
-- [ ] 6.3 Run `修复股票空价格数据` via `workflow_dispatch` using GitHub Actions secrets.
-- [ ] 6.4 Verify Worker authenticated write paths still accept the retained token.
+- [x] 6.1 Run `采集新闻数据` via `workflow_dispatch` using GitHub Actions secrets.
+- [x] 6.2 Run `采集股票价格数据` via `workflow_dispatch` using GitHub Actions secrets.
+- [x] 6.3 Run `修复股票空价格数据` via `workflow_dispatch` using GitHub Actions secrets.
+- [x] 6.4 Verify Worker authenticated write paths still accept the retained token.
 - [x] 6.5 Verify Worker front-end write operations use `APP_API_TOKEN` or the intended fallback token.
 - [x] 6.6 Recheck `repair_prices.yml` schedule and confirm the intended Beijing run times before public conversion.
 
@@ -57,7 +57,7 @@
 - [x] 7.1 Confirm secret retention risk is accepted and retained secrets are absent from current tree, rewritten history, and retained logs.
 - [x] 7.2 Confirm current-tree scan and full-history scan are clean.
 - [x] 7.3 Confirm required GitHub Actions and Cloudflare Worker runtime bindings are populated with intended retained values.
-- [ ] 7.4 Confirm scheduled workflows can start successfully after billing-independent public-readiness changes.
+- [x] 7.4 Confirm scheduled workflows can start successfully after billing-independent public-readiness changes.
 - [x] 7.5 Confirm the repository is still private immediately before changing visibility.
-- [ ] 7.6 Change repository visibility to public manually in GitHub settings.
-- [ ] 7.7 After public conversion, run one workflow manually and verify it starts with the public repository settings.
+- [x] 7.6 Change repository visibility to public manually in GitHub settings.
+- [x] 7.7 After public conversion, run one workflow manually and verify it starts with the public repository settings.
