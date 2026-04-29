@@ -20,7 +20,7 @@
 - [x] 3.2 Record operator decision to retain Tavily `TAVILY_API_KEY` and rely on history/log sanitization.
 - [x] 3.3 Record operator decision to retain Finnhub `FINNHUB_API_KEY` and rely on history/log sanitization.
 - [x] 3.4 Record operator decision to retain `INGEST_API_TOKEN` and `APP_API_TOKEN` and rely on history/log sanitization.
-- [ ] 3.5 Confirm GitHub Actions repository secrets exist: `LLM_API_KEY`, `LLM_BASE_URL`, `FINNHUB_API_KEY`, `INGEST_API_BASE_URL`, `INGEST_API_TOKEN`.
+- [x] 3.5 Confirm GitHub Actions repository secrets exist: `LLM_API_KEY`, `LLM_BASE_URL`, `FINNHUB_API_KEY`, `INGEST_API_BASE_URL`, `INGEST_API_TOKEN`.
 - [ ] 3.6 Confirm Cloudflare Worker secrets exist: `INGEST_API_TOKEN`, `APP_API_TOKEN`, and `LLM_API_KEY` if Worker LLM symbol resolution remains enabled.
 - [ ] 3.7 Add Cloudflare Worker non-secret vars as needed: `LLM_BASE_URL`, `LLM_MODEL_ID`, and `APP_ENV`.
 - [x] 3.8 Document the final secret placement table in project docs or an operator checklist.
@@ -39,7 +39,7 @@
 - [x] 5.1 Run targeted regex scanning against the current tree for provider keys, Bearer tokens, private keys, and local tokens.
 - [x] 5.2 Run a full-history scanner such as `gitleaks` or `trufflehog` on the rewritten repository.
 - [x] 5.3 Check for committed databases, logs, exports, spreadsheets, or generated artifacts in current tree and rewritten history.
-- [ ] 5.4 Inspect recent GitHub Actions logs for leaked secrets, request headers, environment dumps, or sensitive prompts.
+- [x] 5.4 Inspect recent GitHub Actions logs for leaked secrets, request headers, environment dumps, or sensitive prompts.
 - [x] 5.5 Run `python -m py_compile` or equivalent smoke checks for files touched during sanitization.
 - [x] 5.6 Run existing focused tests affected by configuration changes.
 
@@ -54,10 +54,10 @@
 
 ## 7. Public Conversion Readiness
 
-- [ ] 7.1 Confirm secret retention risk is accepted and retained secrets are absent from current tree, rewritten history, and retained logs.
+- [x] 7.1 Confirm secret retention risk is accepted and retained secrets are absent from current tree, rewritten history, and retained logs.
 - [x] 7.2 Confirm current-tree scan and full-history scan are clean.
 - [ ] 7.3 Confirm required GitHub Actions and Cloudflare Worker secrets are populated with intended retained values.
 - [ ] 7.4 Confirm scheduled workflows can start successfully after billing-independent public-readiness changes.
-- [ ] 7.5 Confirm the repository is still private immediately before changing visibility.
+- [x] 7.5 Confirm the repository is still private immediately before changing visibility.
 - [ ] 7.6 Change repository visibility to public manually in GitHub settings.
 - [ ] 7.7 After public conversion, run one workflow manually and verify it starts with the public repository settings.
