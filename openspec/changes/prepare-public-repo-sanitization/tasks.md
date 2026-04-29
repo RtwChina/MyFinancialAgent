@@ -27,7 +27,7 @@
 
 ## 4. Git History Sanitization
 
-- [ ] 4.1 Create a private backup clone or branch before rewriting history.
+- [x] 4.1 Create a private backup clone or branch before rewriting history.
 - [x] 4.2 Prepare a history rewrite plan covering known secret values and sensitive file paths.
 - [ ] 4.3 Run git history cleanup with `git-filter-repo` or an equivalent tool across all relevant refs.
 - [ ] 4.4 Verify removed secrets no longer appear in rewritten history.
