@@ -4,7 +4,7 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>My Financial Agent</title>
-    <link rel="stylesheet" href="/styles.css" />
+    <link rel="stylesheet" href="/styles.css?v=20260508-layout-1" />
   </head>
   <body>
     <div class="shell">
@@ -463,10 +463,96 @@
             </section>
 
             <section class="review-step-panel hidden" data-step="plan">
-              <label class="review-field wide">
-                个股与资产操作计划
-                <textarea name="assetPlan" rows="12" placeholder="针对 MU、MSFT、GOOGL、LITE 和仓位，直接写计划、触发条件和风险线。"></textarea>
-              </label>
+              <div class="review-field wide action-plan-field">
+                <div class="action-plan-head">
+                  <div>
+                    <strong>个股与资产操作计划</strong>
+                    <small class="muted">每个标的一行，表格扫全局，下方编辑当前选中标的。</small>
+                  </div>
+                  <div class="action-plan-tools">
+                    <button id="addActionPlanBtn" type="button" class="ghost compact-button">添加标的</button>
+                    <button id="moveActionPlanUpBtn" type="button" class="ghost compact-button">上移</button>
+                    <button id="moveActionPlanDownBtn" type="button" class="ghost compact-button">下移</button>
+                    <button id="deleteActionPlanBtn" type="button" class="ghost compact-button danger">删除</button>
+                  </div>
+                </div>
+                <textarea id="legacyAssetPlanField" name="assetPlan" class="hidden" data-no-md></textarea>
+                <div id="legacyAssetPlanNotice" class="legacy-action-plan hidden">
+                  <strong>旧版文本操作计划</strong>
+                  <pre id="legacyAssetPlanText"></pre>
+                </div>
+                <div class="action-plan-table-wrap">
+                  <table class="action-plan-table">
+                    <colgroup>
+                      <col class="col-symbol">
+                      <col class="col-action">
+                      <col class="col-position">
+                      <col class="col-entry">
+                      <col class="col-take-profit">
+                      <col class="col-stop-loss">
+                      <col class="col-levels">
+                      <col class="col-thinking">
+                    </colgroup>
+                    <thead>
+                      <tr>
+                        <th>标的</th>
+                        <th>动作</th>
+                        <th>当前仓位</th>
+                        <th>开仓计划</th>
+                        <th>止盈计划</th>
+                        <th>止损计划</th>
+                        <th>支撑压力位</th>
+                        <th>思考</th>
+                      </tr>
+                    </thead>
+                    <tbody id="actionPlanRows"></tbody>
+                  </table>
+                </div>
+                <div id="emptyActionPlanState" class="empty-state hidden">还没有结构化操作计划，点击“添加标的”开始填写。</div>
+                <div id="actionPlanEditor" class="action-plan-editor hidden">
+                  <label class="compact">
+                    标的
+                    <input id="actionPlanSymbolInput" type="text" placeholder="MU">
+                  </label>
+                  <label class="compact">
+                    动作
+                    <select id="actionPlanActionSelect">
+                      <option>准备开仓</option>
+                      <option>持仓观察</option>
+                      <option>已清仓复盘</option>
+                    </select>
+                  </label>
+                  <label class="compact">
+                    当前仓位
+                    <select id="actionPlanPositionSelect">
+                      <option>0-10%</option>
+                      <option>10%-20%</option>
+                      <option>20%-30%</option>
+                      <option>&gt;30%</option>
+                    </select>
+                  </label>
+                  <label class="compact">
+                    开仓计划
+                    <textarea id="actionPlanEntryInput" rows="4" data-no-md></textarea>
+                  </label>
+                  <label class="span-2">
+                    止盈计划
+                    <textarea id="actionPlanTakeProfitInput" rows="4" data-no-md></textarea>
+                  </label>
+                  <label class="span-2">
+                    止损计划
+                    <textarea id="actionPlanStopLossInput" rows="4" data-no-md></textarea>
+                  </label>
+                  <label class="span-2">
+                    支撑压力位
+                    <textarea id="actionPlanKeyLevelsInput" rows="7" data-no-md placeholder="支撑位 (Support):&#10;335-348（中）&#10;&#10;压力位:&#10;335-348（中）"></textarea>
+                  </label>
+                  <label class="span-2">
+                    思考
+                    <textarea id="actionPlanThinkingInput" rows="4" data-no-md></textarea>
+                  </label>
+                </div>
+              </div>
             </section>
 
             <section class="review-step-panel hidden" data-step="thinking">
@@ -503,6 +589,6 @@
       </div>
     </aside>
 
-    <script type="module" src="/app.js"></script>
+    <script type="module" src="/app.js?v=20260508-layout-1"></script>
   </body>
 </html>
