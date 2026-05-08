@@ -1,0 +1,836 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>结构化操作计划样式评估</title>
+<style>
+:root {
+  --bg: #f4f6fb;
+  --bg-accent: #eef2f8;
+  --paper: #ffffff;
+  --panel: rgba(255, 255, 255, 0.78);
+  --line: rgba(15, 23, 42, 0.08);
+  --line-strong: rgba(15, 23, 42, 0.16);
+  --text: #0f172a;
+  --muted: #667085;
+  --accent: #2563eb;
+  --accent-soft: rgba(37, 99, 235, 0.12);
+  --success: #157347;
+  --warning: #a16207;
+  --danger: #b42318;
+  --shadow: 0 24px 70px rgba(15, 23, 42, 0.08);
+  --soft-shadow: 0 14px 34px rgba(15, 23, 42, 0.06);
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  min-height: 100vh;
+  font-family: "SF Pro Display", "SF Pro Text", -apple-system, BlinkMacSystemFont, "PingFang SC", "Hiragino Sans GB", sans-serif;
+  color: var(--text);
+  background:
+    radial-gradient(circle at top left, rgba(255, 255, 255, 0.92), transparent 26%),
+    radial-gradient(circle at top right, rgba(37, 99, 235, 0.08), transparent 24%),
+    radial-gradient(circle at 20% 90%, rgba(148, 163, 184, 0.1), transparent 28%),
+    linear-gradient(180deg, var(--bg-accent), var(--bg));
+}
+
+body::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  background-image:
+    linear-gradient(rgba(15, 23, 42, 0.018) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(15, 23, 42, 0.018) 1px, transparent 1px);
+  background-size: 32px 32px;
+  mask-image: linear-gradient(180deg, rgba(0, 0, 0, 0.16), transparent 72%);
+}
+
+button, input, select, textarea { font: inherit; }
+button { cursor: pointer; }
+
+.shell {
+  width: min(1400px, calc(100vw - 32px));
+  margin: 0 auto;
+  padding: 10px 0 52px;
+}
+
+.top-preview {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 16px;
+  align-items: end;
+  margin-bottom: 12px;
+  padding: 18px;
+  border-radius: 28px;
+  background:
+    radial-gradient(circle at 14% 16%, rgba(255, 255, 255, 0.82), transparent 24%),
+    linear-gradient(135deg, rgba(198, 217, 243, 0.9), rgba(232, 239, 250, 0.72) 42%, rgba(218, 229, 245, 0.86));
+  border: 1px solid var(--line);
+  box-shadow: var(--shadow), inset 0 1px 0 rgba(255, 255, 255, 0.82);
+}
+
+.top-preview h1 {
+  margin: 0 0 6px;
+  font-size: 1.12rem;
+}
+
+.top-preview p {
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.9rem;
+}
+
+.fake-page-grid {
+  display: grid;
+  grid-template-columns: 1.2fr 0.8fr;
+  gap: 12px;
+  opacity: 0.58;
+}
+
+.fake-panel {
+  min-height: 112px;
+  border-radius: 24px;
+  background: rgba(255, 255, 255, 0.72);
+  border: 1px solid var(--line);
+  box-shadow: var(--soft-shadow);
+}
+
+.review-modal {
+  position: relative;
+  margin-top: -76px;
+  min-height: calc(100vh - 76px);
+  z-index: 2;
+}
+
+.review-modal-backdrop {
+  position: absolute;
+  inset: 0;
+  border-radius: 28px;
+  background: rgba(15, 23, 42, 0.16);
+  backdrop-filter: blur(8px);
+}
+
+.review-modal-panel {
+  position: relative;
+  width: min(1240px, calc(100vw - 24px));
+  margin: 0 auto;
+  max-height: calc(100vh - 24px);
+  overflow: auto;
+  padding: 22px;
+  border-radius: 30px;
+  border: 1px solid var(--line);
+  box-shadow: var(--shadow);
+  background:
+    radial-gradient(circle at top right, rgba(244, 180, 0, 0.12), transparent 22%),
+    radial-gradient(circle at top left, rgba(30, 64, 175, 0.08), transparent 24%),
+    linear-gradient(180deg, rgba(255, 252, 246, 0.98), rgba(246, 248, 253, 0.94));
+}
+
+.review-hero-compact {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 12px 16px;
+  padding: 18px 20px;
+  border-radius: 26px;
+  border: 1px solid rgba(15, 23, 42, 0.07);
+  background:
+    radial-gradient(circle at top right, rgba(244, 180, 0, 0.08), transparent 20%),
+    radial-gradient(circle at top left, rgba(37, 99, 235, 0.06), transparent 24%),
+    linear-gradient(180deg, rgba(255, 255, 255, 0.95), rgba(248, 250, 254, 0.9));
+}
+
+.review-identity-compact {
+  display: grid;
+  gap: 4px;
+}
+
+.review-identity-compact strong {
+  font-size: clamp(2.15rem, 4.8vw, 3.8rem);
+  line-height: 1.02;
+  letter-spacing: -0.045em;
+}
+
+.review-identity-compact span,
+.review-summary-line,
+.review-step-hint {
+  color: var(--muted);
+}
+
+.review-header-actions,
+.review-modal-footer,
+.variant-tabs,
+.plan-tools,
+.row-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.review-header-actions,
+.review-modal-footer {
+  justify-content: flex-end;
+}
+
+.review-step-nav {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 10px;
+  margin-top: 18px;
+}
+
+.step-chip {
+  border-radius: 20px;
+  padding: 12px 14px;
+  background: rgba(255, 255, 255, 0.72);
+  border: 1px solid rgba(15, 23, 42, 0.07);
+  color: var(--muted);
+  font-weight: 650;
+}
+
+.step-chip.completed {
+  background: linear-gradient(180deg, rgba(21, 115, 71, 0.08), rgba(21, 115, 71, 0.04));
+  border-color: rgba(21, 115, 71, 0.16);
+  color: var(--success);
+}
+
+.step-chip.active {
+  background: linear-gradient(180deg, rgba(37, 99, 235, 0.18), rgba(37, 99, 235, 0.08));
+  border-color: rgba(37, 99, 235, 0.26);
+  color: var(--accent);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.76), 0 10px 22px rgba(37, 99, 235, 0.08);
+}
+
+.review-step-hint {
+  margin: 10px 4px 16px;
+  font-size: 0.94rem;
+}
+
+.step-card {
+  display: grid;
+  gap: 14px;
+  padding: 18px;
+  border-radius: 24px;
+  background: rgba(255, 255, 255, 0.72);
+  border: 1px solid rgba(15, 23, 42, 0.06);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.82);
+}
+
+.variant-tabs {
+  justify-content: space-between;
+  flex-wrap: wrap;
+}
+
+.variant-switch {
+  display: inline-flex;
+  gap: 4px;
+  padding: 4px;
+  border-radius: 18px;
+  border: 1px solid var(--line);
+  background: rgba(255, 255, 255, 0.78);
+}
+
+.variant-switch button,
+.ghost,
+.primary,
+.micro-btn {
+  min-height: 36px;
+  border: 1px solid rgba(15, 23, 42, 0.1);
+  border-radius: 999px;
+  padding: 0 14px;
+  background: rgba(255, 255, 255, 0.74);
+  color: var(--text);
+  font-weight: 700;
+}
+
+.variant-switch button {
+  border: 0;
+  color: var(--muted);
+}
+
+.variant-switch button.active,
+.primary {
+  background: linear-gradient(135deg, rgba(17, 24, 39, 0.96), rgba(30, 41, 59, 0.92));
+  color: #fff;
+}
+
+.micro-btn {
+  min-height: 28px;
+  padding: 0 10px;
+  border-radius: 10px;
+  font-size: 0.78rem;
+}
+
+.plan-tools {
+  justify-content: space-between;
+  flex-wrap: wrap;
+}
+
+.plan-tools h3 {
+  margin: 0;
+  font-size: 1rem;
+}
+
+.plan-filter {
+  display: inline-flex;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  overflow: hidden;
+  background: #fff;
+}
+
+.plan-filter button {
+  min-height: 32px;
+  border: 0;
+  border-right: 1px solid var(--line);
+  background: transparent;
+  padding: 0 12px;
+  color: var(--muted);
+  font-weight: 700;
+}
+
+.plan-filter button:last-child { border-right: 0; }
+.plan-filter button.active { color: var(--accent); background: var(--accent-soft); }
+
+.variant { display: none; }
+.variant.active { display: block; }
+
+.status-pill,
+.position-pill {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 26px;
+  border-radius: 999px;
+  padding: 0 10px;
+  font-size: 0.78rem;
+  font-weight: 850;
+  white-space: nowrap;
+}
+
+.status-open { color: #1d4ed8; background: rgba(37, 99, 235, 0.1); }
+.status-hold { color: #7c2d12; background: rgba(245, 158, 11, 0.13); }
+.status-closed { color: #475569; background: rgba(100, 116, 139, 0.12); }
+.position-pill { color: #0f5132; background: rgba(21, 115, 71, 0.1); }
+
+.levels-preview {
+  white-space: pre-line;
+  line-height: 1.48;
+  color: #334155;
+}
+
+.levels-preview b {
+  color: var(--accent);
+}
+
+.compact-text {
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  line-height: 1.55;
+}
+
+.table-wrap {
+  overflow: auto;
+  border-radius: 20px;
+  border: 1px solid rgba(15, 23, 42, 0.07);
+  background: rgba(255, 255, 255, 0.86);
+}
+
+table {
+  width: 100%;
+  min-width: 1120px;
+  border-collapse: collapse;
+  table-layout: fixed;
+}
+
+th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  text-align: left;
+  padding: 10px 11px;
+  font-size: 0.78rem;
+  color: #475569;
+  background: rgba(241, 245, 249, 0.96);
+  border-bottom: 1px solid rgba(15, 23, 42, 0.1);
+}
+
+td {
+  padding: 11px;
+  vertical-align: top;
+  border-bottom: 1px solid rgba(15, 23, 42, 0.06);
+  font-size: 0.86rem;
+}
+
+tr.selected td {
+  background: rgba(37, 99, 235, 0.06);
+  box-shadow: inset 3px 0 0 var(--accent);
+}
+
+.symbol-only {
+  font-size: 1rem;
+  font-weight: 900;
+  letter-spacing: 0;
+}
+
+.variant-a-grid {
+  display: grid;
+  gap: 12px;
+}
+
+.inline-editor {
+  display: grid;
+  grid-template-columns: 90px 130px 170px minmax(0, 1fr);
+  gap: 10px;
+  padding: 14px;
+  border-radius: 18px;
+  border: 1px solid rgba(37, 99, 235, 0.14);
+  background: rgba(255, 255, 255, 0.76);
+}
+
+.field {
+  display: grid;
+  gap: 6px;
+}
+
+.field label {
+  font-size: 0.78rem;
+  color: var(--muted);
+  font-weight: 800;
+}
+
+.field input,
+.field select,
+.field textarea {
+  width: 100%;
+  border: 1px solid rgba(15, 23, 42, 0.12);
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.9);
+  padding: 9px 10px;
+  outline: none;
+}
+
+.field textarea {
+  min-height: 76px;
+  resize: vertical;
+  line-height: 1.55;
+}
+
+.field.levels textarea {
+  min-height: 148px;
+  font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+  font-size: 0.78rem;
+}
+
+.field input:focus,
+.field select:focus,
+.field textarea:focus {
+  border-color: rgba(37, 99, 235, 0.5);
+  box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.11);
+}
+
+.variant-b-layout {
+  display: grid;
+  grid-template-columns: minmax(360px, 0.8fr) minmax(0, 1.2fr);
+  gap: 14px;
+}
+
+.rail-list,
+.detail-editor,
+.plan-card {
+  border-radius: 20px;
+  border: 1px solid rgba(15, 23, 42, 0.07);
+  background: rgba(255, 255, 255, 0.78);
+}
+
+.rail-list {
+  overflow: hidden;
+}
+
+.rail-item {
+  display: grid;
+  grid-template-columns: 74px minmax(0, 1fr);
+  gap: 10px;
+  padding: 13px 14px;
+  border-bottom: 1px solid rgba(15, 23, 42, 0.06);
+}
+
+.rail-item.active {
+  background: rgba(37, 99, 235, 0.08);
+  box-shadow: inset 3px 0 0 var(--accent);
+}
+
+.rail-copy {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+}
+
+.rail-copy p {
+  margin: 0;
+  color: #334155;
+}
+
+.detail-editor {
+  padding: 16px;
+  display: grid;
+  gap: 12px;
+}
+
+.detail-top {
+  display: grid;
+  grid-template-columns: 1fr 160px 180px;
+  gap: 10px;
+}
+
+.editor-columns {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.field.full { grid-column: 1 / -1; }
+
+.variant-c-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.plan-card {
+  padding: 14px;
+  display: grid;
+  gap: 12px;
+}
+
+.plan-card-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  align-items: center;
+}
+
+.card-metrics {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.plan-card-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.mini-block {
+  min-height: 92px;
+  padding: 10px;
+  border-radius: 14px;
+  background: rgba(248, 250, 252, 0.88);
+  border: 1px solid rgba(15, 23, 42, 0.06);
+}
+
+.mini-block b {
+  display: block;
+  margin-bottom: 5px;
+  color: #475569;
+  font-size: 0.78rem;
+}
+
+.mini-block p {
+  margin: 0;
+  color: #334155;
+  font-size: 0.84rem;
+  line-height: 1.55;
+}
+
+.review-modal-footer {
+  justify-content: space-between;
+  margin-top: 16px;
+}
+
+@media (max-width: 980px) {
+  .top-preview,
+  .review-hero-compact,
+  .variant-b-layout,
+  .inline-editor,
+  .detail-top,
+  .editor-columns {
+    grid-template-columns: 1fr;
+  }
+  .fake-page-grid,
+  .variant-c-grid,
+  .plan-card-grid {
+    grid-template-columns: 1fr;
+  }
+  .review-step-nav {
+    grid-template-columns: 1fr 1fr;
+  }
+  .review-modal-panel {
+    padding: 14px;
+  }
+}
+</style>
+</head>
+<body>
+<div class="shell">
+  <section class="top-preview">
+    <div>
+      <h1>复盘工作台</h1>
+      <p>当前打开的是每日复盘抽屉，操作计划步骤使用结构化输入。</p>
+    </div>
+    <div class="fake-page-grid" aria-hidden="true">
+      <div class="fake-panel"></div>
+      <div class="fake-panel"></div>
+    </div>
+  </section>
+
+  <section class="review-modal">
+    <div class="review-modal-backdrop"></div>
+    <div class="review-modal-panel">
+      <header class="review-hero-compact">
+        <div class="review-identity-compact">
+          <span>当日复盘</span>
+          <strong>2026-05-07</strong>
+          <div class="review-summary-line">美股交易日 ｜ 新闻窗口（北京时间） 05-06 04:00 → 05-07 04:00</div>
+        </div>
+        <div class="review-header-actions">
+          <button class="ghost">编辑模式</button>
+          <button class="ghost">关闭</button>
+        </div>
+      </header>
+
+      <nav class="review-step-nav">
+        <button class="step-chip completed">新闻总结</button>
+        <button class="step-chip completed">大盘盘点</button>
+        <button class="step-chip completed">板块轮动</button>
+        <button class="step-chip active">操作计划</button>
+        <button class="step-chip">交易总结</button>
+      </nav>
+      <div class="review-step-hint">针对核心标的和仓位，给出明确计划、触发条件和风险线。</div>
+
+      <section class="step-card">
+        <div class="variant-tabs">
+          <div class="plan-tools">
+            <h3>个股与资产操作计划</h3>
+            <button class="primary">+ 添加标的</button>
+            <button class="ghost">从持仓带入</button>
+          </div>
+          <div class="variant-switch" aria-label="样式版本">
+            <button class="active" data-variant="a">版本 A</button>
+            <button data-variant="b">版本 B</button>
+            <button data-variant="c">版本 C</button>
+          </div>
+        </div>
+
+        <div class="plan-tools">
+          <div class="plan-filter">
+            <button class="active">全部</button>
+            <button>准备开仓</button>
+            <button>持仓观察</button>
+            <button>已清仓复盘</button>
+          </div>
+          <div class="row-actions">
+            <button class="micro-btn">上移</button>
+            <button class="micro-btn">下移</button>
+            <button class="micro-btn">删除</button>
+          </div>
+        </div>
+
+        <div class="variant variant-a active" data-panel="a">
+          <div class="variant-a-grid">
+            <div class="table-wrap">
+              <table>
+                <thead>
+                  <tr>
+                    <th style="width: 82px;">标的</th>
+                    <th style="width: 112px;">动作</th>
+                    <th style="width: 152px;">当前仓位</th>
+                    <th style="width: 175px;">开仓计划</th>
+                    <th style="width: 175px;">止盈计划</th>
+                    <th style="width: 175px;">止损计划</th>
+                    <th style="width: 210px;">支撑压力位</th>
+                    <th style="width: 220px;">思考</th>
+                  </tr>
+                </thead>
+                <tbody id="tableRows"></tbody>
+              </table>
+            </div>
+            <div class="inline-editor">
+              <div class="field"><label>标的</label><input value="MU"></div>
+              <div class="field"><label>动作</label><select><option>准备开仓</option><option selected>持仓观察</option><option>已清仓复盘</option></select></div>
+              <div class="field"><label>当前仓位</label><select><option selected>0-10%</option><option>10%-20%</option><option>20%-30%</option><option>&gt;30%</option></select></div>
+              <div class="field levels"><label>支撑压力位</label><textarea id="levelsA"></textarea></div>
+            </div>
+          </div>
+        </div>
+
+        <div class="variant variant-b" data-panel="b">
+          <div class="variant-b-layout">
+            <div class="rail-list" id="railList"></div>
+            <div class="detail-editor">
+              <div class="detail-top">
+                <div class="field"><label>标的</label><input value="MU"></div>
+                <div class="field"><label>动作</label><select><option>准备开仓</option><option selected>持仓观察</option><option>已清仓复盘</option></select></div>
+                <div class="field"><label>当前仓位</label><select><option selected>0-10%</option><option>10%-20%</option><option>20%-30%</option><option>&gt;30%</option></select></div>
+              </div>
+              <div class="editor-columns">
+                <div class="field"><label>开仓计划</label><textarea>不追高，等回踩 88-90 区间观察承接；放量站回 95 再补 5%。</textarea></div>
+                <div class="field"><label>止盈计划</label><textarea>第一目标 95，突破后看 102，保留底仓跟踪。</textarea></div>
+                <div class="field"><label>止损计划</label><textarea>跌破 82 且半导体同步走弱，减到观察仓。</textarea></div>
+                <div class="field levels"><label>支撑压力位</label><textarea id="levelsB"></textarea></div>
+                <div class="field full"><label>思考</label><textarea>AI 服务器需求仍是主线，短期看利率和存储周期预期的再定价。</textarea></div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="variant variant-c" data-panel="c">
+          <div class="variant-c-grid" id="cardGrid"></div>
+        </div>
+      </section>
+
+      <footer class="review-modal-footer">
+        <button class="ghost">上一步</button>
+        <button class="primary">下一步</button>
+      </footer>
+    </div>
+  </section>
+</div>
+
+<script>
+const levelText = `支撑位 (Support):
+335-348（中）
+298-310（小）
+272-284（中）
+246-264（强）
+228-240（强） 👉 突破看前高
+210-222（强） 👉 突破止跌
+175-187（强）
+
+压力位:
+335-348（中）`;
+
+const plans = [
+  {
+    symbol: "MU",
+    action: "持仓观察",
+    actionClass: "status-hold",
+    position: "0-10%",
+    entry: "不追高，等回踩 88-90 区间观察承接；放量站回 95 再补 5%。",
+    profit: "第一目标 95，突破后看 102，保留底仓跟踪。",
+    loss: "跌破 82 且半导体同步走弱，减到观察仓。",
+    levels: levelText,
+    thinking: "AI 服务器需求仍是主线，短期看利率和存储周期预期的再定价。"
+  },
+  {
+    symbol: "MSFT",
+    action: "持仓观察",
+    actionClass: "status-hold",
+    position: "10%-20%",
+    entry: "不新增，除非回踩 410 附近且云业务预期没有恶化。",
+    profit: "新高后减 1/4，剩余仓位跟随趋势。",
+    loss: "跌破 398 并放量，降低到 10% 以下。",
+    levels: "支撑位 (Support):\\n410-416（中）\\n398-404（强）\\n\\n压力位:\\n438-445（中）\\n455-462（强）",
+    thinking: "基本盘稳，但估值不便宜，适合持有而不是情绪化追高。"
+  },
+  {
+    symbol: "GOOGL",
+    action: "准备开仓",
+    actionClass: "status-open",
+    position: "0-10%",
+    entry: "若 168 上方企稳两天，追加 5%；若回到 160 下方，只观察不动。",
+    profit: "178 附近先看广告和云业务预期，强势则继续持有。",
+    loss: "跌破 156 且 AI 竞争担忧加剧，撤回新增仓位。",
+    levels: "支撑位 (Support):\\n160-164（中）\\n156-158（强）\\n\\n压力位:\\n168-172（中）\\n178-182（强）",
+    thinking: "估值修复空间还在，但需要确认 AI 投入没有继续拖累利润率叙事。"
+  },
+  {
+    symbol: "LITE",
+    action: "已清仓复盘",
+    actionClass: "status-closed",
+    position: "0-10%",
+    entry: "不开新仓，等待光模块链路确认。",
+    profit: "冲高到 72-75 先减一半。",
+    loss: "跌破 61 清掉短线仓。",
+    levels: "支撑位 (Support):\\n61-63（中）\\n58-60（强）\\n\\n压力位:\\n72-75（强）",
+    thinking: "弹性大但波动也大，当前更适合交易计划，不适合扩大长期仓位。"
+  }
+];
+
+function escapeHtml(value) {
+  return String(value)
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#039;");
+}
+
+function renderLevels(value) {
+  return escapeHtml(value)
+    .replace(/支撑位 \(Support\):/g, "<b>支撑位 (Support):</b>")
+    .replace(/压力位:/g, "<b>压力位:</b>");
+}
+
+document.querySelector("#levelsA").value = levelText;
+document.querySelector("#levelsB").value = levelText;
+
+document.querySelector("#tableRows").innerHTML = plans.map((plan, index) => `
+  <tr class="${index === 0 ? "selected" : ""}">
+    <td><span class="symbol-only">${plan.symbol}</span></td>
+    <td><span class="status-pill ${plan.actionClass}">${plan.action}</span></td>
+    <td><span class="position-pill">${plan.position}</span></td>
+    <td><div class="compact-text">${escapeHtml(plan.entry)}</div></td>
+    <td><div class="compact-text">${escapeHtml(plan.profit)}</div></td>
+    <td><div class="compact-text">${escapeHtml(plan.loss)}</div></td>
+    <td><div class="levels-preview compact-text">${renderLevels(plan.levels)}</div></td>
+    <td><div class="compact-text">${escapeHtml(plan.thinking)}</div></td>
+  </tr>
+`).join("");
+
+document.querySelector("#railList").innerHTML = plans.map((plan, index) => `
+  <div class="rail-item ${index === 0 ? "active" : ""}">
+    <div><span class="symbol-only">${plan.symbol}</span></div>
+    <div class="rail-copy">
+      <div><span class="status-pill ${plan.actionClass}">${plan.action}</span></div>
+      <p class="compact-text">${escapeHtml(plan.entry)}</p>
+      <span class="position-pill">${plan.position}</span>
+    </div>
+  </div>
+`).join("");
+
+document.querySelector("#cardGrid").innerHTML = plans.map((plan) => `
+  <article class="plan-card">
+    <div class="plan-card-head">
+      <span class="symbol-only">${plan.symbol}</span>
+      <div class="card-metrics">
+        <span class="status-pill ${plan.actionClass}">${plan.action}</span>
+        <span class="position-pill">${plan.position}</span>
+      </div>
+    </div>
+    <div class="plan-card-grid">
+      <div class="mini-block"><b>开仓计划</b><p>${escapeHtml(plan.entry)}</p></div>
+      <div class="mini-block"><b>止盈计划</b><p>${escapeHtml(plan.profit)}</p></div>
+      <div class="mini-block"><b>止损计划</b><p>${escapeHtml(plan.loss)}</p></div>
+      <div class="mini-block"><b>支撑压力位</b><p class="levels-preview">${renderLevels(plan.levels)}</p></div>
+      <div class="mini-block" style="grid-column: span 2;"><b>思考</b><p>${escapeHtml(plan.thinking)}</p></div>
+    </div>
+  </article>
+`).join("");
+
+document.querySelectorAll("[data-variant]").forEach((button) => {
+  button.addEventListener("click", () => {
+    const target = button.dataset.variant;
+    document.querySelectorAll("[data-variant]").forEach((item) => item.classList.toggle("active", item === button));
+    document.querySelectorAll("[data-panel]").forEach((panel) => panel.classList.toggle("active", panel.dataset.panel === target));
+  });
+});
+</script>
+</body>
+</html>

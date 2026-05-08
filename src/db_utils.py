@@ -24,6 +24,72 @@ logger = get_logger("db_utils")
 # 数据库文件路径 (本地开发用)
 LOCAL_DB_PATH = os.path.join(OUTPUT_DIR, "financial_data.db")
 
+ACTION_PLAN_ACTIONS = ("准备开仓", "持仓观察", "已清仓复盘")
+ACTION_PLAN_POSITIONS = ("0-10%", "10%-20%", "20%-30%", ">30%")
+DEFAULT_ACTION_PLAN_ACTION = "持仓观察"
+DEFAULT_ACTION_PLAN_POSITION = "0-10%"
+
+
+def normalize_action_plan_action(value: Any) -> str:
+    """归一化结构化操作计划动作枚举。"""
+    text = str(value or "").strip()
+    return text if text in ACTION_PLAN_ACTIONS else DEFAULT_ACTION_PLAN_ACTION
+
+
+def normalize_action_plan_position(value: Any) -> str:
+    """归一化结构化操作计划仓位枚举。"""
+    text = str(value or "").strip()
+    return text if text in ACTION_PLAN_POSITIONS else DEFAULT_ACTION_PLAN_POSITION
+
+
+def normalize_action_plan_item(item: Dict[str, Any], sort_order: int = 0) -> Optional[Dict[str, Any]]:
+    """清洗单条操作计划；缺少 symbol 时返回 None。"""
+    symbol = str(item.get("symbol") or "").strip().upper()
+    if not symbol:
+        return None
+    return {
+        "symbol": symbol,
+        "action_type": normalize_action_plan_action(item.get("action_type") or item.get("actionType")),
+        "entry_plan": str(item.get("entry_plan") or item.get("entryPlan") or "").strip(),
+        "take_profit_plan": str(item.get("take_profit_plan") or item.get("takeProfitPlan") or "").strip(),
+        "stop_loss_plan": str(item.get("stop_loss_plan") or item.get("stopLossPlan") or "").strip(),
+        "key_levels": str(item.get("key_levels") or item.get("keyLevels") or "").strip(),
+        "current_position": normalize_action_plan_position(item.get("current_position") or item.get("currentPosition")),
+        "thinking": str(item.get("thinking") or "").strip(),
+        "sort_order": int(item.get("sort_order") if item.get("sort_order") is not None else item.get("sortOrder") or sort_order),
+    }
+
+
+def format_action_plans_markdown(action_plans: List[Dict[str, Any]]) -> str:
+    """将结构化操作计划生成为兼容旧 asset_plan 的 Markdown 摘要。"""
+    sections: List[str] = []
+    for item in action_plans:
+        plan = normalize_action_plan_item(item, len(sections))
+        if not plan:
+            continue
+        lines = [
+            f"### {plan['symbol']}",
+            f"- 动作：{plan['action_type']}",
+            f"- 当前仓位：{plan['current_position']}",
+        ]
+        optional_fields = [
+            ("开仓计划", plan["entry_plan"]),
+            ("止盈计划", plan["take_profit_plan"]),
+            ("止损计划", plan["stop_loss_plan"]),
+            ("支撑压力位", plan["key_levels"]),
+            ("思考", plan["thinking"]),
+        ]
+        for label, value in optional_fields:
+            if not value:
+                continue
+            if "\n" in value:
+                indented = "\n".join(f"  {line}" if line else "" for line in value.splitlines())
+                lines.append(f"- {label}：\n{indented}")
+            else:
+                lines.append(f"- {label}：{value}")
+        sections.append("\n".join(lines))
+    return "\n\n".join(sections)
+
 
 def get_db_connection(db_path: str = None) -> sqlite3.Connection:
     """获取数据库连接"""
@@ -471,6 +537,111 @@ def get_archive_by_date(archive_date: str, db_path: str = None) -> Optional[Dict
     conn.close()
 
     return dict(row) if row else None
+
+
+def list_review_action_plans(archive_date: str, db_path: str = None) -> List[Dict[str, Any]]:
+    """查询指定复盘日的结构化操作计划。"""
+    conn = get_db_connection(db_path)
+    cursor = conn.cursor()
+    cursor.execute(
+        '''
+        SELECT *
+        FROM daily_review_action_plans
+        WHERE archive_date = ?
+        ORDER BY sort_order ASC, symbol ASC
+        ''',
+        (archive_date,),
+    )
+    rows = cursor.fetchall()
+    conn.close()
+    return [dict(row) for row in rows]
+
+
+def replace_review_action_plans(
+    archive_date: str,
+    action_plans: List[Dict[str, Any]],
+    db_path: str = None,
+) -> List[Dict[str, Any]]:
+    """替换指定复盘日的结构化操作计划，并只删除当前 archive_date 下缺失的行。"""
+    normalized: List[Dict[str, Any]] = []
+    seen_symbols: set[str] = set()
+    for index, item in enumerate(action_plans or []):
+        plan = normalize_action_plan_item(item, index)
+        if not plan or plan["symbol"] in seen_symbols:
+            continue
+        seen_symbols.add(plan["symbol"])
+        normalized.append(plan)
+
+    conn = get_db_connection(db_path)
+    cursor = conn.cursor()
+    now = now_cst()
+    for index, plan in enumerate(normalized):
+        cursor.execute(
+            '''
+            INSERT INTO daily_review_action_plans (
+                archive_date, symbol, action_type, entry_plan, take_profit_plan,
+                stop_loss_plan, key_levels, current_position, thinking,
+                sort_order, created_at, updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(archive_date, symbol) DO UPDATE SET
+                action_type = excluded.action_type,
+                entry_plan = excluded.entry_plan,
+                take_profit_plan = excluded.take_profit_plan,
+                stop_loss_plan = excluded.stop_loss_plan,
+                key_levels = excluded.key_levels,
+                current_position = excluded.current_position,
+                thinking = excluded.thinking,
+                sort_order = excluded.sort_order,
+                updated_at = excluded.updated_at
+            ''',
+            (
+                archive_date,
+                plan["symbol"],
+                plan["action_type"],
+                plan["entry_plan"],
+                plan["take_profit_plan"],
+                plan["stop_loss_plan"],
+                plan["key_levels"],
+                plan["current_position"],
+                plan["thinking"],
+                int(plan.get("sort_order", index)),
+                now,
+                now,
+            ),
+        )
+
+    if normalized:
+        placeholders = ", ".join("?" for _ in normalized)
+        cursor.execute(
+            f'''
+            DELETE FROM daily_review_action_plans
+            WHERE archive_date = ?
+              AND symbol NOT IN ({placeholders})
+            ''',
+            (archive_date, *[plan["symbol"] for plan in normalized]),
+        )
+    else:
+        cursor.execute(
+            'DELETE FROM daily_review_action_plans WHERE archive_date = ?',
+            (archive_date,),
+        )
+
+    conn.commit()
+    conn.close()
+    return normalized
+
+
+def count_review_action_plans(archive_date: str, db_path: str = None) -> int:
+    """统计指定复盘日的结构化操作计划数量。"""
+    conn = get_db_connection(db_path)
+    cursor = conn.cursor()
+    cursor.execute(
+        'SELECT COUNT(*) AS cnt FROM daily_review_action_plans WHERE archive_date = ?',
+        (archive_date,),
+    )
+    row = cursor.fetchone()
+    conn.close()
+    return int(row["cnt"] if row else 0)
 
 
 # ========== 新闻分析结果操作 ==========

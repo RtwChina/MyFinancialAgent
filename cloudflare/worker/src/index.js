@@ -25,6 +25,11 @@ const TRACKED_SYMBOLS = [
   { symbol: "XLY",  aliases: ["XLY", "可选消费", "消费板块", "Consumer Discretionary"] },
 ];
 
+const ACTION_PLAN_ACTIONS = ["准备开仓", "持仓观察", "已清仓复盘"];
+const ACTION_PLAN_POSITIONS = ["0-10%", "10%-20%", "20%-30%", ">30%"];
+const DEFAULT_ACTION_PLAN_ACTION = "持仓观察";
+const DEFAULT_ACTION_PLAN_POSITION = "0-10%";
+
 export default {
   async fetch(request, env) {
     const appEnv = getAppEnv(env);
@@ -964,6 +969,8 @@ async function getReviewBootstrap(env, archiveDate) {
     .bind(archiveDate)
     .first();
 
+  const actionPlans = await listReviewActionPlans(env, archiveDate);
+
   // news 按类型分组
   const newsByType = { index: [], sector: [], stock: [] };
   for (const item of newsItems) {
@@ -981,6 +988,7 @@ async function getReviewBootstrap(env, archiveDate) {
     news: newsItems,          // 全量（兼容旧版）
     newsByType,               // 按 index/sector/stock 分组
     analysis: normalizeReviewAnalysis(analysis, newsItems),
+    actionPlans,
     carryForward: previousCompletedReview,
     draft: existingDraft ? { ...existingDraft, review_status: normalizeReviewStatus(existingDraft.review_status) } : null,
   };
@@ -1051,6 +1059,163 @@ function normalizeReviewStatus(status) {
   return status || "initialized";
 }
 
+function normalizeActionPlanAction(value) {
+  const text = String(value || "").trim();
+  return ACTION_PLAN_ACTIONS.includes(text) ? text : DEFAULT_ACTION_PLAN_ACTION;
+}
+
+function normalizeActionPlanPosition(value) {
+  const text = String(value || "").trim();
+  return ACTION_PLAN_POSITIONS.includes(text) ? text : DEFAULT_ACTION_PLAN_POSITION;
+}
+
+function normalizeActionPlanItem(item, sortOrder = 0) {
+  if (!item || typeof item !== "object") return null;
+  const symbol = String(item.symbol || "").trim().toUpperCase();
+  if (!symbol) return null;
+  return {
+    id: item.id == null ? null : Number(item.id),
+    symbol,
+    actionType: normalizeActionPlanAction(item.actionType || item.action_type),
+    entryPlan: String(item.entryPlan || item.entry_plan || "").trim(),
+    takeProfitPlan: String(item.takeProfitPlan || item.take_profit_plan || "").trim(),
+    stopLossPlan: String(item.stopLossPlan || item.stop_loss_plan || "").trim(),
+    keyLevels: String(item.keyLevels || item.key_levels || "").trim(),
+    currentPosition: normalizeActionPlanPosition(item.currentPosition || item.current_position),
+    thinking: String(item.thinking || "").trim(),
+    sortOrder: Number.isFinite(Number(item.sortOrder ?? item.sort_order))
+      ? Number(item.sortOrder ?? item.sort_order)
+      : sortOrder,
+  };
+}
+
+function dbActionPlanToApi(row) {
+  return {
+    id: row.id,
+    archiveDate: row.archive_date,
+    symbol: row.symbol,
+    actionType: row.action_type || DEFAULT_ACTION_PLAN_ACTION,
+    entryPlan: row.entry_plan || "",
+    takeProfitPlan: row.take_profit_plan || "",
+    stopLossPlan: row.stop_loss_plan || "",
+    keyLevels: row.key_levels || "",
+    currentPosition: row.current_position || DEFAULT_ACTION_PLAN_POSITION,
+    thinking: row.thinking || "",
+    sortOrder: Number(row.sort_order || 0),
+    createdAt: row.created_at || null,
+    updatedAt: row.updated_at || null,
+  };
+}
+
+async function listReviewActionPlans(env, archiveDate) {
+  const rows = await env.DB.prepare(
+    `SELECT *
+     FROM daily_review_action_plans
+     WHERE archive_date = ?
+     ORDER BY sort_order ASC, symbol ASC`,
+  )
+    .bind(archiveDate)
+    .all();
+  return (rows.results || []).map(dbActionPlanToApi);
+}
+
+function normalizeActionPlansForSave(actionPlans) {
+  const normalized = [];
+  const seen = new Set();
+  for (const item of Array.isArray(actionPlans) ? actionPlans : []) {
+    const plan = normalizeActionPlanItem(item, normalized.length);
+    if (!plan || seen.has(plan.symbol)) continue;
+    seen.add(plan.symbol);
+    normalized.push({ ...plan, sortOrder: normalized.length });
+  }
+  return normalized;
+}
+
+function formatActionPlansMarkdown(actionPlans) {
+  return normalizeActionPlansForSave(actionPlans).map((plan) => {
+    const lines = [
+      `### ${plan.symbol}`,
+      `- 动作：${plan.actionType}`,
+      `- 当前仓位：${plan.currentPosition}`,
+    ];
+    const fields = [
+      ["开仓计划", plan.entryPlan],
+      ["止盈计划", plan.takeProfitPlan],
+      ["止损计划", plan.stopLossPlan],
+      ["支撑压力位", plan.keyLevels],
+      ["思考", plan.thinking],
+    ];
+    for (const [label, value] of fields) {
+      if (!value) continue;
+      if (value.includes("\n")) {
+        const indented = value.split("\n").map((line) => (line ? `  ${line}` : "")).join("\n");
+        lines.push(`- ${label}：\n${indented}`);
+      } else {
+        lines.push(`- ${label}：${value}`);
+      }
+    }
+    return lines.join("\n");
+  }).join("\n\n");
+}
+
+async function replaceReviewActionPlans(env, archiveDate, actionPlans) {
+  const normalized = normalizeActionPlansForSave(actionPlans);
+  const now = isoNow();
+  for (const plan of normalized) {
+    await env.DB.prepare(
+      `INSERT INTO daily_review_action_plans (
+        archive_date, symbol, action_type, entry_plan, take_profit_plan,
+        stop_loss_plan, key_levels, current_position, thinking,
+        sort_order, created_at, updated_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ON CONFLICT(archive_date, symbol) DO UPDATE SET
+        action_type = excluded.action_type,
+        entry_plan = excluded.entry_plan,
+        take_profit_plan = excluded.take_profit_plan,
+        stop_loss_plan = excluded.stop_loss_plan,
+        key_levels = excluded.key_levels,
+        current_position = excluded.current_position,
+        thinking = excluded.thinking,
+        sort_order = excluded.sort_order,
+        updated_at = excluded.updated_at`,
+    )
+      .bind(
+        archiveDate,
+        plan.symbol,
+        plan.actionType,
+        plan.entryPlan,
+        plan.takeProfitPlan,
+        plan.stopLossPlan,
+        plan.keyLevels,
+        plan.currentPosition,
+        plan.thinking,
+        plan.sortOrder,
+        now,
+        now,
+      )
+      .run();
+  }
+
+  if (normalized.length) {
+    const placeholders = normalized.map(() => "?").join(", ");
+    await env.DB.prepare(
+      `DELETE FROM daily_review_action_plans
+       WHERE archive_date = ?
+         AND symbol NOT IN (${placeholders})`,
+    )
+      .bind(archiveDate, ...normalized.map((plan) => plan.symbol))
+      .run();
+  } else {
+    await env.DB.prepare(
+      `DELETE FROM daily_review_action_plans WHERE archive_date = ?`,
+    )
+      .bind(archiveDate)
+      .run();
+  }
+
+  return normalized;
+}
+
 function normalizeReviewAnalysis(analysis, newsItems) {
   const hasAnalysisContent = analysis && [
     analysis.daily_major_events,
@@ -1104,6 +1269,13 @@ async function saveReviewDraft(env, archiveDate, body) {
     .bind(archiveDate)
     .first();
   const reviewStatus = body.reviewStatus || existing?.review_status || "initialized";
+  const hasStructuredActionPlans = Array.isArray(body.actionPlans);
+  const normalizedActionPlans = hasStructuredActionPlans
+    ? normalizeActionPlansForSave(body.actionPlans)
+    : [];
+  const assetPlanText = hasStructuredActionPlans && normalizedActionPlans.length
+    ? formatActionPlansMarkdown(normalizedActionPlans)
+    : (body.assetPlan || "");
 
   await env.DB.prepare(
     `INSERT INTO daily_review_archive (
@@ -1125,13 +1297,22 @@ async function saveReviewDraft(env, archiveDate, body) {
       body.reviewerNewsNotes || body.newsBrief || "",
       body.marketSentiment || "",
       body.sectorRotation || "",
-      body.assetPlan || "",
+      assetPlanText,
       body.tradingSummary || "",
       isoNow(),
     )
     .run();
 
-  return { ok: true, archiveDate, reviewStatus };
+  if (hasStructuredActionPlans) {
+    await replaceReviewActionPlans(env, archiveDate, normalizedActionPlans);
+  }
+
+  return {
+    ok: true,
+    archiveDate,
+    reviewStatus,
+    actionPlanCount: normalizedActionPlans.length,
+  };
 }
 
 async function completeReview(env, archiveDate) {

@@ -1,0 +1,26 @@
+{
+  "generated_at": "2026-05-07T00:00:00",
+  "items": [
+    {
+      "archive_date": "2026-05-07",
+      "skipped": false,
+      "existing_count": 0,
+      "asset_plan": "MU 持仓观察，支撑位 82-88，压力位 95-102。",
+      "action_plans": [
+        {
+          "archive_date": "2026-05-07",
+          "symbol": "MU",
+          "action_type": "持仓观察",
+          "current_position": "0-10%",
+          "entry_plan": "",
+          "take_profit_plan": "",
+          "stop_loss_plan": "",
+          "key_levels": "MU 持仓观察，支撑位 82-88，压力位 95-102。",
+          "thinking": "MU 持仓观察，支撑位 82-88，压力位 95-102。",
+          "sort_order": 0,
+          "migration_note": "temporary parser draft; review before apply"
+        }
+      ]
+    }
+  ]
+}

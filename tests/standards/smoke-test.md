@@ -62,6 +62,8 @@
 
 | SM-017  | Stage 3 流式写入 | 验证 LLM 批次完成后立即写入，成功批次不等待超时批次 | 无特殊前置（有 LLM 超时时效果最明显） | 1. 运行 `python main.py hourly-news` 2. 检查日志中 `[写入] batch N 条写入` 关键词出现时序 | `[写入] batch` 日志在 Stage 3 过程中陆续出现（不是全部集中在 Stage 3 结束后）；Stage 3 完成后日志含 `已在 Stage 3 过程中流式写入，跳过全量写入` | P1 | 否 |
 
+| SM-018  | 结构化操作计划保存 | 验证复盘抽屉操作计划步骤使用结构化表格保存并可回填 | 测试库已执行 `daily_review_action_plans` 迁移，存在可打开的复盘日 | 1. 打开复盘抽屉 2. 进入“操作计划”步骤 3. 添加 `MU` 计划，填写动作、仓位、开仓/止盈/止损、支撑压力位和思考 4. 保存并重新请求 bootstrap | `bootstrap.actionPlans` 返回 `MU` 计划；`daily_review_archive.asset_plan` 同步生成 Markdown 摘要；其他日期同标的计划不受影响 | P0 | 是 |
+
 ## 文档更新时机
 - 新功能进入主链路
 - 主流程步骤改变

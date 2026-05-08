@@ -18,11 +18,32 @@ test('review can be completed, reopened, edited, and saved again', async ({ page
   await page.getByRole('button', { name: '下一步' }).click();
   await page.locator('textarea[name="sectorRotation"]').fill('本地冒烟：板块轮动已记录。');
   await page.getByRole('button', { name: '下一步' }).click();
-  await page.locator('textarea[name="assetPlan"]').fill('本地冒烟：操作计划已记录。');
+  if (await page.locator('#emptyActionPlanState').isVisible()) {
+    await page.locator('#addActionPlanBtn').click();
+  }
+  await page.locator('#actionPlanSymbolInput').fill('MU');
+  await page.locator('#actionPlanActionSelect').selectOption('持仓观察');
+  await page.locator('#actionPlanPositionSelect').selectOption('0-10%');
+  await page.locator('#actionPlanEntryInput').fill('本地冒烟：回踩支撑区再观察。');
+  await page.locator('#actionPlanTakeProfitInput').fill('本地冒烟：突破压力位后分批止盈。');
+  await page.locator('#actionPlanStopLossInput').fill('本地冒烟：跌破支撑位降低仓位。');
+  await page.locator('#actionPlanKeyLevelsInput').fill('支撑位 (Support):\n82-88（中）\n\n压力位:\n95-102（中）');
+  await page.locator('#actionPlanThinkingInput').fill('本地冒烟：结构化计划保存验证。');
   await page.getByRole('button', { name: '下一步' }).click();
   await page.getByRole('button', { name: '完成复盘' }).click();
 
   await expect(page.locator('#reviewDrawer')).toBeHidden();
+  const bootstrap = await request.get(`${BASE_URL}/api/reviews/${REVIEW_DATE}/bootstrap`);
+  const bootstrapJson = await bootstrap.json();
+  expect(bootstrapJson.actionPlans).toEqual(
+    expect.arrayContaining([
+      expect.objectContaining({
+        symbol: 'MU',
+        actionType: '持仓观察',
+        currentPosition: '0-10%',
+      }),
+    ]),
+  );
 
   await page.locator('#filtersForm select[name="status"]').selectOption('reviewed');
   await page.locator('#filtersForm').getByRole('button', { name: '查询' }).click();

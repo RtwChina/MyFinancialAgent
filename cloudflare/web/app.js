@@ -51,6 +51,9 @@ const state = {
   reviewStep: "news",
   reviewStatus: "initialized",
   editMode: false,
+  actionPlans: [],
+  selectedActionPlanIndex: -1,
+  legacyAssetPlan: "",
   dailyInsight: null,
   homepageInsightSections: [],
   symbolsLoaded: false,
@@ -65,6 +68,10 @@ const state = {
 };
 
 const APP_TOKEN_STORAGE_KEY = "myFinancialAgentApiToken";
+const ACTION_PLAN_ACTIONS = ["准备开仓", "持仓观察", "已清仓复盘"];
+const ACTION_PLAN_POSITIONS = ["0-10%", "10%-20%", "20%-30%", ">30%"];
+const DEFAULT_ACTION_PLAN_ACTION = "持仓观察";
+const DEFAULT_ACTION_PLAN_POSITION = "0-10%";
 
 const REVIEW_STEPS = [
   { key: "news", label: "新闻总结", field: "reviewerNewsNotes", optional: false, hint: "先看 AI 日总结和重点新闻，再写下你自己的主线判断与点评。" },
@@ -225,6 +232,24 @@ const reviewActionGroup = document.querySelector("#reviewActionGroup");
 const prevStepBtn = document.querySelector("#prevStepBtn");
 const nextStepBtn = document.querySelector("#nextStepBtn");
 const reviewModalFooter = document.querySelector(".review-modal-footer");
+const actionPlanRows = document.querySelector("#actionPlanRows");
+const addActionPlanBtn = document.querySelector("#addActionPlanBtn");
+const moveActionPlanUpBtn = document.querySelector("#moveActionPlanUpBtn");
+const moveActionPlanDownBtn = document.querySelector("#moveActionPlanDownBtn");
+const deleteActionPlanBtn = document.querySelector("#deleteActionPlanBtn");
+const emptyActionPlanState = document.querySelector("#emptyActionPlanState");
+const actionPlanEditor = document.querySelector("#actionPlanEditor");
+const legacyAssetPlanField = document.querySelector("#legacyAssetPlanField");
+const legacyAssetPlanNotice = document.querySelector("#legacyAssetPlanNotice");
+const legacyAssetPlanText = document.querySelector("#legacyAssetPlanText");
+const actionPlanSymbolInput = document.querySelector("#actionPlanSymbolInput");
+const actionPlanActionSelect = document.querySelector("#actionPlanActionSelect");
+const actionPlanPositionSelect = document.querySelector("#actionPlanPositionSelect");
+const actionPlanKeyLevelsInput = document.querySelector("#actionPlanKeyLevelsInput");
+const actionPlanEntryInput = document.querySelector("#actionPlanEntryInput");
+const actionPlanTakeProfitInput = document.querySelector("#actionPlanTakeProfitInput");
+const actionPlanStopLossInput = document.querySelector("#actionPlanStopLossInput");
+const actionPlanThinkingInput = document.querySelector("#actionPlanThinkingInput");
 
 navButtons.forEach((button) => {
   button.addEventListener("click", () => switchView(button.dataset.view));
@@ -258,6 +283,24 @@ reviewsPageSizeSelect.addEventListener("change", () => {
   state.reviewsPageSize = Number(reviewsPageSizeSelect.value);
   state.reviewsPage = 1;
   loadReviews();
+});
+
+addActionPlanBtn.addEventListener("click", () => addActionPlan());
+moveActionPlanUpBtn.addEventListener("click", () => moveActionPlan(-1));
+moveActionPlanDownBtn.addEventListener("click", () => moveActionPlan(1));
+deleteActionPlanBtn.addEventListener("click", () => deleteSelectedActionPlan());
+[
+  actionPlanSymbolInput,
+  actionPlanActionSelect,
+  actionPlanPositionSelect,
+  actionPlanKeyLevelsInput,
+  actionPlanEntryInput,
+  actionPlanTakeProfitInput,
+  actionPlanStopLossInput,
+  actionPlanThinkingInput,
+].forEach((field) => {
+  field.addEventListener("input", syncSelectedActionPlanFromEditor);
+  field.addEventListener("change", syncSelectedActionPlanFromEditor);
 });
 
 saveDraftBtn.addEventListener("click", async () => {
@@ -652,14 +695,18 @@ async function openReviewDrawer(archiveDate) {
   }
   renderAnalysis(effectiveAnalysis, data.news);
   renderNewsPicker(data.news);
+  state.actionPlans = normalizeActionPlans(data.actionPlans || []);
+  state.selectedActionPlanIndex = state.actionPlans.length ? 0 : -1;
+  state.legacyAssetPlan = data.draft?.asset_plan || data.carryForward?.asset_plan || "";
 
   applyFormValues({
     reviewerNewsNotes: data.draft?.reviewer_news_notes || data.draft?.news_brief || buildDefaultNewsBrief(data.analysis, data.news),
     marketSentiment: data.draft?.market_sentiment || data.carryForward?.market_sentiment || "",
     sectorRotation: data.draft?.sector_rotation || data.carryForward?.sector_rotation || "",
-    assetPlan: data.draft?.asset_plan || data.carryForward?.asset_plan || "",
+    assetPlan: state.legacyAssetPlan,
     tradingSummary: data.draft?.trading_summary || "",
   });
+  renderActionPlans();
 
   initMdTabs();
   setReviewMode(reviewStatus);
@@ -672,8 +719,11 @@ function closeDrawer() {
 }
 
 async function saveReview() {
+  syncSelectedActionPlanFromEditor();
   const payload = Object.fromEntries(new FormData(reviewForm).entries());
   payload.reviewStatus = state.activeBootstrap?.draft?.review_status || "initialized";
+  payload.actionPlans = normalizeActionPlans(state.actionPlans);
+  payload.assetPlan = payload.actionPlans.length ? formatActionPlansMarkdown(payload.actionPlans) : (payload.assetPlan || "");
 
   await fetchJson(`/api/reviews/${state.activeDate}`, {
     method: "POST",
@@ -692,7 +742,12 @@ async function saveReview() {
       asset_plan: payload.assetPlan,
       trading_summary: payload.tradingSummary,
     },
+    actionPlans: payload.actionPlans,
   };
+  state.actionPlans = payload.actionPlans;
+  state.selectedActionPlanIndex = state.actionPlans.length ? Math.max(0, state.selectedActionPlanIndex) : -1;
+  state.legacyAssetPlan = payload.assetPlan;
+  renderActionPlans();
   if (state.reviewStatus === "reviewed" && state.editMode) {
     state.editMode = false;
     setReviewMode("reviewed");
@@ -830,8 +885,215 @@ function applyFormValues(values) {
   }
 }
 
+function normalizeActionPlanAction(value) {
+  const text = String(value || "").trim();
+  return ACTION_PLAN_ACTIONS.includes(text) ? text : DEFAULT_ACTION_PLAN_ACTION;
+}
+
+function normalizeActionPlanPosition(value) {
+  const text = String(value || "").trim();
+  return ACTION_PLAN_POSITIONS.includes(text) ? text : DEFAULT_ACTION_PLAN_POSITION;
+}
+
+function normalizeActionPlan(item = {}, sortOrder = 0) {
+  return {
+    id: item.id ?? null,
+    symbol: String(item.symbol || "").trim().toUpperCase(),
+    actionType: normalizeActionPlanAction(item.actionType || item.action_type),
+    currentPosition: normalizeActionPlanPosition(item.currentPosition || item.current_position),
+    entryPlan: String(item.entryPlan || item.entry_plan || "").trim(),
+    takeProfitPlan: String(item.takeProfitPlan || item.take_profit_plan || "").trim(),
+    stopLossPlan: String(item.stopLossPlan || item.stop_loss_plan || "").trim(),
+    keyLevels: String(item.keyLevels || item.key_levels || "").trim(),
+    thinking: String(item.thinking || "").trim(),
+    sortOrder,
+  };
+}
+
+function normalizeActionPlans(items = []) {
+  const seen = new Set();
+  const normalized = [];
+  (Array.isArray(items) ? items : []).forEach((item) => {
+    const plan = normalizeActionPlan(item, normalized.length);
+    if (!plan.symbol || seen.has(plan.symbol)) return;
+    seen.add(plan.symbol);
+    normalized.push(plan);
+  });
+  return normalized;
+}
+
+function formatActionPlansMarkdown(items = []) {
+  return normalizeActionPlans(items).map((plan) => {
+    const lines = [
+      `### ${plan.symbol}`,
+      `- 动作：${plan.actionType}`,
+      `- 当前仓位：${plan.currentPosition}`,
+    ];
+    [
+      ["开仓计划", plan.entryPlan],
+      ["止盈计划", plan.takeProfitPlan],
+      ["止损计划", plan.stopLossPlan],
+      ["支撑压力位", plan.keyLevels],
+      ["思考", plan.thinking],
+    ].forEach(([label, value]) => {
+      if (!value) return;
+      if (value.includes("\n")) {
+        lines.push(`- ${label}：\n${value.split("\n").map((line) => (line ? `  ${line}` : "")).join("\n")}`);
+      } else {
+        lines.push(`- ${label}：${value}`);
+      }
+    });
+    return lines.join("\n");
+  }).join("\n\n");
+}
+
+function renderActionPlans() {
+  syncLegacyAssetPlanField();
+  const readOnly = state.reviewStatus === "reviewed" && !state.editMode;
+  const hasPlans = state.actionPlans.length > 0;
+  actionPlanRows.innerHTML = state.actionPlans.map((plan, index) => `
+    <tr class="${index === state.selectedActionPlanIndex ? "selected" : ""}" data-index="${index}">
+      <td><strong class="action-plan-symbol">${escapeHtml(plan.symbol)}</strong></td>
+      <td><span class="action-plan-pill">${escapeHtml(plan.actionType)}</span></td>
+      <td><span class="action-plan-position">${escapeHtml(plan.currentPosition)}</span></td>
+      <td><div class="action-plan-cell-text">${escapeHtml(plan.entryPlan)}</div></td>
+      <td><div class="action-plan-cell-text">${escapeHtml(plan.takeProfitPlan)}</div></td>
+      <td><div class="action-plan-cell-text">${escapeHtml(plan.stopLossPlan)}</div></td>
+      <td><div class="action-plan-cell-text action-plan-levels">${escapeHtml(plan.keyLevels)}</div></td>
+      <td><div class="action-plan-cell-text">${escapeHtml(plan.thinking)}</div></td>
+    </tr>
+  `).join("");
+  actionPlanRows.querySelectorAll("tr").forEach((row) => {
+    row.addEventListener("click", () => selectActionPlan(Number(row.dataset.index)));
+  });
+  emptyActionPlanState.classList.toggle("hidden", hasPlans);
+  actionPlanEditor.classList.toggle("hidden", !hasPlans);
+  addActionPlanBtn.disabled = readOnly;
+  moveActionPlanUpBtn.disabled = readOnly || state.selectedActionPlanIndex <= 0;
+  moveActionPlanDownBtn.disabled = readOnly || state.selectedActionPlanIndex < 0 || state.selectedActionPlanIndex >= state.actionPlans.length - 1;
+  deleteActionPlanBtn.disabled = readOnly || state.selectedActionPlanIndex < 0;
+  if (hasPlans) fillActionPlanEditor(state.actionPlans[state.selectedActionPlanIndex] || state.actionPlans[0]);
+  applyActionPlanReadOnly(readOnly);
+  renderLegacyAssetPlanNotice();
+}
+
+function renderLegacyAssetPlanNotice() {
+  const shouldShow = !state.actionPlans.length && Boolean(String(state.legacyAssetPlan || "").trim());
+  legacyAssetPlanNotice.classList.toggle("hidden", !shouldShow);
+  legacyAssetPlanText.textContent = shouldShow ? state.legacyAssetPlan : "";
+}
+
+function fillActionPlanEditor(plan) {
+  if (!plan) return;
+  actionPlanSymbolInput.value = plan.symbol || "";
+  actionPlanActionSelect.value = normalizeActionPlanAction(plan.actionType);
+  actionPlanPositionSelect.value = normalizeActionPlanPosition(plan.currentPosition);
+  actionPlanKeyLevelsInput.value = plan.keyLevels || "";
+  actionPlanEntryInput.value = plan.entryPlan || "";
+  actionPlanTakeProfitInput.value = plan.takeProfitPlan || "";
+  actionPlanStopLossInput.value = plan.stopLossPlan || "";
+  actionPlanThinkingInput.value = plan.thinking || "";
+}
+
+function selectActionPlan(index) {
+  if (index < 0 || index >= state.actionPlans.length) return;
+  state.selectedActionPlanIndex = index;
+  renderActionPlans();
+}
+
+function syncSelectedActionPlanFromEditor() {
+  const index = state.selectedActionPlanIndex;
+  if (index < 0 || index >= state.actionPlans.length) return;
+  state.actionPlans[index] = normalizeActionPlan({
+    ...state.actionPlans[index],
+    symbol: actionPlanSymbolInput.value,
+    actionType: actionPlanActionSelect.value,
+    currentPosition: actionPlanPositionSelect.value,
+    keyLevels: actionPlanKeyLevelsInput.value,
+    entryPlan: actionPlanEntryInput.value,
+    takeProfitPlan: actionPlanTakeProfitInput.value,
+    stopLossPlan: actionPlanStopLossInput.value,
+    thinking: actionPlanThinkingInput.value,
+  }, index);
+  syncLegacyAssetPlanField();
+  renderActionPlanRowsOnly();
+}
+
+function renderActionPlanRowsOnly() {
+  const selected = state.selectedActionPlanIndex;
+  actionPlanRows.innerHTML = state.actionPlans.map((plan, index) => `
+    <tr class="${index === selected ? "selected" : ""}" data-index="${index}">
+      <td><strong class="action-plan-symbol">${escapeHtml(plan.symbol || "未命名")}</strong></td>
+      <td><span class="action-plan-pill">${escapeHtml(plan.actionType)}</span></td>
+      <td><span class="action-plan-position">${escapeHtml(plan.currentPosition)}</span></td>
+      <td><div class="action-plan-cell-text">${escapeHtml(plan.entryPlan)}</div></td>
+      <td><div class="action-plan-cell-text">${escapeHtml(plan.takeProfitPlan)}</div></td>
+      <td><div class="action-plan-cell-text">${escapeHtml(plan.stopLossPlan)}</div></td>
+      <td><div class="action-plan-cell-text action-plan-levels">${escapeHtml(plan.keyLevels)}</div></td>
+      <td><div class="action-plan-cell-text">${escapeHtml(plan.thinking)}</div></td>
+    </tr>
+  `).join("");
+  actionPlanRows.querySelectorAll("tr").forEach((row) => {
+    row.addEventListener("click", () => selectActionPlan(Number(row.dataset.index)));
+  });
+}
+
+function addActionPlan() {
+  const readOnly = state.reviewStatus === "reviewed" && !state.editMode;
+  if (readOnly) return;
+  const used = new Set(state.actionPlans.map((item) => item.symbol).filter(Boolean));
+  const candidates = ["MU", "MSFT", "GOOGL", "LITE", "BABA", "CASH"];
+  const symbol = candidates.find((item) => !used.has(item)) || "";
+  state.actionPlans.push(normalizeActionPlan({ symbol, actionType: "准备开仓", currentPosition: "0-10%" }, state.actionPlans.length));
+  state.selectedActionPlanIndex = state.actionPlans.length - 1;
+  renderActionPlans();
+}
+
+function moveActionPlan(delta) {
+  const index = state.selectedActionPlanIndex;
+  const target = index + delta;
+  if (index < 0 || target < 0 || target >= state.actionPlans.length) return;
+  const [item] = state.actionPlans.splice(index, 1);
+  state.actionPlans.splice(target, 0, item);
+  state.actionPlans = state.actionPlans.map((plan, sortOrder) => ({ ...plan, sortOrder }));
+  state.selectedActionPlanIndex = target;
+  renderActionPlans();
+}
+
+function deleteSelectedActionPlan() {
+  const index = state.selectedActionPlanIndex;
+  if (index < 0 || index >= state.actionPlans.length) return;
+  state.actionPlans.splice(index, 1);
+  state.actionPlans = state.actionPlans.map((plan, sortOrder) => ({ ...plan, sortOrder }));
+  state.selectedActionPlanIndex = state.actionPlans.length ? Math.min(index, state.actionPlans.length - 1) : -1;
+  renderActionPlans();
+}
+
+function syncLegacyAssetPlanField() {
+  legacyAssetPlanField.value = state.actionPlans.length
+    ? formatActionPlansMarkdown(state.actionPlans)
+    : (state.legacyAssetPlan || "");
+}
+
+function applyActionPlanReadOnly(readOnly) {
+  [
+    actionPlanSymbolInput,
+    actionPlanActionSelect,
+    actionPlanPositionSelect,
+    actionPlanKeyLevelsInput,
+    actionPlanEntryInput,
+    actionPlanTakeProfitInput,
+    actionPlanStopLossInput,
+    actionPlanThinkingInput,
+  ].forEach((field) => {
+    field.disabled = readOnly;
+    if ("readOnly" in field) field.readOnly = readOnly;
+  });
+}
+
 function initMdTabs() {
   reviewForm.querySelectorAll("textarea").forEach((ta) => {
+    if (ta.dataset.noMd !== undefined) return;
     if (ta.parentElement.querySelector(".md-tab-bar")) return;
     const bar = document.createElement("div");
     bar.className = "md-tab-bar";
@@ -877,6 +1139,7 @@ function initMdTabs() {
 
 function syncMdPreviews(readOnly) {
   reviewForm.querySelectorAll("textarea").forEach((ta) => {
+    if (ta.dataset.noMd !== undefined) return;
     const preview = ta.parentElement.querySelector(".md-preview");
     const bar = ta.parentElement.querySelector(".md-tab-bar");
     if (!preview || !bar) return;
@@ -1254,6 +1517,9 @@ function getStepValue(step) {
     const summary = String(reviewForm.elements.namedItem("reviewerNewsNotes")?.value || "").trim();
     return summary;
   }
+  if (step.key === "plan") {
+    return state.actionPlans.length ? formatActionPlansMarkdown(state.actionPlans) : String(legacyAssetPlanField.value || "").trim();
+  }
   return String(reviewForm.elements.namedItem(step.field)?.value || "").trim();
 }
 
@@ -1289,6 +1555,20 @@ function validateStep(step, showAlert = true) {
 
   if (step.optional) return true;
 
+  if (step.key === "plan") {
+    const validPlans = normalizeActionPlans(state.actionPlans).filter((plan) => plan.symbol);
+    const hasLegacy = Boolean(String(legacyAssetPlanField.value || "").trim());
+    if (!validPlans.length && !hasLegacy) {
+      if (showAlert) window.alert("请先添加至少一条结构化操作计划。");
+      return false;
+    }
+    if (state.actionPlans.length && !validPlans.length) {
+      if (showAlert) window.alert("请先填写操作计划的标的代码。");
+      return false;
+    }
+    return true;
+  }
+
   const value = String(reviewForm.elements.namedItem(step.field)?.value || "").trim();
   if (!value) {
     if (showAlert) window.alert(`请先完成“${step.label}”这一步。`);
@@ -1320,6 +1600,8 @@ function setReviewMode(status) {
     if ("readOnly" in field) field.readOnly = readOnly;
     if ("disabled" in field && field.type !== "hidden") field.disabled = readOnly && field.type === "checkbox";
   });
+  applyActionPlanReadOnly(readOnly);
+  renderActionPlans();
   saveDraftBtn.disabled = readOnly;
   if (status === "reviewed") {
     initializeBtn.textContent = state.editMode ? "退出编辑" : "编辑";

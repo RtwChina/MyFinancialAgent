@@ -140,11 +140,14 @@
 - 目标：确认 initialized -> draft -> reviewed 链路正常
 - 执行方式：
   - `POST /api/reviews/{date}/initialize`
-  - `POST /api/reviews/{date}`
+  - `POST /api/reviews/{date}`，请求体包含结构化 `actionPlans`
   - `POST /api/reviews/{date}/complete`
 - 预期结果：
   - 状态正确流转
   - `reviewer_news_notes`、`market_sentiment`、`sector_rotation`、`asset_plan`、`trading_summary` 可回查
+  - `GET /api/reviews/{date}/bootstrap` 返回 `actionPlans`
+  - `daily_review_action_plans` 仅写入当前复盘日的子记录
+  - `asset_plan` 保存为结构化计划生成的兼容 Markdown 摘要
   - `daily_review_archive_news` 产生归档快照
 - 阻断级别：阻断
 
