@@ -69,9 +69,10 @@ const state = {
 
 const APP_TOKEN_STORAGE_KEY = "myFinancialAgentApiToken";
 const ACTION_PLAN_ACTIONS = ["准备开仓", "持仓观察", "已清仓复盘"];
-const ACTION_PLAN_POSITIONS = ["0-10%", "10%-20%", "20%-30%", ">30%"];
+const ACTION_PLAN_POSITIONS = ["0%", "0-5%", "5%-10%", "10%-15%", "15%-20%", "20%-25%", "25%-30%", ">30%"];
 const DEFAULT_ACTION_PLAN_ACTION = "持仓观察";
-const DEFAULT_ACTION_PLAN_POSITION = "0-10%";
+const DEFAULT_ACTION_PLAN_POSITION = "0-5%";
+const ZERO_POSITION_ACTIONS = new Set(["准备开仓", "已清仓复盘"]);
 
 const REVIEW_STEPS = [
   { key: "news", label: "新闻总结", field: "reviewerNewsNotes", optional: false, hint: "先看 AI 日总结和重点新闻，再写下你自己的主线判断与点评。" },
@@ -233,7 +234,9 @@ const prevStepBtn = document.querySelector("#prevStepBtn");
 const nextStepBtn = document.querySelector("#nextStepBtn");
 const reviewModalFooter = document.querySelector(".review-modal-footer");
 const actionPlanRows = document.querySelector("#actionPlanRows");
+const actionPlanTools = document.querySelector(".action-plan-tools");
 const addActionPlanBtn = document.querySelector("#addActionPlanBtn");
+const sortActionPlansBtn = document.querySelector("#sortActionPlansBtn");
 const moveActionPlanUpBtn = document.querySelector("#moveActionPlanUpBtn");
 const moveActionPlanDownBtn = document.querySelector("#moveActionPlanDownBtn");
 const deleteActionPlanBtn = document.querySelector("#deleteActionPlanBtn");
@@ -245,7 +248,8 @@ const legacyAssetPlanText = document.querySelector("#legacyAssetPlanText");
 const actionPlanSymbolInput = document.querySelector("#actionPlanSymbolInput");
 const actionPlanActionSelect = document.querySelector("#actionPlanActionSelect");
 const actionPlanPositionSelect = document.querySelector("#actionPlanPositionSelect");
-const actionPlanKeyLevelsInput = document.querySelector("#actionPlanKeyLevelsInput");
+const actionPlanSupportLevelsInput = document.querySelector("#actionPlanSupportLevelsInput");
+const actionPlanResistanceLevelsInput = document.querySelector("#actionPlanResistanceLevelsInput");
 const actionPlanEntryInput = document.querySelector("#actionPlanEntryInput");
 const actionPlanTakeProfitInput = document.querySelector("#actionPlanTakeProfitInput");
 const actionPlanStopLossInput = document.querySelector("#actionPlanStopLossInput");
@@ -286,6 +290,7 @@ reviewsPageSizeSelect.addEventListener("change", () => {
 });
 
 addActionPlanBtn.addEventListener("click", () => addActionPlan());
+sortActionPlansBtn.addEventListener("click", () => sortActionPlansByPosition());
 moveActionPlanUpBtn.addEventListener("click", () => moveActionPlan(-1));
 moveActionPlanDownBtn.addEventListener("click", () => moveActionPlan(1));
 deleteActionPlanBtn.addEventListener("click", () => deleteSelectedActionPlan());
@@ -293,7 +298,8 @@ deleteActionPlanBtn.addEventListener("click", () => deleteSelectedActionPlan());
   actionPlanSymbolInput,
   actionPlanActionSelect,
   actionPlanPositionSelect,
-  actionPlanKeyLevelsInput,
+  actionPlanSupportLevelsInput,
+  actionPlanResistanceLevelsInput,
   actionPlanEntryInput,
   actionPlanTakeProfitInput,
   actionPlanStopLossInput,
@@ -895,19 +901,35 @@ function normalizeActionPlanPosition(value) {
   return ACTION_PLAN_POSITIONS.includes(text) ? text : DEFAULT_ACTION_PLAN_POSITION;
 }
 
+function defaultActionPlanPositionForAction(actionType) {
+  return ZERO_POSITION_ACTIONS.has(normalizeActionPlanAction(actionType)) ? "0%" : DEFAULT_ACTION_PLAN_POSITION;
+}
+
 function normalizeActionPlan(item = {}, sortOrder = 0) {
+  const supportLevels = String(item.supportLevels || item.support_levels || "").trim();
+  const resistanceLevels = String(item.resistanceLevels || item.resistance_levels || "").trim();
+  const keyLevels = String(item.keyLevels || item.key_levels || "").trim();
   return {
     id: item.id ?? null,
     symbol: String(item.symbol || "").trim().toUpperCase(),
     actionType: normalizeActionPlanAction(item.actionType || item.action_type),
-    currentPosition: normalizeActionPlanPosition(item.currentPosition || item.current_position),
+    currentPosition: normalizeActionPlanPosition(item.currentPosition || item.current_position || defaultActionPlanPositionForAction(item.actionType || item.action_type)),
     entryPlan: String(item.entryPlan || item.entry_plan || "").trim(),
     takeProfitPlan: String(item.takeProfitPlan || item.take_profit_plan || "").trim(),
     stopLossPlan: String(item.stopLossPlan || item.stop_loss_plan || "").trim(),
-    keyLevels: String(item.keyLevels || item.key_levels || "").trim(),
+    supportLevels,
+    resistanceLevels,
+    keyLevels: keyLevels || formatSupportResistanceLevels(supportLevels, resistanceLevels),
     thinking: String(item.thinking || "").trim(),
     sortOrder,
   };
+}
+
+function formatSupportResistanceLevels(supportLevels, resistanceLevels) {
+  const sections = [];
+  if (supportLevels) sections.push(`支撑位：\n${supportLevels}`);
+  if (resistanceLevels) sections.push(`压力位：\n${resistanceLevels}`);
+  return sections.join("\n\n");
 }
 
 function normalizeActionPlans(items = []) {
@@ -933,7 +955,8 @@ function formatActionPlansMarkdown(items = []) {
       ["开仓计划", plan.entryPlan],
       ["止盈计划", plan.takeProfitPlan],
       ["止损计划", plan.stopLossPlan],
-      ["支撑压力位", plan.keyLevels],
+      ["支撑位", plan.supportLevels],
+      ["压力位", plan.resistanceLevels],
       ["思考", plan.thinking],
     ].forEach(([label, value]) => {
       if (!value) return;
@@ -959,7 +982,8 @@ function renderActionPlans() {
       <td><div class="action-plan-cell-text">${escapeHtml(plan.entryPlan)}</div></td>
       <td><div class="action-plan-cell-text">${escapeHtml(plan.takeProfitPlan)}</div></td>
       <td><div class="action-plan-cell-text">${escapeHtml(plan.stopLossPlan)}</div></td>
-      <td><div class="action-plan-cell-text action-plan-levels">${escapeHtml(plan.keyLevels)}</div></td>
+      <td><div class="action-plan-cell-text action-plan-levels">${escapeHtml(plan.supportLevels)}</div></td>
+      <td><div class="action-plan-cell-text action-plan-levels">${escapeHtml(plan.resistanceLevels)}</div></td>
       <td><div class="action-plan-cell-text">${escapeHtml(plan.thinking)}</div></td>
     </tr>
   `).join("");
@@ -968,7 +992,9 @@ function renderActionPlans() {
   });
   emptyActionPlanState.classList.toggle("hidden", hasPlans);
   actionPlanEditor.classList.toggle("hidden", !hasPlans);
+  actionPlanTools.classList.toggle("hidden", readOnly);
   addActionPlanBtn.disabled = readOnly;
+  sortActionPlansBtn.disabled = readOnly || state.actionPlans.length < 2;
   moveActionPlanUpBtn.disabled = readOnly || state.selectedActionPlanIndex <= 0;
   moveActionPlanDownBtn.disabled = readOnly || state.selectedActionPlanIndex < 0 || state.selectedActionPlanIndex >= state.actionPlans.length - 1;
   deleteActionPlanBtn.disabled = readOnly || state.selectedActionPlanIndex < 0;
@@ -988,7 +1014,8 @@ function fillActionPlanEditor(plan) {
   actionPlanSymbolInput.value = plan.symbol || "";
   actionPlanActionSelect.value = normalizeActionPlanAction(plan.actionType);
   actionPlanPositionSelect.value = normalizeActionPlanPosition(plan.currentPosition);
-  actionPlanKeyLevelsInput.value = plan.keyLevels || "";
+  actionPlanSupportLevelsInput.value = plan.supportLevels || "";
+  actionPlanResistanceLevelsInput.value = plan.resistanceLevels || "";
   actionPlanEntryInput.value = plan.entryPlan || "";
   actionPlanTakeProfitInput.value = plan.takeProfitPlan || "";
   actionPlanStopLossInput.value = plan.stopLossPlan || "";
@@ -1004,12 +1031,20 @@ function selectActionPlan(index) {
 function syncSelectedActionPlanFromEditor() {
   const index = state.selectedActionPlanIndex;
   if (index < 0 || index >= state.actionPlans.length) return;
+  const actionType = actionPlanActionSelect.value;
+  const currentPosition = ZERO_POSITION_ACTIONS.has(actionType)
+    ? "0%"
+    : actionPlanPositionSelect.value;
+  if (actionPlanPositionSelect.value !== currentPosition) {
+    actionPlanPositionSelect.value = currentPosition;
+  }
   state.actionPlans[index] = normalizeActionPlan({
     ...state.actionPlans[index],
     symbol: actionPlanSymbolInput.value,
-    actionType: actionPlanActionSelect.value,
-    currentPosition: actionPlanPositionSelect.value,
-    keyLevels: actionPlanKeyLevelsInput.value,
+    actionType,
+    currentPosition,
+    supportLevels: actionPlanSupportLevelsInput.value,
+    resistanceLevels: actionPlanResistanceLevelsInput.value,
     entryPlan: actionPlanEntryInput.value,
     takeProfitPlan: actionPlanTakeProfitInput.value,
     stopLossPlan: actionPlanStopLossInput.value,
@@ -1029,7 +1064,8 @@ function renderActionPlanRowsOnly() {
       <td><div class="action-plan-cell-text">${escapeHtml(plan.entryPlan)}</div></td>
       <td><div class="action-plan-cell-text">${escapeHtml(plan.takeProfitPlan)}</div></td>
       <td><div class="action-plan-cell-text">${escapeHtml(plan.stopLossPlan)}</div></td>
-      <td><div class="action-plan-cell-text action-plan-levels">${escapeHtml(plan.keyLevels)}</div></td>
+      <td><div class="action-plan-cell-text action-plan-levels">${escapeHtml(plan.supportLevels)}</div></td>
+      <td><div class="action-plan-cell-text action-plan-levels">${escapeHtml(plan.resistanceLevels)}</div></td>
       <td><div class="action-plan-cell-text">${escapeHtml(plan.thinking)}</div></td>
     </tr>
   `).join("");
@@ -1044,7 +1080,7 @@ function addActionPlan() {
   const used = new Set(state.actionPlans.map((item) => item.symbol).filter(Boolean));
   const candidates = ["MU", "MSFT", "GOOGL", "LITE", "BABA", "CASH"];
   const symbol = candidates.find((item) => !used.has(item)) || "";
-  state.actionPlans.push(normalizeActionPlan({ symbol, actionType: "准备开仓", currentPosition: "0-10%" }, state.actionPlans.length));
+  state.actionPlans.push(normalizeActionPlan({ symbol, actionType: "准备开仓", currentPosition: "0%" }, state.actionPlans.length));
   state.selectedActionPlanIndex = state.actionPlans.length - 1;
   renderActionPlans();
 }
@@ -1057,6 +1093,30 @@ function moveActionPlan(delta) {
   state.actionPlans.splice(target, 0, item);
   state.actionPlans = state.actionPlans.map((plan, sortOrder) => ({ ...plan, sortOrder }));
   state.selectedActionPlanIndex = target;
+  renderActionPlans();
+}
+
+function actionPlanPositionScore(plan) {
+  const value = String(plan?.currentPosition || "").trim();
+  if (value === ">30%") return 40;
+  const match = value.match(/(\d+)\s*%-\s*(\d+)\s*%/);
+  if (match) return Number(match[2]);
+  const single = value.match(/(\d+)\s*%/);
+  return single ? Number(single[1]) : -1;
+}
+
+function sortActionPlansByPosition() {
+  const readOnly = state.reviewStatus === "reviewed" && !state.editMode;
+  if (readOnly || state.actionPlans.length < 2) return;
+  const selected = state.actionPlans[state.selectedActionPlanIndex] || null;
+  const sorted = state.actionPlans
+    .map((plan, originalIndex) => ({ plan, originalIndex }))
+    .sort((a, b) => {
+      const scoreDiff = actionPlanPositionScore(b.plan) - actionPlanPositionScore(a.plan);
+      return scoreDiff || a.originalIndex - b.originalIndex;
+    });
+  state.selectedActionPlanIndex = selected ? sorted.findIndex((item) => item.plan === selected) : 0;
+  state.actionPlans = sorted.map(({ plan }, sortOrder) => ({ ...plan, sortOrder }));
   renderActionPlans();
 }
 
@@ -1080,7 +1140,8 @@ function applyActionPlanReadOnly(readOnly) {
     actionPlanSymbolInput,
     actionPlanActionSelect,
     actionPlanPositionSelect,
-    actionPlanKeyLevelsInput,
+    actionPlanSupportLevelsInput,
+    actionPlanResistanceLevelsInput,
     actionPlanEntryInput,
     actionPlanTakeProfitInput,
     actionPlanStopLossInput,

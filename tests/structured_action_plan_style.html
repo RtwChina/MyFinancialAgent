@@ -654,7 +654,8 @@ tr.selected td {
                     <th style="width: 175px;">开仓计划</th>
                     <th style="width: 175px;">止盈计划</th>
                     <th style="width: 175px;">止损计划</th>
-                    <th style="width: 210px;">支撑压力位</th>
+                    <th style="width: 160px;">支撑位</th>
+                    <th style="width: 160px;">压力位</th>
                     <th style="width: 220px;">思考</th>
                   </tr>
                 </thead>
@@ -664,8 +665,9 @@ tr.selected td {
             <div class="inline-editor">
               <div class="field"><label>标的</label><input value="MU"></div>
               <div class="field"><label>动作</label><select><option>准备开仓</option><option selected>持仓观察</option><option>已清仓复盘</option></select></div>
-              <div class="field"><label>当前仓位</label><select><option selected>0-10%</option><option>10%-20%</option><option>20%-30%</option><option>&gt;30%</option></select></div>
-              <div class="field levels"><label>支撑压力位</label><textarea id="levelsA"></textarea></div>
+              <div class="field"><label>当前仓位</label><select><option selected>0-5%</option><option>5%-10%</option><option>10%-15%</option><option>15%-20%</option><option>20%-25%</option><option>25%-30%</option><option>&gt;30%</option></select></div>
+              <div class="field levels"><label>支撑位</label><textarea id="supportA"></textarea></div>
+              <div class="field levels"><label>压力位</label><textarea id="resistanceA"></textarea></div>
             </div>
           </div>
         </div>
@@ -677,13 +679,14 @@ tr.selected td {
               <div class="detail-top">
                 <div class="field"><label>标的</label><input value="MU"></div>
                 <div class="field"><label>动作</label><select><option>准备开仓</option><option selected>持仓观察</option><option>已清仓复盘</option></select></div>
-                <div class="field"><label>当前仓位</label><select><option selected>0-10%</option><option>10%-20%</option><option>20%-30%</option><option>&gt;30%</option></select></div>
+                <div class="field"><label>当前仓位</label><select><option selected>0-5%</option><option>5%-10%</option><option>10%-15%</option><option>15%-20%</option><option>20%-25%</option><option>25%-30%</option><option>&gt;30%</option></select></div>
               </div>
               <div class="editor-columns">
                 <div class="field"><label>开仓计划</label><textarea>不追高，等回踩 88-90 区间观察承接；放量站回 95 再补 5%。</textarea></div>
                 <div class="field"><label>止盈计划</label><textarea>第一目标 95，突破后看 102，保留底仓跟踪。</textarea></div>
                 <div class="field"><label>止损计划</label><textarea>跌破 82 且半导体同步走弱，减到观察仓。</textarea></div>
-                <div class="field levels"><label>支撑压力位</label><textarea id="levelsB"></textarea></div>
+                <div class="field levels"><label>支撑位</label><textarea id="supportB"></textarea></div>
+                <div class="field levels"><label>压力位</label><textarea id="resistanceB"></textarea></div>
                 <div class="field full"><label>思考</label><textarea>AI 服务器需求仍是主线，短期看利率和存储周期预期的再定价。</textarea></div>
               </div>
             </div>
@@ -721,7 +724,7 @@ const plans = [
     symbol: "MU",
     action: "持仓观察",
     actionClass: "status-hold",
-    position: "0-10%",
+    position: "0-5%",
     entry: "不追高，等回踩 88-90 区间观察承接；放量站回 95 再补 5%。",
     profit: "第一目标 95，突破后看 102，保留底仓跟踪。",
     loss: "跌破 82 且半导体同步走弱，减到观察仓。",
@@ -732,7 +735,7 @@ const plans = [
     symbol: "MSFT",
     action: "持仓观察",
     actionClass: "status-hold",
-    position: "10%-20%",
+    position: "10%-15%",
     entry: "不新增，除非回踩 410 附近且云业务预期没有恶化。",
     profit: "新高后减 1/4，剩余仓位跟随趋势。",
     loss: "跌破 398 并放量，降低到 10% 以下。",
@@ -743,7 +746,7 @@ const plans = [
     symbol: "GOOGL",
     action: "准备开仓",
     actionClass: "status-open",
-    position: "0-10%",
+    position: "0-5%",
     entry: "若 168 上方企稳两天，追加 5%；若回到 160 下方，只观察不动。",
     profit: "178 附近先看广告和云业务预期，强势则继续持有。",
     loss: "跌破 156 且 AI 竞争担忧加剧，撤回新增仓位。",
@@ -754,7 +757,7 @@ const plans = [
     symbol: "LITE",
     action: "已清仓复盘",
     actionClass: "status-closed",
-    position: "0-10%",
+    position: "0-5%",
     entry: "不开新仓，等待光模块链路确认。",
     profit: "冲高到 72-75 先减一半。",
     loss: "跌破 61 清掉短线仓。",
@@ -778,8 +781,22 @@ function renderLevels(value) {
     .replace(/压力位:/g, "<b>压力位:</b>");
 }
 
-document.querySelector("#levelsA").value = levelText;
-document.querySelector("#levelsB").value = levelText;
+function levelSection(value, marker) {
+  const text = String(value || "");
+  const supportIndex = text.search(/支撑位|Support/i);
+  const resistanceIndex = text.search(/压力位|Resistance/i);
+  if (marker === "support") {
+    const start = supportIndex >= 0 ? supportIndex : 0;
+    const end = resistanceIndex > start ? resistanceIndex : text.length;
+    return text.slice(start, end).trim();
+  }
+  return resistanceIndex >= 0 ? text.slice(resistanceIndex).trim() : "";
+}
+
+document.querySelector("#supportA").value = "82-88（中）";
+document.querySelector("#resistanceA").value = "95-102（中）";
+document.querySelector("#supportB").value = "82-88（中）";
+document.querySelector("#resistanceB").value = "95-102（中）";
 
 document.querySelector("#tableRows").innerHTML = plans.map((plan, index) => `
   <tr class="${index === 0 ? "selected" : ""}">
@@ -789,7 +806,8 @@ document.querySelector("#tableRows").innerHTML = plans.map((plan, index) => `
     <td><div class="compact-text">${escapeHtml(plan.entry)}</div></td>
     <td><div class="compact-text">${escapeHtml(plan.profit)}</div></td>
     <td><div class="compact-text">${escapeHtml(plan.loss)}</div></td>
-    <td><div class="levels-preview compact-text">${renderLevels(plan.levels)}</div></td>
+    <td><div class="levels-preview compact-text">${renderLevels(levelSection(plan.levels, "support"))}</div></td>
+    <td><div class="levels-preview compact-text">${renderLevels(levelSection(plan.levels, "resistance"))}</div></td>
     <td><div class="compact-text">${escapeHtml(plan.thinking)}</div></td>
   </tr>
 `).join("");
@@ -818,7 +836,8 @@ document.querySelector("#cardGrid").innerHTML = plans.map((plan) => `
       <div class="mini-block"><b>开仓计划</b><p>${escapeHtml(plan.entry)}</p></div>
       <div class="mini-block"><b>止盈计划</b><p>${escapeHtml(plan.profit)}</p></div>
       <div class="mini-block"><b>止损计划</b><p>${escapeHtml(plan.loss)}</p></div>
-      <div class="mini-block"><b>支撑压力位</b><p class="levels-preview">${renderLevels(plan.levels)}</p></div>
+      <div class="mini-block"><b>支撑位</b><p class="levels-preview">${renderLevels(levelSection(plan.levels, "support"))}</p></div>
+      <div class="mini-block"><b>压力位</b><p class="levels-preview">${renderLevels(levelSection(plan.levels, "resistance"))}</p></div>
       <div class="mini-block" style="grid-column: span 2;"><b>思考</b><p>${escapeHtml(plan.thinking)}</p></div>
     </div>
   </article>

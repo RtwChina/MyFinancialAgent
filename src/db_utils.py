@@ -25,9 +25,10 @@ logger = get_logger("db_utils")
 LOCAL_DB_PATH = os.path.join(OUTPUT_DIR, "financial_data.db")
 
 ACTION_PLAN_ACTIONS = ("准备开仓", "持仓观察", "已清仓复盘")
-ACTION_PLAN_POSITIONS = ("0-10%", "10%-20%", "20%-30%", ">30%")
+ACTION_PLAN_POSITIONS = ("0%", "0-5%", "5%-10%", "10%-15%", "15%-20%", "20%-25%", "25%-30%", ">30%")
 DEFAULT_ACTION_PLAN_ACTION = "持仓观察"
-DEFAULT_ACTION_PLAN_POSITION = "0-10%"
+DEFAULT_ACTION_PLAN_POSITION = "0-5%"
+ZERO_POSITION_ACTIONS = {"准备开仓", "已清仓复盘"}
 
 
 def normalize_action_plan_action(value: Any) -> str:
@@ -42,22 +43,43 @@ def normalize_action_plan_position(value: Any) -> str:
     return text if text in ACTION_PLAN_POSITIONS else DEFAULT_ACTION_PLAN_POSITION
 
 
+def default_action_plan_position_for_action(action_type: Any) -> str:
+    return "0%" if normalize_action_plan_action(action_type) in ZERO_POSITION_ACTIONS else DEFAULT_ACTION_PLAN_POSITION
+
+
 def normalize_action_plan_item(item: Dict[str, Any], sort_order: int = 0) -> Optional[Dict[str, Any]]:
     """清洗单条操作计划；缺少 symbol 时返回 None。"""
     symbol = str(item.get("symbol") or "").strip().upper()
     if not symbol:
         return None
+    support_levels = str(item.get("support_levels") or item.get("supportLevels") or "").strip()
+    resistance_levels = str(item.get("resistance_levels") or item.get("resistanceLevels") or "").strip()
+    key_levels = str(item.get("key_levels") or item.get("keyLevels") or "").strip()
     return {
         "symbol": symbol,
         "action_type": normalize_action_plan_action(item.get("action_type") or item.get("actionType")),
         "entry_plan": str(item.get("entry_plan") or item.get("entryPlan") or "").strip(),
         "take_profit_plan": str(item.get("take_profit_plan") or item.get("takeProfitPlan") or "").strip(),
         "stop_loss_plan": str(item.get("stop_loss_plan") or item.get("stopLossPlan") or "").strip(),
-        "key_levels": str(item.get("key_levels") or item.get("keyLevels") or "").strip(),
-        "current_position": normalize_action_plan_position(item.get("current_position") or item.get("currentPosition")),
+        "support_levels": support_levels,
+        "resistance_levels": resistance_levels,
+        "key_levels": key_levels or format_support_resistance_levels(support_levels, resistance_levels),
+        "current_position": normalize_action_plan_position(
+            item.get("current_position") or item.get("currentPosition") or default_action_plan_position_for_action(item.get("action_type") or item.get("actionType"))
+        ),
         "thinking": str(item.get("thinking") or "").strip(),
         "sort_order": int(item.get("sort_order") if item.get("sort_order") is not None else item.get("sortOrder") or sort_order),
     }
+
+
+def format_support_resistance_levels(support_levels: str, resistance_levels: str) -> str:
+    """将支撑位和压力位合并为兼容旧 key_levels 的文本。"""
+    sections: List[str] = []
+    if support_levels:
+        sections.append(f"支撑位：\n{support_levels}")
+    if resistance_levels:
+        sections.append(f"压力位：\n{resistance_levels}")
+    return "\n\n".join(sections)
 
 
 def format_action_plans_markdown(action_plans: List[Dict[str, Any]]) -> str:
@@ -76,7 +98,8 @@ def format_action_plans_markdown(action_plans: List[Dict[str, Any]]) -> str:
             ("开仓计划", plan["entry_plan"]),
             ("止盈计划", plan["take_profit_plan"]),
             ("止损计划", plan["stop_loss_plan"]),
-            ("支撑压力位", plan["key_levels"]),
+            ("支撑位", plan["support_levels"]),
+            ("压力位", plan["resistance_levels"]),
             ("思考", plan["thinking"]),
         ]
         for label, value in optional_fields:
@@ -580,15 +603,17 @@ def replace_review_action_plans(
             '''
             INSERT INTO daily_review_action_plans (
                 archive_date, symbol, action_type, entry_plan, take_profit_plan,
-                stop_loss_plan, key_levels, current_position, thinking,
-                sort_order, created_at, updated_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                stop_loss_plan, key_levels, support_levels, resistance_levels,
+                current_position, thinking, sort_order, created_at, updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(archive_date, symbol) DO UPDATE SET
                 action_type = excluded.action_type,
                 entry_plan = excluded.entry_plan,
                 take_profit_plan = excluded.take_profit_plan,
                 stop_loss_plan = excluded.stop_loss_plan,
                 key_levels = excluded.key_levels,
+                support_levels = excluded.support_levels,
+                resistance_levels = excluded.resistance_levels,
                 current_position = excluded.current_position,
                 thinking = excluded.thinking,
                 sort_order = excluded.sort_order,
@@ -602,6 +627,8 @@ def replace_review_action_plans(
                 plan["take_profit_plan"],
                 plan["stop_loss_plan"],
                 plan["key_levels"],
+                plan["support_levels"],
+                plan["resistance_levels"],
                 plan["current_position"],
                 plan["thinking"],
                 int(plan.get("sort_order", index)),

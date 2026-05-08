@@ -1873,7 +1873,7 @@ textarea[name="reviewerNewsNotes"] {
 
 .action-plan-table {
   width: 100%;
-  min-width: 1320px;
+  min-width: 1440px;
   border-collapse: collapse;
   table-layout: fixed;
 }
@@ -1896,8 +1896,9 @@ textarea[name="reviewerNewsNotes"] {
   width: 168px;
 }
 
-.action-plan-table col.col-levels {
-  width: 240px;
+.action-plan-table col.col-support,
+.action-plan-table col.col-resistance {
+  width: 180px;
 }
 
 .action-plan-table col.col-thinking {
@@ -1983,7 +1984,7 @@ textarea[name="reviewerNewsNotes"] {
 
 .action-plan-editor {
   display: grid;
-  grid-template-columns: 110px 150px 150px minmax(0, 1fr);
+  grid-template-columns: repeat(4, minmax(0, 1fr));
   align-items: start;
   gap: 12px;
   padding: 14px;
@@ -2014,8 +2015,21 @@ textarea[name="reviewerNewsNotes"] {
   grid-column: span 2;
 }
 
+.action-plan-editor label.span-4 {
+  grid-column: 1 / -1;
+}
+
+.action-plan-top-row {
+  grid-column: 1 / -1;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+}
+
 .action-plan-editor label.compact,
-.action-plan-editor label.span-2 {
+.action-plan-editor label.span-2,
+.action-plan-editor label.span-4 {
   align-self: start;
 }
 
@@ -2024,6 +2038,42 @@ textarea[name="reviewerNewsNotes"] {
 .action-plan-editor label.compact textarea {
   flex: 1 1 auto;
   min-width: 0;
+}
+
+.action-plan-editor label.compact-symbol,
+.action-plan-editor label.compact-action,
+.action-plan-editor label.compact-position {
+  justify-self: start;
+}
+
+.action-plan-editor label.compact-symbol input,
+.action-plan-editor label.compact-action select,
+.action-plan-editor label.compact-position select {
+  flex: 0 0 auto;
+}
+
+.action-plan-editor label.compact-symbol input {
+  width: 82px;
+}
+
+.action-plan-editor label.compact-action select {
+  width: 122px;
+}
+
+.action-plan-editor label.compact-position select {
+  width: 112px;
+}
+
+.action-plan-editor label.compact-entry {
+  flex: 1 1 auto;
+  min-width: 260px;
+}
+
+.action-plan-editor label.compact-entry textarea {
+  height: 35px;
+  min-height: 35px;
+  flex: 1 1 auto;
+  resize: vertical;
 }
 
 .action-plan-editor input,
@@ -2045,14 +2095,30 @@ textarea[name="reviewerNewsNotes"] {
   line-height: 1.55;
 }
 
-#actionPlanKeyLevelsInput {
-  min-height: 132px;
+#actionPlanTakeProfitInput,
+#actionPlanStopLossInput,
+#actionPlanSupportLevelsInput,
+#actionPlanResistanceLevelsInput,
+#actionPlanThinkingInput {
+  height: 88px;
+  min-height: 88px;
+}
+
+#actionPlanSupportLevelsInput,
+#actionPlanResistanceLevelsInput {
+  height: 120px;
+  min-height: 120px;
+}
+
+#actionPlanSupportLevelsInput,
+#actionPlanResistanceLevelsInput {
   font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
   font-size: 0.8rem;
 }
 
-.action-plan-field #actionPlanKeyLevelsInput {
-  min-height: 132px;
+.action-plan-field #actionPlanSupportLevelsInput,
+.action-plan-field #actionPlanResistanceLevelsInput {
+  min-height: 88px;
 }
 
 .action-plan-editor input:focus,

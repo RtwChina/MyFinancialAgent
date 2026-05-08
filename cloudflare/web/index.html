@@ -4,7 +4,7 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>My Financial Agent</title>
-    <link rel="stylesheet" href="/styles.css?v=20260508-layout-1" />
+    <link rel="stylesheet" href="/styles.css?v=20260508-levels-12" />
   </head>
   <body>
     <div class="shell">
@@ -471,6 +471,7 @@
                   </div>
                   <div class="action-plan-tools">
                     <button id="addActionPlanBtn" type="button" class="ghost compact-button">添加标的</button>
+                    <button id="sortActionPlansBtn" type="button" class="ghost compact-button">自动排序</button>
                     <button id="moveActionPlanUpBtn" type="button" class="ghost compact-button">上移</button>
                     <button id="moveActionPlanDownBtn" type="button" class="ghost compact-button">下移</button>
                     <button id="deleteActionPlanBtn" type="button" class="ghost compact-button danger">删除</button>
@@ -490,7 +491,8 @@
                       <col class="col-entry">
                       <col class="col-take-profit">
                       <col class="col-stop-loss">
-                      <col class="col-levels">
+                      <col class="col-support">
+                      <col class="col-resistance">
                       <col class="col-thinking">
                     </colgroup>
                     <thead>
@@ -501,7 +503,8 @@
                         <th>开仓计划</th>
                         <th>止盈计划</th>
                         <th>止损计划</th>
-                        <th>支撑压力位</th>
+                        <th>支撑位</th>
+                        <th>压力位</th>
                         <th>思考</th>
                       </tr>
                     </thead>
@@ -510,31 +513,37 @@
                 </div>
                 <div id="emptyActionPlanState" class="empty-state hidden">还没有结构化操作计划，点击“添加标的”开始填写。</div>
                 <div id="actionPlanEditor" class="action-plan-editor hidden">
-                  <label class="compact">
-                    标的
-                    <input id="actionPlanSymbolInput" type="text" placeholder="MU">
-                  </label>
-                  <label class="compact">
-                    动作
-                    <select id="actionPlanActionSelect">
-                      <option>准备开仓</option>
-                      <option>持仓观察</option>
-                      <option>已清仓复盘</option>
-                    </select>
-                  </label>
-                  <label class="compact">
-                    当前仓位
-                    <select id="actionPlanPositionSelect">
-                      <option>0-10%</option>
-                      <option>10%-20%</option>
-                      <option>20%-30%</option>
-                      <option>&gt;30%</option>
-                    </select>
-                  </label>
-                  <label class="compact">
-                    开仓计划
-                    <input id="actionPlanEntryInput" type="text" data-no-md>
-                  </label>
+                  <div class="action-plan-top-row">
+                    <label class="compact compact-symbol">
+                      标的
+                      <input id="actionPlanSymbolInput" type="text" placeholder="MU">
+                    </label>
+                    <label class="compact compact-action">
+                      动作
+                      <select id="actionPlanActionSelect">
+                        <option>准备开仓</option>
+                        <option>持仓观察</option>
+                        <option>已清仓复盘</option>
+                      </select>
+                    </label>
+                    <label class="compact compact-position">
+                      当前仓位
+                      <select id="actionPlanPositionSelect">
+                        <option>0%</option>
+                        <option>0-5%</option>
+                        <option>5%-10%</option>
+                        <option>10%-15%</option>
+                        <option>15%-20%</option>
+                        <option>20%-25%</option>
+                        <option>25%-30%</option>
+                        <option>&gt;30%</option>
+                      </select>
+                    </label>
+                    <label class="compact compact-entry">
+                      开仓计划
+                      <textarea id="actionPlanEntryInput" rows="3" data-no-md></textarea>
+                    </label>
+                  </div>
                   <label class="span-2">
                     止盈计划
                     <textarea id="actionPlanTakeProfitInput" rows="4" data-no-md></textarea>
@@ -544,10 +553,14 @@
                     <textarea id="actionPlanStopLossInput" rows="4" data-no-md></textarea>
                   </label>
                   <label class="span-2">
-                    支撑压力位
-                    <textarea id="actionPlanKeyLevelsInput" rows="7" data-no-md placeholder="支撑位 (Support):&#10;335-348（中）&#10;&#10;压力位:&#10;335-348（中）"></textarea>
+                    支撑位
+                    <textarea id="actionPlanSupportLevelsInput" rows="4" data-no-md placeholder="82-88（中）"></textarea>
                   </label>
                   <label class="span-2">
+                    压力位
+                    <textarea id="actionPlanResistanceLevelsInput" rows="4" data-no-md placeholder="95-102（中）"></textarea>
+                  </label>
+                  <label class="span-4">
                     思考
                     <textarea id="actionPlanThinkingInput" rows="4" data-no-md></textarea>
                   </label>

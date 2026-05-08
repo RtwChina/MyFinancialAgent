@@ -87,6 +87,8 @@ CREATE TABLE IF NOT EXISTS daily_review_action_plans (
     take_profit_plan TEXT,
     stop_loss_plan TEXT,
     key_levels TEXT,
+    support_levels TEXT,
+    resistance_levels TEXT,
     current_position TEXT,
     thinking TEXT,
     sort_order INTEGER DEFAULT 0,

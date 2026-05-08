@@ -26,9 +26,10 @@ const TRACKED_SYMBOLS = [
 ];
 
 const ACTION_PLAN_ACTIONS = ["准备开仓", "持仓观察", "已清仓复盘"];
-const ACTION_PLAN_POSITIONS = ["0-10%", "10%-20%", "20%-30%", ">30%"];
+const ACTION_PLAN_POSITIONS = ["0%", "0-5%", "5%-10%", "10%-15%", "15%-20%", "20%-25%", "25%-30%", ">30%"];
 const DEFAULT_ACTION_PLAN_ACTION = "持仓观察";
-const DEFAULT_ACTION_PLAN_POSITION = "0-10%";
+const DEFAULT_ACTION_PLAN_POSITION = "0-5%";
+const ZERO_POSITION_ACTIONS = new Set(["准备开仓", "已清仓复盘"]);
 
 export default {
   async fetch(request, env) {
@@ -1069,10 +1070,17 @@ function normalizeActionPlanPosition(value) {
   return ACTION_PLAN_POSITIONS.includes(text) ? text : DEFAULT_ACTION_PLAN_POSITION;
 }
 
+function defaultActionPlanPositionForAction(actionType) {
+  return ZERO_POSITION_ACTIONS.has(normalizeActionPlanAction(actionType)) ? "0%" : DEFAULT_ACTION_PLAN_POSITION;
+}
+
 function normalizeActionPlanItem(item, sortOrder = 0) {
   if (!item || typeof item !== "object") return null;
   const symbol = String(item.symbol || "").trim().toUpperCase();
   if (!symbol) return null;
+  const supportLevels = String(item.supportLevels || item.support_levels || "").trim();
+  const resistanceLevels = String(item.resistanceLevels || item.resistance_levels || "").trim();
+  const keyLevels = String(item.keyLevels || item.key_levels || "").trim();
   return {
     id: item.id == null ? null : Number(item.id),
     symbol,
@@ -1080,13 +1088,22 @@ function normalizeActionPlanItem(item, sortOrder = 0) {
     entryPlan: String(item.entryPlan || item.entry_plan || "").trim(),
     takeProfitPlan: String(item.takeProfitPlan || item.take_profit_plan || "").trim(),
     stopLossPlan: String(item.stopLossPlan || item.stop_loss_plan || "").trim(),
-    keyLevels: String(item.keyLevels || item.key_levels || "").trim(),
-    currentPosition: normalizeActionPlanPosition(item.currentPosition || item.current_position),
+    supportLevels,
+    resistanceLevels,
+    keyLevels: keyLevels || formatSupportResistanceLevels(supportLevels, resistanceLevels),
+    currentPosition: normalizeActionPlanPosition(item.currentPosition || item.current_position || defaultActionPlanPositionForAction(item.actionType || item.action_type)),
     thinking: String(item.thinking || "").trim(),
     sortOrder: Number.isFinite(Number(item.sortOrder ?? item.sort_order))
       ? Number(item.sortOrder ?? item.sort_order)
       : sortOrder,
   };
+}
+
+function formatSupportResistanceLevels(supportLevels, resistanceLevels) {
+  const sections = [];
+  if (supportLevels) sections.push(`支撑位：\n${supportLevels}`);
+  if (resistanceLevels) sections.push(`压力位：\n${resistanceLevels}`);
+  return sections.join("\n\n");
 }
 
 function dbActionPlanToApi(row) {
@@ -1098,7 +1115,9 @@ function dbActionPlanToApi(row) {
     entryPlan: row.entry_plan || "",
     takeProfitPlan: row.take_profit_plan || "",
     stopLossPlan: row.stop_loss_plan || "",
-    keyLevels: row.key_levels || "",
+    supportLevels: row.support_levels || "",
+    resistanceLevels: row.resistance_levels || "",
+    keyLevels: row.key_levels || formatSupportResistanceLevels(row.support_levels || "", row.resistance_levels || ""),
     currentPosition: row.current_position || DEFAULT_ACTION_PLAN_POSITION,
     thinking: row.thinking || "",
     sortOrder: Number(row.sort_order || 0),
@@ -1142,7 +1161,8 @@ function formatActionPlansMarkdown(actionPlans) {
       ["开仓计划", plan.entryPlan],
       ["止盈计划", plan.takeProfitPlan],
       ["止损计划", plan.stopLossPlan],
-      ["支撑压力位", plan.keyLevels],
+      ["支撑位", plan.supportLevels],
+      ["压力位", plan.resistanceLevels],
       ["思考", plan.thinking],
     ];
     for (const [label, value] of fields) {
@@ -1165,15 +1185,17 @@ async function replaceReviewActionPlans(env, archiveDate, actionPlans) {
     await env.DB.prepare(
       `INSERT INTO daily_review_action_plans (
         archive_date, symbol, action_type, entry_plan, take_profit_plan,
-        stop_loss_plan, key_levels, current_position, thinking,
-        sort_order, created_at, updated_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        stop_loss_plan, key_levels, support_levels, resistance_levels,
+        current_position, thinking, sort_order, created_at, updated_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       ON CONFLICT(archive_date, symbol) DO UPDATE SET
         action_type = excluded.action_type,
         entry_plan = excluded.entry_plan,
         take_profit_plan = excluded.take_profit_plan,
         stop_loss_plan = excluded.stop_loss_plan,
         key_levels = excluded.key_levels,
+        support_levels = excluded.support_levels,
+        resistance_levels = excluded.resistance_levels,
         current_position = excluded.current_position,
         thinking = excluded.thinking,
         sort_order = excluded.sort_order,
@@ -1187,6 +1209,8 @@ async function replaceReviewActionPlans(env, archiveDate, actionPlans) {
         plan.takeProfitPlan,
         plan.stopLossPlan,
         plan.keyLevels,
+        plan.supportLevels,
+        plan.resistanceLevels,
         plan.currentPosition,
         plan.thinking,
         plan.sortOrder,

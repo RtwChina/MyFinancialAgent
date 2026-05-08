@@ -17,7 +17,7 @@ from typing import Any, Dict, Iterable, List
 
 
 ACTION_VALUES = {"准备开仓", "持仓观察", "已清仓复盘"}
-POSITION_VALUES = ("0-10%", "10%-20%", "20%-30%", ">30%")
+POSITION_VALUES = ("0%", "0-5%", "5%-10%", "10%-15%", "15%-20%", "20%-25%", "25%-30%", ">30%")
 
 
 def connect(db_path: Path) -> sqlite3.Connection:
@@ -33,19 +33,27 @@ def normalize_action(value: str | None) -> str:
 
 def normalize_position(value: str | None) -> str:
     text = (value or "").strip()
-    return text if text in POSITION_VALUES else "0-10%"
+    return text if text in POSITION_VALUES else "0-5%"
 
 
 def percent_to_position(percent: float | None) -> str:
     if percent is None:
-        return "0-10%"
+        return "0-5%"
+    if percent <= 0:
+        return "0%"
     if percent > 30:
         return ">30%"
+    if percent > 25:
+        return "25%-30%"
     if percent > 20:
-        return "20%-30%"
+        return "20%-25%"
+    if percent > 15:
+        return "15%-20%"
     if percent > 10:
-        return "10%-20%"
-    return "0-10%"
+        return "10%-15%"
+    if percent > 5:
+        return "5%-10%"
+    return "0-5%"
 
 
 def fetch_symbols(conn: sqlite3.Connection) -> List[str]:
@@ -121,7 +129,14 @@ def parse_asset_plan(archive_date: str, text: str, symbols: List[str]) -> List[D
         if not chunk:
             chunk = text
         lines = [line.strip() for line in chunk.splitlines() if line.strip()]
-        key_levels = lines_matching(lines, [r"支撑|压力|support|resistance", r"\d+\s*[-–]\s*\d+"])
+        support_levels = lines_matching(lines, [r"支撑|support", r"\d+\s*[-–]\s*\d+"])
+        resistance_levels = lines_matching(lines, [r"压力|resistance", r"\d+\s*[-–]\s*\d+"])
+        key_levels = "\n\n".join(
+            section for section in [
+                f"支撑位：\n{support_levels}" if support_levels else "",
+                f"压力位：\n{resistance_levels}" if resistance_levels else "",
+            ] if section
+        )
         plans.append({
             "archive_date": archive_date,
             "symbol": symbol,
@@ -131,6 +146,8 @@ def parse_asset_plan(archive_date: str, text: str, symbols: List[str]) -> List[D
             "take_profit_plan": lines_matching(lines, [r"止盈|目标|减仓|新高"]),
             "stop_loss_plan": lines_matching(lines, [r"止损|跌破|失效|退出|清仓"]),
             "key_levels": key_levels,
+            "support_levels": support_levels,
+            "resistance_levels": resistance_levels,
             "thinking": chunk,
             "sort_order": sort_order,
             "migration_note": "temporary parser draft; review before apply",
@@ -192,8 +209,10 @@ def write_preview_markdown(preview: Dict[str, Any], output_path: Path) -> None:
                 f"- Entry: {plan['entry_plan'] or '-'}",
                 f"- Take profit: {plan['take_profit_plan'] or '-'}",
                 f"- Stop loss: {plan['stop_loss_plan'] or '-'}",
-                "- Key levels:",
-                plan["key_levels"] or "-",
+                "- Support levels:",
+                plan["support_levels"] or "-",
+                "- Resistance levels:",
+                plan["resistance_levels"] or "-",
                 "- Thinking:",
                 plan["thinking"] or "-",
                 "",
@@ -217,18 +236,20 @@ def apply_preview(conn: sqlite3.Connection, preview: Dict[str, Any], override_ex
                 continue
             conn.execute(
                 """
-                INSERT INTO daily_review_action_plans (
-                    archive_date, symbol, action_type, entry_plan, take_profit_plan,
-                    stop_loss_plan, key_levels, current_position, thinking,
-                    sort_order, created_at, updated_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+	                INSERT INTO daily_review_action_plans (
+	                    archive_date, symbol, action_type, entry_plan, take_profit_plan,
+	                    stop_loss_plan, key_levels, support_levels, resistance_levels,
+	                    current_position, thinking, sort_order, created_at, updated_at
+	                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(archive_date, symbol) DO UPDATE SET
                     action_type = excluded.action_type,
                     entry_plan = excluded.entry_plan,
                     take_profit_plan = excluded.take_profit_plan,
-                    stop_loss_plan = excluded.stop_loss_plan,
-                    key_levels = excluded.key_levels,
-                    current_position = excluded.current_position,
+	                    stop_loss_plan = excluded.stop_loss_plan,
+	                    key_levels = excluded.key_levels,
+	                    support_levels = excluded.support_levels,
+	                    resistance_levels = excluded.resistance_levels,
+	                    current_position = excluded.current_position,
                     thinking = excluded.thinking,
                     sort_order = excluded.sort_order,
                     updated_at = excluded.updated_at
@@ -239,9 +260,11 @@ def apply_preview(conn: sqlite3.Connection, preview: Dict[str, Any], override_ex
                     normalize_action(plan.get("action_type")),
                     plan.get("entry_plan") or "",
                     plan.get("take_profit_plan") or "",
-                    plan.get("stop_loss_plan") or "",
-                    plan.get("key_levels") or "",
-                    normalize_position(plan.get("current_position")),
+	                    plan.get("stop_loss_plan") or "",
+	                    plan.get("key_levels") or "",
+	                    plan.get("support_levels") or "",
+	                    plan.get("resistance_levels") or "",
+	                    normalize_position(plan.get("current_position")),
                     plan.get("thinking") or "",
                     int(plan.get("sort_order") or 0),
                     now,
