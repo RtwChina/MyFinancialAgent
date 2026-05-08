@@ -2001,7 +2001,13 @@ textarea[name="reviewerNewsNotes"] {
 }
 
 .action-plan-editor label.compact {
-  align-content: start;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  align-content: normal;
+  color: #64748b;
+  font-size: 0.74rem;
+  white-space: nowrap;
 }
 
 .action-plan-editor label.span-2 {
@@ -2011,6 +2017,13 @@ textarea[name="reviewerNewsNotes"] {
 .action-plan-editor label.compact,
 .action-plan-editor label.span-2 {
   align-self: start;
+}
+
+.action-plan-editor label.compact input,
+.action-plan-editor label.compact select,
+.action-plan-editor label.compact textarea {
+  flex: 1 1 auto;
+  min-width: 0;
 }
 
 .action-plan-editor input,
@@ -2030,13 +2043,6 @@ textarea[name="reviewerNewsNotes"] {
   min-height: 92px;
   resize: vertical;
   line-height: 1.55;
-}
-
-.action-plan-editor label.compact textarea {
-  height: 44px;
-  min-height: 44px;
-  padding-top: 8px;
-  padding-bottom: 8px;
 }
 
 #actionPlanKeyLevelsInput {
