@@ -138,7 +138,6 @@ def create_legacy_temp_schema(conn: sqlite3.Connection) -> None:
             selected_news_ids TEXT,
             market_sentiment TEXT,
             sector_rotation TEXT,
-            asset_plan TEXT,
             trading_summary TEXT,
             reviewed_at TEXT,
             updated_at TEXT
@@ -313,7 +312,7 @@ def render_archive_rows(conn: sqlite3.Connection) -> list[str]:
     rows = conn.execute(
         """
         SELECT archive_date, review_status, news_brief, market_sentiment, sector_rotation,
-               asset_plan, trading_summary, reviewed_at, updated_at
+               trading_summary, reviewed_at, updated_at
         FROM daily_review_archive
         ORDER BY archive_date
         """
@@ -324,9 +323,9 @@ def render_archive_rows(conn: sqlite3.Connection) -> list[str]:
         statements.append(
             "INSERT OR IGNORE INTO daily_review_archive "
             "(archive_date, review_status, reviewer_news_notes, market_sentiment, sector_rotation, "
-            "asset_plan, trading_summary, reviewed_at, updated_at) "
+            "trading_summary, reviewed_at, updated_at) "
             f"VALUES ({sql_value(row['archive_date'])}, {sql_value(row['review_status'])}, {sql_value(row['news_brief'])}, "
-            f"{sql_value(row['market_sentiment'])}, {sql_value(row['sector_rotation'])}, {sql_value(row['asset_plan'])}, "
+            f"{sql_value(row['market_sentiment'])}, {sql_value(row['sector_rotation'])}, "
             f"{sql_value(row['trading_summary'])}, {sql_value(row['reviewed_at'])}, {sql_value(row['updated_at'])});"
         )
     return statements

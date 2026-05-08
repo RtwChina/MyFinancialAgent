@@ -814,7 +814,12 @@ async function getReviews(env, url) {
       a.reviewer_news_notes,
       a.market_sentiment,
       a.sector_rotation,
-      a.asset_plan,
+      (
+        SELECT GROUP_CONCAT(symbol, ' | ')
+        FROM daily_review_action_plans p
+        WHERE p.archive_date = a.archive_date
+        ORDER BY p.sort_order ASC, p.symbol ASC
+      ) AS action_plan_summary,
       a.trading_summary,
       n.linkage_logic_chain
     FROM daily_review_archive a
@@ -961,7 +966,7 @@ async function getReviewBootstrap(env, archiveDate) {
   }
 
   const previousCompletedReview = await env.DB.prepare(
-    `SELECT archive_date, reviewer_news_notes, market_sentiment, sector_rotation, asset_plan
+    `SELECT archive_date, reviewer_news_notes, market_sentiment, sector_rotation
      FROM daily_review_archive
      WHERE archive_date < ? AND review_status = 'reviewed'
      ORDER BY archive_date DESC
@@ -970,7 +975,11 @@ async function getReviewBootstrap(env, archiveDate) {
     .bind(archiveDate)
     .first();
 
-  const actionPlans = await listReviewActionPlans(env, archiveDate);
+  const currentActionPlans = await listReviewActionPlans(env, archiveDate);
+  const carryForwardActionPlans = previousCompletedReview
+    ? await listReviewActionPlans(env, previousCompletedReview.archive_date)
+    : [];
+  const actionPlans = currentActionPlans.length ? currentActionPlans : carryForwardActionPlans;
 
   // news 按类型分组
   const newsByType = { index: [], sector: [], stock: [] };
@@ -1150,34 +1159,6 @@ function normalizeActionPlansForSave(actionPlans) {
   return normalized;
 }
 
-function formatActionPlansMarkdown(actionPlans) {
-  return normalizeActionPlansForSave(actionPlans).map((plan) => {
-    const lines = [
-      `### ${plan.symbol}`,
-      `- 动作：${plan.actionType}`,
-      `- 当前仓位：${plan.currentPosition}`,
-    ];
-    const fields = [
-      ["开仓计划", plan.entryPlan],
-      ["止盈计划", plan.takeProfitPlan],
-      ["止损计划", plan.stopLossPlan],
-      ["支撑位", plan.supportLevels],
-      ["压力位", plan.resistanceLevels],
-      ["思考", plan.thinking],
-    ];
-    for (const [label, value] of fields) {
-      if (!value) continue;
-      if (value.includes("\n")) {
-        const indented = value.split("\n").map((line) => (line ? `  ${line}` : "")).join("\n");
-        lines.push(`- ${label}：\n${indented}`);
-      } else {
-        lines.push(`- ${label}：${value}`);
-      }
-    }
-    return lines.join("\n");
-  }).join("\n\n");
-}
-
 async function replaceReviewActionPlans(env, archiveDate, actionPlans) {
   const normalized = normalizeActionPlansForSave(actionPlans);
   const now = isoNow();
@@ -1297,21 +1278,17 @@ async function saveReviewDraft(env, archiveDate, body) {
   const normalizedActionPlans = hasStructuredActionPlans
     ? normalizeActionPlansForSave(body.actionPlans)
     : [];
-  const assetPlanText = hasStructuredActionPlans && normalizedActionPlans.length
-    ? formatActionPlansMarkdown(normalizedActionPlans)
-    : (body.assetPlan || "");
 
   await env.DB.prepare(
     `INSERT INTO daily_review_archive (
       archive_date, review_status, reviewer_news_notes, market_sentiment,
-      sector_rotation, asset_plan, trading_summary, updated_at
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+      sector_rotation, trading_summary, updated_at
+    ) VALUES (?, ?, ?, ?, ?, ?, ?)
     ON CONFLICT(archive_date) DO UPDATE SET
       review_status = excluded.review_status,
       reviewer_news_notes = excluded.reviewer_news_notes,
       market_sentiment = excluded.market_sentiment,
       sector_rotation = excluded.sector_rotation,
-      asset_plan = excluded.asset_plan,
       trading_summary = excluded.trading_summary,
       updated_at = excluded.updated_at`,
   )
@@ -1321,7 +1298,6 @@ async function saveReviewDraft(env, archiveDate, body) {
       body.reviewerNewsNotes || body.newsBrief || "",
       body.marketSentiment || "",
       body.sectorRotation || "",
-      assetPlanText,
       body.tradingSummary || "",
       isoNow(),
     )
@@ -1490,9 +1466,9 @@ async function initializeReview(env, archiveDate) {
     await env.DB.prepare(
       `INSERT INTO daily_review_archive (
         archive_date, review_status, reviewer_news_notes, market_sentiment,
-        sector_rotation, asset_plan, trading_summary, reviewed_at, updated_at
+        sector_rotation, trading_summary, reviewed_at, updated_at
       )
-       VALUES (?, 'initialized', '', '', '', '', '', NULL, ?)`,
+       VALUES (?, 'initialized', '', '', '', '', NULL, ?)`,
     )
       .bind(archiveDate, now)
       .run();
@@ -1505,7 +1481,6 @@ async function initializeReview(env, archiveDate) {
            reviewer_news_notes = '',
            market_sentiment = '',
            sector_rotation = '',
-           asset_plan = '',
            trading_summary = '',
            reviewed_at = NULL,
            updated_at = ?
@@ -1563,9 +1538,9 @@ async function createReviewSnapshots(env, archiveDate, body = {}) {
     await env.DB.prepare(
       `INSERT INTO daily_review_snapshots (
         archive_date, version_no, snapshot_reason, review_status, reviewer_news_notes,
-        market_sentiment, sector_rotation, asset_plan, trading_summary,
+        market_sentiment, sector_rotation, trading_summary,
         reviewed_at, source_updated_at, snapshot_created_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     )
       .bind(
         archiveDate,
@@ -1575,7 +1550,6 @@ async function createReviewSnapshots(env, archiveDate, body = {}) {
         reviewRecord.reviewer_news_notes || "",
         reviewRecord.market_sentiment || "",
         reviewRecord.sector_rotation || "",
-        reviewRecord.asset_plan || "",
         reviewRecord.trading_summary || "",
         reviewRecord.reviewed_at || null,
         reviewRecord.updated_at || null,

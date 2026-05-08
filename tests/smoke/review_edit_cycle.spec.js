@@ -3,6 +3,9 @@ import { test, expect } from '@playwright/test';
 const BASE_URL = 'http://127.0.0.1:8787';
 const REVIEW_DATE = '2026-03-13';
 const SORT_REVIEW_DATE = '2026-03-12';
+const ZERO_REVIEW_DATE = '2026-03-14';
+const CARRY_SOURCE_DATE = '2026-03-09';
+const CARRY_TARGET_DATE = '2026-03-10';
 
 test('review can be completed, reopened, edited, and saved again', async ({ page, request }) => {
   await request.post(`${BASE_URL}/api/reviews/${REVIEW_DATE}/initialize`);
@@ -118,19 +121,21 @@ test('action plans can be auto sorted by current position descending', async ({ 
 });
 
 test('opening and closed action plans default current position to zero', async ({ page, request }) => {
-  await request.post(`${BASE_URL}/api/reviews/${SORT_REVIEW_DATE}`, {
+  await request.post(`${BASE_URL}/api/reviews/${ZERO_REVIEW_DATE}`, {
     data: {
       reviewStatus: 'draft',
       reviewerNewsNotes: '零仓位冒烟：新闻总结。',
       marketSentiment: '零仓位冒烟：大盘盘点。',
       sectorRotation: '零仓位冒烟：板块轮动。',
       tradingSummary: '',
-      actionPlans: [],
+      actionPlans: [
+        { symbol: 'BASE', actionType: '持仓观察', currentPosition: '0-5%' },
+      ],
     },
   });
 
   await page.goto(BASE_URL, { waitUntil: 'networkidle' });
-  const row = page.locator('#reviewsList tr', { hasText: SORT_REVIEW_DATE }).first();
+  const row = page.locator('#reviewsList tr', { hasText: ZERO_REVIEW_DATE }).first();
   await expect(row).toBeVisible();
   await row.getByRole('button', { name: /开始复盘|继续复盘|进入复盘|查看/ }).click();
 
@@ -147,10 +152,50 @@ test('opening and closed action plans default current position to zero', async (
   await expect(page.locator('#actionPlanPositionSelect')).toHaveValue('0%');
 
   await page.locator('#saveDraftBtn').click();
-  const bootstrap = await request.get(`${BASE_URL}/api/reviews/${SORT_REVIEW_DATE}/bootstrap`);
+  const bootstrap = await request.get(`${BASE_URL}/api/reviews/${ZERO_REVIEW_DATE}/bootstrap`);
   const bootstrapJson = await bootstrap.json();
-  expect(bootstrapJson.actionPlans[0]).toEqual(expect.objectContaining({
+  expect(bootstrapJson.actionPlans.at(-1)).toEqual(expect.objectContaining({
     actionType: '已清仓复盘',
     currentPosition: '0%',
   }));
+});
+
+test('new review carries forward previous structured action plans without legacy asset text', async ({ request }) => {
+  await request.post(`${BASE_URL}/api/reviews/${CARRY_SOURCE_DATE}`, {
+    data: {
+      reviewStatus: 'reviewed',
+      reviewerNewsNotes: '结构化沿用冒烟：新闻总结。',
+      marketSentiment: '结构化沿用冒烟：大盘盘点。',
+      sectorRotation: '结构化沿用冒烟：板块轮动。',
+      tradingSummary: '',
+      actionPlans: [
+        {
+          symbol: 'CARRY',
+          actionType: '持仓观察',
+          currentPosition: '20%-25%',
+          entryPlan: '上一天结构化开仓计划。',
+          takeProfitPlan: '上一天结构化止盈计划。',
+          stopLossPlan: '上一天结构化止损计划。',
+          supportLevels: '10-12（强）',
+          resistanceLevels: '18-20（中）',
+          thinking: '上一天结构化思考。',
+        },
+      ],
+    },
+  });
+  await request.post(`${BASE_URL}/api/reviews/${CARRY_TARGET_DATE}/initialize`);
+
+  const bootstrap = await request.get(`${BASE_URL}/api/reviews/${CARRY_TARGET_DATE}/bootstrap`);
+  const bootstrapJson = await bootstrap.json();
+  expect(bootstrapJson.actionPlans).toEqual([
+    expect.objectContaining({
+      symbol: 'CARRY',
+      actionType: '持仓观察',
+      currentPosition: '20%-25%',
+      supportLevels: '10-12（强）',
+      resistanceLevels: '18-20（中）',
+    }),
+  ]);
+  expect(bootstrapJson.draft).not.toHaveProperty('asset_plan');
+  expect(bootstrapJson.carryForward).not.toHaveProperty('asset_plan');
 });

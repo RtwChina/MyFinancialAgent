@@ -29,6 +29,7 @@ wheels/
 # 输出文件
 output/
 logs/
+backups/
 *.xlsx
 *.log
 

@@ -82,38 +82,6 @@ def format_support_resistance_levels(support_levels: str, resistance_levels: str
     return "\n\n".join(sections)
 
 
-def format_action_plans_markdown(action_plans: List[Dict[str, Any]]) -> str:
-    """将结构化操作计划生成为兼容旧 asset_plan 的 Markdown 摘要。"""
-    sections: List[str] = []
-    for item in action_plans:
-        plan = normalize_action_plan_item(item, len(sections))
-        if not plan:
-            continue
-        lines = [
-            f"### {plan['symbol']}",
-            f"- 动作：{plan['action_type']}",
-            f"- 当前仓位：{plan['current_position']}",
-        ]
-        optional_fields = [
-            ("开仓计划", plan["entry_plan"]),
-            ("止盈计划", plan["take_profit_plan"]),
-            ("止损计划", plan["stop_loss_plan"]),
-            ("支撑位", plan["support_levels"]),
-            ("压力位", plan["resistance_levels"]),
-            ("思考", plan["thinking"]),
-        ]
-        for label, value in optional_fields:
-            if not value:
-                continue
-            if "\n" in value:
-                indented = "\n".join(f"  {line}" if line else "" for line in value.splitlines())
-                lines.append(f"- {label}：\n{indented}")
-            else:
-                lines.append(f"- {label}：{value}")
-        sections.append("\n".join(lines))
-    return "\n\n".join(sections)
-
-
 def get_db_connection(db_path: str = None) -> sqlite3.Connection:
     """获取数据库连接"""
     if db_path is None:
@@ -439,16 +407,15 @@ def save_archive(data: Dict[str, Any], db_path: str = None) -> bool:
             INSERT INTO daily_review_archive
             (
                 archive_date, review_status, reviewer_news_notes, market_sentiment,
-                sector_rotation, asset_plan, trading_summary,
+                sector_rotation, trading_summary,
                 reviewed_at, updated_at
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(archive_date) DO UPDATE SET
                 review_status = excluded.review_status,
                 reviewer_news_notes = excluded.reviewer_news_notes,
                 market_sentiment = excluded.market_sentiment,
                 sector_rotation = excluded.sector_rotation,
-                asset_plan = excluded.asset_plan,
                 trading_summary = excluded.trading_summary,
                 reviewed_at = excluded.reviewed_at,
                 updated_at = excluded.updated_at
@@ -458,7 +425,6 @@ def save_archive(data: Dict[str, Any], db_path: str = None) -> bool:
             data.get('reviewer_news_notes') or data.get('news_brief'),
             data.get('market_sentiment'),
             data.get('sector_rotation'),
-            data.get('asset_plan'),
             data.get('trading_summary'),
             data.get('reviewed_at'),
             data.get('updated_at', now_cst()),
@@ -500,9 +466,9 @@ def initialize_archive_record(archive_date: str, db_path: str = None) -> bool:
             INSERT INTO daily_review_archive
             (
                 archive_date, review_status, reviewer_news_notes, market_sentiment,
-                sector_rotation, asset_plan, trading_summary, reviewed_at, updated_at
+                sector_rotation, trading_summary, reviewed_at, updated_at
             )
-            VALUES (?, 'initialized', '', '', '', '', '', NULL, ?)
+            VALUES (?, 'initialized', '', '', '', '', NULL, ?)
             ON CONFLICT(archive_date) DO UPDATE SET
                 review_status = CASE
                     WHEN daily_review_archive.review_status = 'reviewed' THEN daily_review_archive.review_status
@@ -518,10 +484,6 @@ def initialize_archive_record(archive_date: str, db_path: str = None) -> bool:
                 END,
                 sector_rotation = CASE
                     WHEN daily_review_archive.review_status = 'reviewed' THEN daily_review_archive.sector_rotation
-                    ELSE ''
-                END,
-                asset_plan = CASE
-                    WHEN daily_review_archive.review_status = 'reviewed' THEN daily_review_archive.asset_plan
                     ELSE ''
                 END,
                 trading_summary = CASE

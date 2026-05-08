@@ -66,7 +66,6 @@ CREATE TABLE IF NOT EXISTS daily_review_archive (
     reviewer_news_notes TEXT,
     market_sentiment TEXT,
     sector_rotation TEXT,
-    asset_plan TEXT,
     trading_summary TEXT,
     reviewed_at DATETIME,
     updated_at DATETIME DEFAULT CURRENT_TIMESTAMP

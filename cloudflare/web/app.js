@@ -53,7 +53,6 @@ const state = {
   editMode: false,
   actionPlans: [],
   selectedActionPlanIndex: -1,
-  legacyAssetPlan: "",
   dailyInsight: null,
   homepageInsightSections: [],
   symbolsLoaded: false,
@@ -78,7 +77,7 @@ const REVIEW_STEPS = [
   { key: "news", label: "新闻总结", field: "reviewerNewsNotes", optional: false, hint: "先看 AI 日总结和重点新闻，再写下你自己的主线判断与点评。" },
   { key: "market", label: "大盘盘点", field: "marketSentiment", optional: false, hint: "只写真正影响大盘的变量，比如美元、利率、VIX 和风险偏好。" },
   { key: "rotation", label: "板块轮动", field: "sectorRotation", optional: false, hint: "把大宗商品和板块强弱写清楚，说明谁领涨、谁承压、资金往哪边走。" },
-  { key: "plan", label: "操作计划", field: "assetPlan", optional: false, hint: "针对核心标的和仓位，给出明确计划、触发条件和风险线。" },
+  { key: "plan", label: "操作计划", field: "actionPlans", optional: false, hint: "针对核心标的和仓位，给出明确计划、触发条件和风险线。" },
   { key: "thinking", label: "深度总结", field: "tradingSummary", optional: true, hint: "最后补深度反思。可选，但如果写了，最好落到可执行的下一步。" },
 ];
 
@@ -242,9 +241,6 @@ const moveActionPlanDownBtn = document.querySelector("#moveActionPlanDownBtn");
 const deleteActionPlanBtn = document.querySelector("#deleteActionPlanBtn");
 const emptyActionPlanState = document.querySelector("#emptyActionPlanState");
 const actionPlanEditor = document.querySelector("#actionPlanEditor");
-const legacyAssetPlanField = document.querySelector("#legacyAssetPlanField");
-const legacyAssetPlanNotice = document.querySelector("#legacyAssetPlanNotice");
-const legacyAssetPlanText = document.querySelector("#legacyAssetPlanText");
 const actionPlanSymbolInput = document.querySelector("#actionPlanSymbolInput");
 const actionPlanActionSelect = document.querySelector("#actionPlanActionSelect");
 const actionPlanPositionSelect = document.querySelector("#actionPlanPositionSelect");
@@ -703,13 +699,11 @@ async function openReviewDrawer(archiveDate) {
   renderNewsPicker(data.news);
   state.actionPlans = normalizeActionPlans(data.actionPlans || []);
   state.selectedActionPlanIndex = state.actionPlans.length ? 0 : -1;
-  state.legacyAssetPlan = data.draft?.asset_plan || data.carryForward?.asset_plan || "";
 
   applyFormValues({
     reviewerNewsNotes: data.draft?.reviewer_news_notes || data.draft?.news_brief || buildDefaultNewsBrief(data.analysis, data.news),
     marketSentiment: data.draft?.market_sentiment || data.carryForward?.market_sentiment || "",
     sectorRotation: data.draft?.sector_rotation || data.carryForward?.sector_rotation || "",
-    assetPlan: state.legacyAssetPlan,
     tradingSummary: data.draft?.trading_summary || "",
   });
   renderActionPlans();
@@ -729,7 +723,6 @@ async function saveReview() {
   const payload = Object.fromEntries(new FormData(reviewForm).entries());
   payload.reviewStatus = state.activeBootstrap?.draft?.review_status || "initialized";
   payload.actionPlans = normalizeActionPlans(state.actionPlans);
-  payload.assetPlan = payload.actionPlans.length ? formatActionPlansMarkdown(payload.actionPlans) : (payload.assetPlan || "");
 
   await fetchJson(`/api/reviews/${state.activeDate}`, {
     method: "POST",
@@ -745,14 +738,12 @@ async function saveReview() {
       reviewer_news_notes: payload.reviewerNewsNotes,
       market_sentiment: payload.marketSentiment,
       sector_rotation: payload.sectorRotation,
-      asset_plan: payload.assetPlan,
       trading_summary: payload.tradingSummary,
     },
     actionPlans: payload.actionPlans,
   };
   state.actionPlans = payload.actionPlans;
   state.selectedActionPlanIndex = state.actionPlans.length ? Math.max(0, state.selectedActionPlanIndex) : -1;
-  state.legacyAssetPlan = payload.assetPlan;
   renderActionPlans();
   if (state.reviewStatus === "reviewed" && state.editMode) {
     state.editMode = false;
@@ -843,7 +834,7 @@ function buildReviewRow(item) {
     <td><strong>${item.archive_date}</strong><small>${formatReviewWindowLabel(cycle)}</small></td>
     <td class="md-cell">${renderMdCell(item.market_sentiment, 70)}</td>
     <td class="md-cell">${renderMdCell(item.sector_rotation, 70)}</td>
-    <td class="md-cell">${renderMdCell(item.asset_plan, 70)}</td>
+    <td class="md-cell">${renderMdCell(item.action_plan_summary, 70)}</td>
     <td></td>
     <td></td>
   `;
@@ -1000,13 +991,6 @@ function renderActionPlans() {
   deleteActionPlanBtn.disabled = readOnly || state.selectedActionPlanIndex < 0;
   if (hasPlans) fillActionPlanEditor(state.actionPlans[state.selectedActionPlanIndex] || state.actionPlans[0]);
   applyActionPlanReadOnly(readOnly);
-  renderLegacyAssetPlanNotice();
-}
-
-function renderLegacyAssetPlanNotice() {
-  const shouldShow = !state.actionPlans.length && Boolean(String(state.legacyAssetPlan || "").trim());
-  legacyAssetPlanNotice.classList.toggle("hidden", !shouldShow);
-  legacyAssetPlanText.textContent = shouldShow ? state.legacyAssetPlan : "";
 }
 
 function fillActionPlanEditor(plan) {
@@ -1130,9 +1114,6 @@ function deleteSelectedActionPlan() {
 }
 
 function syncLegacyAssetPlanField() {
-  legacyAssetPlanField.value = state.actionPlans.length
-    ? formatActionPlansMarkdown(state.actionPlans)
-    : (state.legacyAssetPlan || "");
 }
 
 function applyActionPlanReadOnly(readOnly) {
@@ -1579,7 +1560,7 @@ function getStepValue(step) {
     return summary;
   }
   if (step.key === "plan") {
-    return state.actionPlans.length ? formatActionPlansMarkdown(state.actionPlans) : String(legacyAssetPlanField.value || "").trim();
+    return state.actionPlans.length ? formatActionPlansMarkdown(state.actionPlans) : "";
   }
   return String(reviewForm.elements.namedItem(step.field)?.value || "").trim();
 }
@@ -1618,8 +1599,7 @@ function validateStep(step, showAlert = true) {
 
   if (step.key === "plan") {
     const validPlans = normalizeActionPlans(state.actionPlans).filter((plan) => plan.symbol);
-    const hasLegacy = Boolean(String(legacyAssetPlanField.value || "").trim());
-    if (!validPlans.length && !hasLegacy) {
+    if (!validPlans.length) {
       if (showAlert) window.alert("请先添加至少一条结构化操作计划。");
       return false;
     }
