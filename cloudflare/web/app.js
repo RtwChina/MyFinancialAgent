@@ -247,6 +247,7 @@ const actionPlanPositionSelect = document.querySelector("#actionPlanPositionSele
 const actionPlanSupportLevelsInput = document.querySelector("#actionPlanSupportLevelsInput");
 const actionPlanResistanceLevelsInput = document.querySelector("#actionPlanResistanceLevelsInput");
 const actionPlanEntryInput = document.querySelector("#actionPlanEntryInput");
+const appendDailyRecordDateBtn = document.querySelector("#appendDailyRecordDateBtn");
 const actionPlanTakeProfitInput = document.querySelector("#actionPlanTakeProfitInput");
 const actionPlanStopLossInput = document.querySelector("#actionPlanStopLossInput");
 const actionPlanThinkingInput = document.querySelector("#actionPlanThinkingInput");
@@ -290,6 +291,7 @@ sortActionPlansBtn.addEventListener("click", () => sortActionPlansByPosition());
 moveActionPlanUpBtn.addEventListener("click", () => moveActionPlan(-1));
 moveActionPlanDownBtn.addEventListener("click", () => moveActionPlan(1));
 deleteActionPlanBtn.addEventListener("click", () => deleteSelectedActionPlan());
+appendDailyRecordDateBtn.addEventListener("click", () => appendDailyRecordDate());
 [
   actionPlanSymbolInput,
   actionPlanActionSelect,
@@ -943,7 +945,7 @@ function formatActionPlansMarkdown(items = []) {
       `- 当前仓位：${plan.currentPosition}`,
     ];
     [
-      ["开仓计划", plan.entryPlan],
+      ["每日记录", plan.entryPlan],
       ["止盈计划", plan.takeProfitPlan],
       ["止损计划", plan.stopLossPlan],
       ["支撑位", plan.supportLevels],
@@ -959,6 +961,12 @@ function formatActionPlansMarkdown(items = []) {
     });
     return lines.join("\n");
   }).join("\n\n");
+}
+
+function formatChineseMonthDay(dateString) {
+  const match = String(dateString || "").match(/^\d{4}-(\d{2})-(\d{2})$/);
+  if (!match) return "";
+  return `${Number(match[1])} 月 ${Number(match[2])} 日：`;
 }
 
 function renderActionPlans() {
@@ -1036,6 +1044,25 @@ function syncSelectedActionPlanFromEditor() {
   }, index);
   syncLegacyAssetPlanField();
   renderActionPlanRowsOnly();
+}
+
+function appendDailyRecordDate() {
+  const marker = formatChineseMonthDay(state.activeDate);
+  if (!marker || actionPlanEntryInput.readOnly) return;
+  const current = actionPlanEntryInput.value;
+  const needsBreak = current.trim() && !current.endsWith("\n");
+  const insertion = `${needsBreak ? "\n" : ""}${marker}`;
+  const start = actionPlanEntryInput.selectionStart ?? current.length;
+  const end = actionPlanEntryInput.selectionEnd ?? current.length;
+  const useCursor = document.activeElement === actionPlanEntryInput && start !== end;
+  if (useCursor) {
+    actionPlanEntryInput.setRangeText(insertion, start, end, "end");
+  } else {
+    actionPlanEntryInput.value = `${current}${insertion}`;
+    actionPlanEntryInput.selectionStart = actionPlanEntryInput.selectionEnd = actionPlanEntryInput.value.length;
+  }
+  actionPlanEntryInput.focus();
+  syncSelectedActionPlanFromEditor();
 }
 
 function renderActionPlanRowsOnly() {
@@ -1124,6 +1151,7 @@ function applyActionPlanReadOnly(readOnly) {
     actionPlanSupportLevelsInput,
     actionPlanResistanceLevelsInput,
     actionPlanEntryInput,
+    appendDailyRecordDateBtn,
     actionPlanTakeProfitInput,
     actionPlanStopLossInput,
     actionPlanThinkingInput,

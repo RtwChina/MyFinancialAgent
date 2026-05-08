@@ -199,3 +199,39 @@ test('new review carries forward previous structured action plans without legacy
   expect(bootstrapJson.draft).not.toHaveProperty('asset_plan');
   expect(bootstrapJson.carryForward).not.toHaveProperty('asset_plan');
 });
+
+test('daily record button inserts the review date into the entry plan field', async ({ page, request }) => {
+  const dailyRecordDate = '2026-05-08';
+  await request.post(`${BASE_URL}/api/reviews/${dailyRecordDate}`, {
+    data: {
+      reviewStatus: 'draft',
+      reviewerNewsNotes: '每日记录冒烟：新闻总结。',
+      marketSentiment: '每日记录冒烟：大盘盘点。',
+      sectorRotation: '每日记录冒烟：板块轮动。',
+      tradingSummary: '',
+      actionPlans: [
+        { symbol: 'DATEBTN', actionType: '持仓观察', currentPosition: '0-5%' },
+      ],
+    },
+  });
+
+  await page.goto(BASE_URL, { waitUntil: 'networkidle' });
+  const row = page.locator('#reviewsList tr', { hasText: dailyRecordDate }).first();
+  await expect(row).toBeVisible();
+  await row.getByRole('button', { name: /开始复盘|继续复盘|进入复盘|查看/ }).click();
+
+  await expect(page.locator('#reviewDrawer')).toBeVisible();
+  await page.getByText('4. 操作计划', { exact: true }).click();
+  await expect(page.locator('#actionPlanEditor').getByText('每日记录', { exact: true })).toBeVisible();
+  await page.locator('#actionPlanEntryInput').fill('4 月 17 日：加仓');
+  await page.locator('#appendDailyRecordDateBtn').click();
+  await expect(page.locator('#actionPlanEntryInput')).toHaveValue('4 月 17 日：加仓\n5 月 8 日：');
+
+  await page.locator('#saveDraftBtn').click();
+  const bootstrap = await request.get(`${BASE_URL}/api/reviews/${dailyRecordDate}/bootstrap`);
+  const bootstrapJson = await bootstrap.json();
+  expect(bootstrapJson.actionPlans[0]).toEqual(expect.objectContaining({
+    symbol: 'DATEBTN',
+    entryPlan: '4 月 17 日：加仓\n5 月 8 日：',
+  }));
+});

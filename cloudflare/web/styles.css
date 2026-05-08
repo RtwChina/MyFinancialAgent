@@ -2046,18 +2046,6 @@ textarea[name="reviewerNewsNotes"] {
   width: 112px;
 }
 
-.action-plan-editor label.compact-entry {
-  flex: 1 1 auto;
-  min-width: 260px;
-}
-
-.action-plan-editor label.compact-entry textarea {
-  height: 35px;
-  min-height: 35px;
-  flex: 1 1 auto;
-  resize: vertical;
-}
-
 .action-plan-editor input,
 .action-plan-editor select,
 .action-plan-editor textarea {
@@ -2075,6 +2063,24 @@ textarea[name="reviewerNewsNotes"] {
   min-height: 92px;
   resize: vertical;
   line-height: 1.55;
+}
+
+.field-title-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.field-title-row .compact-button {
+  min-height: 28px;
+  padding: 0 10px;
+  font-size: 0.74rem;
+}
+
+#actionPlanEntryInput {
+  height: 132px;
+  min-height: 132px;
 }
 
 #actionPlanTakeProfitInput,

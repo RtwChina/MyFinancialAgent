@@ -495,7 +495,7 @@
                         <th>标的</th>
                         <th>动作</th>
                         <th>当前仓位</th>
-                        <th>开仓计划</th>
+                        <th>每日记录</th>
                         <th>止盈计划</th>
                         <th>止损计划</th>
                         <th>支撑位</th>
@@ -534,11 +534,14 @@
                         <option>&gt;30%</option>
                       </select>
                     </label>
-                    <label class="compact compact-entry">
-                      开仓计划
-                      <textarea id="actionPlanEntryInput" rows="3" data-no-md></textarea>
-                    </label>
                   </div>
+                  <label class="span-4 daily-record-field">
+                    <span class="field-title-row">
+                      <span>每日记录</span>
+                      <button id="appendDailyRecordDateBtn" type="button" class="ghost compact-button">+ 今日</button>
+                    </span>
+                    <textarea id="actionPlanEntryInput" rows="5" data-no-md></textarea>
+                  </label>
                   <label class="span-2">
                     止盈计划
                     <textarea id="actionPlanTakeProfitInput" rows="4" data-no-md></textarea>
