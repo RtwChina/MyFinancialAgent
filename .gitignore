@@ -57,6 +57,7 @@ npm-debug.log*
 .DS_Store
 
 # 测试
+.tests/
 .pytest_cache/
 .coverage
 htmlcov/
