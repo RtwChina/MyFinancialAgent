@@ -1,0 +1,275 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Action Plan Full List Demo</title>
+    <style>
+      :root {
+        --text: #0f172a;
+        --muted: #64748b;
+        --line: rgba(15, 23, 42, 0.08);
+        --selected: rgba(37, 99, 235, 0.055);
+        --hold: #2563eb;
+        --open: #16a34a;
+        --closed: #64748b;
+      }
+
+      * { box-sizing: border-box; }
+
+      body {
+        margin: 0;
+        background: #f6f8fb;
+        color: var(--text);
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      }
+
+      main {
+        display: grid;
+        gap: 18px;
+        padding: 24px;
+      }
+
+      h1 {
+        margin: 0;
+        font-size: 22px;
+      }
+
+      .group {
+        display: grid;
+        gap: 10px;
+        padding: 12px;
+        border-radius: 16px;
+        border: 1px solid rgba(37, 99, 235, 0.16);
+        background: linear-gradient(180deg, rgba(239, 246, 255, 0.72), rgba(255, 255, 255, 0.86));
+      }
+
+      .group-head {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+      }
+
+      .market {
+        padding: 3px 10px;
+        border-radius: 8px;
+        color: #1d4ed8;
+        background: rgba(37, 99, 235, 0.09);
+        font-size: 13px;
+        font-weight: 850;
+      }
+
+      .button {
+        min-height: 26px;
+        padding: 3px 12px;
+        border-radius: 999px;
+        border: 1px solid rgba(15, 23, 42, 0.08);
+        background: #fff;
+        color: #334155;
+        font-size: 12px;
+        font-weight: 750;
+      }
+
+      .table-wrap {
+        overflow: auto;
+        border: 1px solid var(--line);
+        border-radius: 18px;
+        background: rgba(255, 255, 255, 0.88);
+      }
+
+      table {
+        width: 100%;
+        min-width: 1440px;
+        border-collapse: collapse;
+        table-layout: fixed;
+      }
+
+      col.target { width: 136px; }
+      col.position { width: 112px; }
+      col.entry,
+      col.take-profit,
+      col.stop-loss { width: 168px; }
+      col.support,
+      col.resistance { width: 180px; }
+      col.thinking { width: 264px; }
+
+      th,
+      td {
+        padding: 10px 11px;
+        border-bottom: 1px solid rgba(15, 23, 42, 0.06);
+        text-align: left;
+        vertical-align: top;
+        font-size: 13px;
+      }
+
+      th {
+        position: sticky;
+        top: 0;
+        z-index: 1;
+        background: rgba(241, 245, 249, 0.96);
+        color: #475569;
+        font-size: 12px;
+        font-weight: 850;
+      }
+
+      tr.selected td {
+        background: var(--selected);
+      }
+
+      tr.selected td:first-child {
+        box-shadow: inset 3px 0 0 #2563eb;
+      }
+
+      .target-cell {
+        display: grid;
+        justify-items: start;
+        gap: 5px;
+        line-height: 1.25;
+      }
+
+      .symbol {
+        display: block;
+        color: #0f172a;
+        font-size: 15px;
+        font-weight: 900;
+        letter-spacing: 0;
+        line-height: 1.05;
+      }
+
+      .status {
+        font-size: 12px;
+        font-weight: 750;
+        line-height: 1.2;
+        opacity: 0.82;
+        white-space: nowrap;
+      }
+
+      .hold { color: var(--hold); }
+      .open { color: var(--open); }
+      .closed { color: var(--closed); }
+
+      .position {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        min-height: 24px;
+        padding: 0 9px;
+        border-radius: 999px;
+        font-size: 12px;
+        font-weight: 850;
+        white-space: nowrap;
+      }
+
+      .pos-0 { color: #475569; background: #e2e8f0; }
+      .pos-5 { color: #14532d; background: #bbf7d0; }
+      .pos-15 { color: #713f12; background: #fde68a; }
+      .pos-20 { color: #7c2d12; background: #fdba74; }
+
+      .text {
+        display: -webkit-box;
+        overflow: hidden;
+        -webkit-line-clamp: 3;
+        -webkit-box-orient: vertical;
+        line-height: 1.5;
+        white-space: pre-line;
+      }
+
+      .levels {
+        font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+        font-size: 12px;
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <h1>全量列表效果：标的在上，状态在下</h1>
+      <section class="group">
+        <div class="group-head">
+          <span class="market">美股</span>
+          <span class="button">添加标的</span>
+          <span class="button">自动排序</span>
+        </div>
+        <div class="table-wrap">
+          <table>
+            <colgroup>
+              <col class="target" />
+              <col class="position" />
+              <col class="entry" />
+              <col class="take-profit" />
+              <col class="stop-loss" />
+              <col class="support" />
+              <col class="resistance" />
+              <col class="thinking" />
+            </colgroup>
+            <thead>
+              <tr>
+                <th>标的 / 动作</th>
+                <th>当前仓位</th>
+                <th>每日记录</th>
+                <th>止盈计划</th>
+                <th>止损计划</th>
+                <th>支撑位</th>
+                <th>压力位</th>
+                <th>思考</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td><div class="target-cell"><span class="symbol">MSFT</span><span class="status hold">持仓观察</span></div></td>
+                <td><span class="position pos-20">20%-25%</span></td>
+                <td><div class="text">5 月 8 日：继续持有，等财报后确认趋势是否延续。</div></td>
+                <td><div class="text">收盘跌破短期趋势线减半，剩余继续长持。</div></td>
+                <td><div class="text">跌破关键均线并放量则清掉交易仓。</div></td>
+                <td><div class="text levels">405-412（强）
+392-398（中）</div></td>
+                <td><div class="text levels">442-450（中）
+468（强）</div></td>
+                <td><div class="text">标的是主信息，状态弱化后扫表会更轻，第一眼先看代码和仓位。</div></td>
+              </tr>
+              <tr>
+                <td><div class="target-cell"><span class="symbol">AMD</span><span class="status hold">持仓观察</span></div></td>
+                <td><span class="position pos-15">15%-20%</span></td>
+                <td><div class="text">右侧继续观察，突破压力后再加仓。</div></td>
+                <td><div class="text">收盘跌破 158 先减一半。</div></td>
+                <td><div class="text">跌破 142 清掉交易仓。</div></td>
+                <td><div class="text levels">145-150（中）</div></td>
+                <td><div class="text levels">168-172（强）</div></td>
+                <td><div class="text">半导体整体强弱决定仓位上限，不单独硬冲。</div></td>
+              </tr>
+              <tr class="selected">
+                <td><div class="target-cell"><span class="symbol">LITE</span><span class="status hold">持仓观察</span></div></td>
+                <td><span class="position pos-5">0-5%</span></td>
+                <td><div class="text">突破岛形反转关键点后加仓，先用小仓位验证。</div></td>
+                <td><div class="text">冲高不追，放量滞涨先兑现。</div></td>
+                <td><div class="text">跌回缺口下方就不恋战。</div></td>
+                <td><div class="text levels">82-88（中）</div></td>
+                <td><div class="text levels">95-102（中）</div></td>
+                <td><div class="text">选中行仍然靠左侧蓝条表达，不需要让状态本身很亮。</div></td>
+              </tr>
+              <tr>
+                <td><div class="target-cell"><span class="symbol">GE</span><span class="status open">准备开仓</span></div></td>
+                <td><span class="position pos-0">0%</span></td>
+                <td><div class="text">等突破前高后试一笔，不提前埋伏。</div></td>
+                <td><div class="text">突破后第一目标先看 8%-10%。</div></td>
+                <td><div class="text">收盘跌破平台则取消计划。</div></td>
+                <td><div class="text levels">161-164（中）</div></td>
+                <td><div class="text levels">178-182（强）</div></td>
+                <td><div class="text">准备开仓是提醒，不是核心结论，所以只保留绿色文字。</div></td>
+              </tr>
+              <tr>
+                <td><div class="target-cell"><span class="symbol">BABA</span><span class="status closed">已清仓复盘</span></div></td>
+                <td><span class="position pos-0">0%</span></td>
+                <td><div class="text">复盘卖点是否太早，观察是否走出二次机会。</div></td>
+                <td><div class="text">已执行清仓，后续只观察。</div></td>
+                <td><div class="text">不重新接回，除非重新站回趋势线。</div></td>
+                <td><div class="text levels">82-85（弱）</div></td>
+                <td><div class="text levels">92-96（中）</div></td>
+                <td><div class="text">灰色状态有结束感，但不会把注意力从标的和计划上抢走。</div></td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+    </main>
+  </body>
+</html>

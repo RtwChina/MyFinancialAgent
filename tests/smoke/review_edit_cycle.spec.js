@@ -26,9 +26,12 @@ test('review can be completed, reopened, edited, and saved again', async ({ page
   await page.getByRole('button', { name: '下一步' }).click();
   await page.locator('textarea[name="sectorRotation"]').fill('本地冒烟：板块轮动已记录。');
   await page.getByRole('button', { name: '下一步' }).click();
-  if (await page.locator('#emptyActionPlanState').isVisible()) {
-    await page.locator('#addActionPlanBtn').click();
+  if (await page.locator('#emptyActionPlanStateUs').isVisible()) {
+    await page.locator('#addActionPlanUsBtn').click();
+  } else {
+    await page.locator('#actionPlanRowsUs tr').first().click();
   }
+  await expect(page.locator('#actionPlanDetailModal')).toBeVisible();
   await page.locator('#actionPlanSymbolInput').fill('MU');
   await page.locator('#actionPlanActionSelect').selectOption('持仓观察');
   await page.locator('#actionPlanPositionSelect').selectOption('0-5%');
@@ -38,6 +41,8 @@ test('review can be completed, reopened, edited, and saved again', async ({ page
   await page.locator('#actionPlanSupportLevelsInput').fill('82-88（中）');
   await page.locator('#actionPlanResistanceLevelsInput').fill('95-102（中）');
   await page.locator('#actionPlanThinkingInput').fill('本地冒烟：结构化计划保存验证。');
+  await page.locator('#saveActionPlanDetailBtn').click();
+  await expect(page.locator('#actionPlanDetailModal')).toBeHidden();
   await page.getByRole('button', { name: '下一步' }).click();
   await page.getByRole('button', { name: '完成复盘' }).click();
 
@@ -104,10 +109,10 @@ test('action plans can be auto sorted by current position descending', async ({ 
   if (await page.locator('#initializeBtn').filter({ hasText: '编辑' }).isVisible()) {
     await page.locator('#initializeBtn').click();
   }
-  await expect(page.locator('#sortActionPlansBtn')).toBeVisible();
-  await page.locator('#sortActionPlansBtn').click();
+  await expect(page.locator('#sortActionPlansUsBtn')).toBeVisible();
+  await page.locator('#sortActionPlansUsBtn').click();
 
-  await expect(page.locator('#actionPlanRows tr td:first-child')).toHaveText(['HIGH', 'MID', 'SMALL', 'LOW']);
+  await expect(page.locator('#actionPlanRowsUs tr .action-plan-symbol')).toHaveText(['HIGH', 'MID', 'SMALL', 'LOW']);
   await page.locator('#saveDraftBtn').click();
 
   const bootstrap = await request.get(`${BASE_URL}/api/reviews/${SORT_REVIEW_DATE}/bootstrap`);
@@ -145,11 +150,14 @@ test('opening and closed action plans default current position to zero', async (
     await page.locator('#initializeBtn').click();
   }
 
-  await page.locator('#addActionPlanBtn').click();
+  await page.locator('#addActionPlanUsBtn').click();
+  await expect(page.locator('#actionPlanDetailModal')).toBeVisible();
   await expect(page.locator('#actionPlanPositionSelect')).toHaveValue('0%');
   await page.locator('#actionPlanPositionSelect').selectOption('10%-15%');
   await page.locator('#actionPlanActionSelect').selectOption('已清仓复盘');
   await expect(page.locator('#actionPlanPositionSelect')).toHaveValue('0%');
+  await page.locator('#saveActionPlanDetailBtn').click();
+  await expect(page.locator('#actionPlanDetailModal')).toBeHidden();
 
   await page.locator('#saveDraftBtn').click();
   const bootstrap = await request.get(`${BASE_URL}/api/reviews/${ZERO_REVIEW_DATE}/bootstrap`);
@@ -222,10 +230,14 @@ test('daily record button inserts the review date into the entry plan field', as
 
   await expect(page.locator('#reviewDrawer')).toBeVisible();
   await page.getByText('4. 操作计划', { exact: true }).click();
+  await page.locator('#actionPlanRowsUs tr', { hasText: 'DATEBTN' }).click();
+  await expect(page.locator('#actionPlanDetailModal')).toBeVisible();
   await expect(page.locator('#actionPlanEditor').getByText('每日记录', { exact: true })).toBeVisible();
   await page.locator('#actionPlanEntryInput').fill('4 月 17 日：加仓');
   await page.locator('#appendDailyRecordDateBtn').click();
   await expect(page.locator('#actionPlanEntryInput')).toHaveValue('4 月 17 日：加仓\n5 月 8 日：');
+  await page.locator('#saveActionPlanDetailBtn').click();
+  await expect(page.locator('#actionPlanDetailModal')).toBeHidden();
 
   await page.locator('#saveDraftBtn').click();
   const bootstrap = await request.get(`${BASE_URL}/api/reviews/${dailyRecordDate}/bootstrap`);
@@ -234,4 +246,159 @@ test('daily record button inserts the review date into the entry plan field', as
     symbol: 'DATEBTN',
     entryPlan: '4 月 17 日：加仓\n5 月 8 日：',
   }));
+});
+
+test('action plan details open in a modal instead of inline under the table', async ({ page, request }) => {
+  const detailModalDate = '2026-05-09';
+  await request.post(`${BASE_URL}/api/reviews/${detailModalDate}`, {
+    data: {
+      reviewStatus: 'draft',
+      reviewerNewsNotes: '详情弹窗冒烟：新闻总结。',
+      marketSentiment: '详情弹窗冒烟：大盘盘点。',
+      sectorRotation: '详情弹窗冒烟：板块轮动。',
+      tradingSummary: '',
+      actionPlans: [
+        { symbol: 'MODAL', actionType: '持仓观察', currentPosition: '0-5%', marketType: '美股' },
+      ],
+    },
+  });
+
+  await page.goto(BASE_URL, { waitUntil: 'networkidle' });
+  const row = page.locator('#reviewsList tr', { hasText: detailModalDate }).first();
+  await expect(row).toBeVisible();
+  await row.getByRole('button', { name: /开始复盘|继续复盘|进入复盘|查看/ }).click();
+
+  await expect(page.locator('#reviewDrawer')).toBeVisible();
+  await page.getByText('4. 操作计划', { exact: true }).click();
+  await expect(page.locator('#actionPlanDetailModal')).toBeHidden();
+  await expect(page.locator('#actionPlanEditor')).toBeHidden();
+
+  await page.locator('#actionPlanRowsUs tr', { hasText: 'MODAL' }).click();
+  await expect(page.locator('#actionPlanDetailModal')).toBeVisible();
+  await expect(page.locator('#actionPlanEditor')).toBeVisible();
+  await expect(page.locator('#actionPlanDetailTitle')).toContainText('MODAL');
+
+  await page.locator('#actionPlanEntryInput').fill('5 月 9 日：弹窗编辑。');
+  await page.locator('#saveActionPlanDetailBtn').click();
+  await expect(page.locator('#actionPlanDetailModal')).toBeHidden();
+
+  await page.locator('#saveDraftBtn').click();
+  const bootstrap = await request.get(`${BASE_URL}/api/reviews/${detailModalDate}/bootstrap`);
+  const bootstrapJson = await bootstrap.json();
+  expect(bootstrapJson.actionPlans[0]).toEqual(expect.objectContaining({
+    symbol: 'MODAL',
+    entryPlan: '5 月 9 日：弹窗编辑。',
+  }));
+});
+
+test('long action plan table text shows a full hover tooltip', async ({ page, request }) => {
+  const tooltipDate = '2026-05-10';
+  const longRecord = '5 月 10 日：这是一段很长的每日记录，用来验证鼠标悬停时可以显示完整内容，而不会把表格撑高。';
+  await request.post(`${BASE_URL}/api/reviews/${tooltipDate}`, {
+    data: {
+      reviewStatus: 'draft',
+      reviewerNewsNotes: 'tooltip 冒烟：新闻总结。',
+      marketSentiment: 'tooltip 冒烟：大盘盘点。',
+      sectorRotation: 'tooltip 冒烟：板块轮动。',
+      tradingSummary: '',
+      actionPlans: [
+        {
+          symbol: 'TIP',
+          actionType: '持仓观察',
+          currentPosition: '0-5%',
+          marketType: '美股',
+          entryPlan: longRecord,
+        },
+      ],
+    },
+  });
+
+  await page.goto(BASE_URL, { waitUntil: 'networkidle' });
+  const row = page.locator('#reviewsList tr', { hasText: tooltipDate }).first();
+  await expect(row).toBeVisible();
+  await row.getByRole('button', { name: /开始复盘|继续复盘|进入复盘|查看/ }).click();
+
+  await expect(page.locator('#reviewDrawer')).toBeVisible();
+  await page.getByText('4. 操作计划', { exact: true }).click();
+  const tooltipCell = page.locator('#actionPlanRowsUs tr', { hasText: 'TIP' }).locator('[data-full-text]').first();
+  await expect(tooltipCell).toHaveAttribute('data-full-text', longRecord);
+  await tooltipCell.hover();
+  await expect(page.locator('#actionPlanCellTooltip')).toBeVisible();
+  await expect(page.locator('#actionPlanCellTooltip')).toHaveText(longRecord);
+});
+
+test('action plan list combines symbol and action into one colored status column', async ({ page, request }) => {
+  const statusDate = '2026-05-11';
+  await request.post(`${BASE_URL}/api/reviews/${statusDate}`, {
+    data: {
+      reviewStatus: 'draft',
+      reviewerNewsNotes: '状态列冒烟：新闻总结。',
+      marketSentiment: '状态列冒烟：大盘盘点。',
+      sectorRotation: '状态列冒烟：板块轮动。',
+      tradingSummary: '',
+      actionPlans: [
+        { symbol: 'HOLD', actionType: '持仓观察', currentPosition: '15%-20%', marketType: '美股' },
+        { symbol: 'OPEN', actionType: '准备开仓', currentPosition: '0%', marketType: '美股' },
+        { symbol: 'DONE', actionType: '已清仓复盘', currentPosition: '0%', marketType: '美股' },
+      ],
+    },
+  });
+
+  await page.goto(BASE_URL, { waitUntil: 'networkidle' });
+  const row = page.locator('#reviewsList tr', { hasText: statusDate }).first();
+  await expect(row).toBeVisible();
+  await row.getByRole('button', { name: /开始复盘|继续复盘|进入复盘|查看/ }).click();
+
+  await expect(page.locator('#reviewDrawer')).toBeVisible();
+  await page.getByText('4. 操作计划', { exact: true }).click();
+  await expect(page.locator('#actionPlanRowsUs tr', { hasText: 'HOLD' }).locator('.action-plan-target-cell')).toContainText('持仓观察');
+  await expect(page.locator('#actionPlanRowsUs tr', { hasText: 'OPEN' }).locator('.action-plan-status-pill')).toHaveClass(/status-open/);
+  await expect(page.locator('#actionPlanRowsUs tr', { hasText: 'DONE' }).locator('.action-plan-status-pill')).toHaveClass(/status-closed/);
+  const holdSymbolBox = await page.locator('#actionPlanRowsUs tr', { hasText: 'HOLD' }).locator('.action-plan-symbol').boundingBox();
+  const holdStatusBox = await page.locator('#actionPlanRowsUs tr', { hasText: 'HOLD' }).locator('.action-plan-status-pill').boundingBox();
+  expect(holdStatusBox.y).toBeGreaterThan(holdSymbolBox.y + holdSymbolBox.height - 1);
+  await expect(page.locator('#actionPlanRowsUs tr', { hasText: 'HOLD' }).locator('.action-plan-target-stack')).toBeVisible();
+  const targetCellDisplay = await page.locator('#actionPlanRowsUs tr', { hasText: 'HOLD' }).locator('.action-plan-target-cell')
+    .evaluate((cell) => window.getComputedStyle(cell).display);
+  expect(targetCellDisplay).toBe('table-cell');
+  await expect(page.locator('.action-plan-table th').filter({ hasText: /^动作$/ })).toHaveCount(0);
+  await expect(page.locator('.action-plan-table th').filter({ hasText: '标的 / 动作' })).toHaveCount(2);
+});
+
+test('review section titles are emphasized in red', async ({ page, request }) => {
+  const titleStyleDate = '2026-05-13';
+  await request.post(`${BASE_URL}/api/reviews/${titleStyleDate}`, {
+    data: {
+      reviewStatus: 'draft',
+      reviewerNewsNotes: '标题样式冒烟：新闻总结。',
+      marketSentiment: '标题样式冒烟：大盘盘点。',
+      sectorRotation: '标题样式冒烟：板块轮动。',
+      tradingSummary: '标题样式冒烟：深度总结。',
+      actionPlans: [
+        { symbol: 'STYLE', actionType: '持仓观察', currentPosition: '0-5%', marketType: '美股' },
+      ],
+    },
+  });
+
+  await page.goto(BASE_URL, { waitUntil: 'networkidle' });
+  const row = page.locator('#reviewsList tr', { hasText: titleStyleDate }).first();
+  await expect(row).toBeVisible();
+  await row.getByRole('button', { name: /开始复盘|继续复盘|进入复盘|查看/ }).click();
+
+  await expect(page.locator('#reviewDrawer')).toBeVisible();
+  await expect(page.locator('.snapshot-head h3', { hasText: '新闻总结与点评' })).not.toHaveClass(/review-section-title/);
+  await expect(page.locator('.review-section-title')).toHaveCount(5);
+  const titleStyles = await page.locator('.review-section-title').evaluateAll((items) =>
+    items.map((item) => {
+      const style = window.getComputedStyle(item);
+      return {
+        color: style.color,
+        fontSize: Number.parseFloat(style.fontSize),
+        fontWeight: Number.parseInt(style.fontWeight, 10),
+      };
+    }),
+  );
+  expect(titleStyles.every((style) => style.color === 'rgb(180, 35, 24)')).toBe(true);
+  expect(titleStyles.every((style) => style.fontSize >= 16)).toBe(true);
+  expect(titleStyles.every((style) => style.fontWeight >= 800)).toBe(true);
 });

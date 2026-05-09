@@ -4,7 +4,7 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>My Financial Agent</title>
-    <link rel="stylesheet" href="/styles.css?v=20260508-levels-12" />
+    <link rel="stylesheet" href="/styles.css?v=20260509-groups-18" />
   </head>
   <body>
     <div class="shell">
@@ -442,7 +442,7 @@
                 <div id="analysisBox" class="analysis-panel"></div>
                 <div id="newsPicker" class="news-picker"></div>
                 <label class="review-field wide">
-                  新闻总结与点评
+                  <span class="review-section-title">新闻总结与点评</span>
                   <textarea name="reviewerNewsNotes" rows="8" placeholder="基于上面的 AI 日总结和重点新闻，写下你自己的主线判断、补充观点和交易点评。"></textarea>
                 </label>
               </div>
@@ -450,14 +450,14 @@
 
             <section class="review-step-panel hidden" data-step="market">
               <label class="review-field wide">
-                大盘盘点
+                <span class="review-section-title">大盘盘点</span>
                 <textarea name="marketSentiment" rows="12" placeholder="记录美元、利率、VIX、成交量、风险偏好这些真正驱动大盘的变量。"></textarea>
               </label>
             </section>
 
             <section class="review-step-panel hidden" data-step="rotation">
               <label class="review-field wide">
-                大宗商品与板块轮动
+                <span class="review-section-title">大宗商品与板块轮动</span>
                 <textarea name="sectorRotation" rows="12" placeholder="写原油、黄金、铜、半导体、AI、金融等方向里，今天谁在领涨或承压。"></textarea>
               </label>
             </section>
@@ -466,109 +466,94 @@
               <div class="review-field wide action-plan-field">
                 <div class="action-plan-head">
                   <div>
-                    <strong>个股与资产操作计划</strong>
+                    <strong class="review-section-title">个股与资产操作计划</strong>
                     <small class="muted">每个标的一行，表格扫全局，下方编辑当前选中标的。</small>
                   </div>
                   <div class="action-plan-tools">
-                    <button id="addActionPlanBtn" type="button" class="ghost compact-button">添加标的</button>
-                    <button id="sortActionPlansBtn" type="button" class="ghost compact-button">自动排序</button>
                     <button id="moveActionPlanUpBtn" type="button" class="ghost compact-button">上移</button>
                     <button id="moveActionPlanDownBtn" type="button" class="ghost compact-button">下移</button>
                     <button id="deleteActionPlanBtn" type="button" class="ghost compact-button danger">删除</button>
                   </div>
                 </div>
-                <div class="action-plan-table-wrap">
-                  <table class="action-plan-table">
-                    <colgroup>
-                      <col class="col-symbol">
-                      <col class="col-action">
-                      <col class="col-position">
-                      <col class="col-entry">
-                      <col class="col-take-profit">
-                      <col class="col-stop-loss">
-                      <col class="col-support">
-                      <col class="col-resistance">
-                      <col class="col-thinking">
-                    </colgroup>
-                    <thead>
-                      <tr>
-                        <th>标的</th>
-                        <th>动作</th>
-                        <th>当前仓位</th>
-                        <th>每日记录</th>
-                        <th>止盈计划</th>
-                        <th>止损计划</th>
-                        <th>支撑位</th>
-                        <th>压力位</th>
-                        <th>思考</th>
-                      </tr>
-                    </thead>
-                    <tbody id="actionPlanRows"></tbody>
-                  </table>
-                </div>
-                <div id="emptyActionPlanState" class="empty-state hidden">还没有结构化操作计划，点击“添加标的”开始填写。</div>
-                <div id="actionPlanEditor" class="action-plan-editor hidden">
-                  <div class="action-plan-top-row">
-                    <label class="compact compact-symbol">
-                      标的
-                      <input id="actionPlanSymbolInput" type="text" placeholder="MU">
-                    </label>
-                    <label class="compact compact-action">
-                      动作
-                      <select id="actionPlanActionSelect">
-                        <option>准备开仓</option>
-                        <option>持仓观察</option>
-                        <option>已清仓复盘</option>
-                      </select>
-                    </label>
-                    <label class="compact compact-position">
-                      当前仓位
-                      <select id="actionPlanPositionSelect">
-                        <option>0%</option>
-                        <option>0-5%</option>
-                        <option>5%-10%</option>
-                        <option>10%-15%</option>
-                        <option>15%-20%</option>
-                        <option>20%-25%</option>
-                        <option>25%-30%</option>
-                        <option>&gt;30%</option>
-                      </select>
-                    </label>
+
+                <div class="action-plan-group market-us-group">
+                  <div class="action-plan-group-head">
+                    <span class="action-plan-group-label market-us-label">美股</span>
+                    <button id="addActionPlanUsBtn" type="button" class="ghost compact-button">添加标的</button>
+                    <button id="sortActionPlansUsBtn" type="button" class="ghost compact-button">自动排序</button>
                   </div>
-                  <label class="span-4 daily-record-field">
-                    <span class="field-title-row">
-                      <span>每日记录</span>
-                      <button id="appendDailyRecordDateBtn" type="button" class="ghost compact-button">+ 今日</button>
-                    </span>
-                    <textarea id="actionPlanEntryInput" rows="5" data-no-md></textarea>
-                  </label>
-                  <label class="span-2">
-                    止盈计划
-                    <textarea id="actionPlanTakeProfitInput" rows="4" data-no-md></textarea>
-                  </label>
-                  <label class="span-2">
-                    止损计划
-                    <textarea id="actionPlanStopLossInput" rows="4" data-no-md></textarea>
-                  </label>
-                  <label class="span-2">
-                    支撑位
-                    <textarea id="actionPlanSupportLevelsInput" rows="4" data-no-md placeholder="82-88（中）"></textarea>
-                  </label>
-                  <label class="span-2">
-                    压力位
-                    <textarea id="actionPlanResistanceLevelsInput" rows="4" data-no-md placeholder="95-102（中）"></textarea>
-                  </label>
-                  <label class="span-4">
-                    思考
-                    <textarea id="actionPlanThinkingInput" rows="4" data-no-md></textarea>
-                  </label>
+                  <div class="action-plan-table-wrap">
+                    <table class="action-plan-table">
+                      <colgroup>
+                        <col class="col-symbol">
+                        <col class="col-position">
+                        <col class="col-entry">
+                        <col class="col-take-profit">
+                        <col class="col-stop-loss">
+                        <col class="col-support">
+                        <col class="col-resistance">
+                        <col class="col-thinking">
+                      </colgroup>
+                      <thead>
+                        <tr>
+                          <th>标的 / 动作</th>
+                          <th>当前仓位</th>
+                          <th>每日记录</th>
+                          <th>止盈计划</th>
+                          <th>止损计划</th>
+                          <th>支撑位</th>
+                          <th>压力位</th>
+                          <th>思考</th>
+                        </tr>
+                      </thead>
+                      <tbody id="actionPlanRowsUs"></tbody>
+                    </table>
+                  </div>
+                  <div id="emptyActionPlanStateUs" class="empty-state hidden">还没有美股操作计划，点击”添加标的”开始填写。</div>
                 </div>
+
+                <div class="action-plan-group market-cn-group">
+                  <div class="action-plan-group-head">
+                    <span class="action-plan-group-label market-cn-label">大A</span>
+                    <button id="addActionPlanCnBtn" type="button" class="ghost compact-button">添加标的</button>
+                    <button id="sortActionPlansCnBtn" type="button" class="ghost compact-button">自动排序</button>
+                  </div>
+                  <div class="action-plan-table-wrap">
+                    <table class="action-plan-table">
+                      <colgroup>
+                        <col class="col-symbol">
+                        <col class="col-position">
+                        <col class="col-entry">
+                        <col class="col-take-profit">
+                        <col class="col-stop-loss">
+                        <col class="col-support">
+                        <col class="col-resistance">
+                        <col class="col-thinking">
+                      </colgroup>
+                      <thead>
+                        <tr>
+                          <th>标的 / 动作</th>
+                          <th>当前仓位</th>
+                          <th>每日记录</th>
+                          <th>止盈计划</th>
+                          <th>止损计划</th>
+                          <th>支撑位</th>
+                          <th>压力位</th>
+                          <th>思考</th>
+                        </tr>
+                      </thead>
+                      <tbody id="actionPlanRowsCn"></tbody>
+                    </table>
+                  </div>
+                  <div id="emptyActionPlanStateCn" class="empty-state hidden">还没有大A操作计划，点击”添加标的”开始填写。</div>
+                </div>
+
               </div>
             </section>
 
             <section class="review-step-panel hidden" data-step="thinking">
               <label class="review-field wide">
-                深度思考与交易总结（可选）
+                <span class="review-section-title">深度思考与交易总结（可选）</span>
                 <textarea name="tradingSummary" rows="12" placeholder="今天真正重要的判断是什么？自己最可能犯的错是什么？下一次怎么做得更好？"></textarea>
               </label>
             </section>
@@ -600,6 +585,88 @@
       </div>
     </aside>
 
-    <script type="module" src="/app.js?v=20260508-layout-1"></script>
+    <aside id="actionPlanDetailModal" class="action-plan-detail-modal hidden">
+      <div id="actionPlanDetailBackdrop" class="action-plan-detail-backdrop"></div>
+      <div class="action-plan-detail-panel">
+        <div class="action-plan-detail-head">
+          <div>
+            <h3 id="actionPlanDetailTitle">标的详情</h3>
+            <p id="actionPlanDetailSubtitle" class="muted">查看与编辑当前标的的操作计划。</p>
+          </div>
+          <button id="closeActionPlanDetailBtn" type="button" class="ghost compact-button">关闭</button>
+        </div>
+        <div id="actionPlanEditor" class="action-plan-editor hidden">
+          <div class="action-plan-top-row">
+            <label class="compact compact-symbol">
+              标的
+              <input id="actionPlanSymbolInput" type="text" placeholder="MU">
+            </label>
+            <label class="compact compact-action">
+              动作
+              <select id="actionPlanActionSelect">
+                <option>准备开仓</option>
+                <option>持仓观察</option>
+                <option>已清仓复盘</option>
+              </select>
+            </label>
+            <label class="compact compact-position">
+              当前仓位
+              <select id="actionPlanPositionSelect">
+                <option>0%</option>
+                <option>0-5%</option>
+                <option>5%-10%</option>
+                <option>10%-15%</option>
+                <option>15%-20%</option>
+                <option>20%-25%</option>
+                <option>25%-30%</option>
+                <option>&gt;30%</option>
+              </select>
+            </label>
+            <label class="compact compact-market-type">
+              市场
+              <select id="actionPlanMarketTypeSelect">
+                <option>美股</option>
+                <option>大A</option>
+              </select>
+            </label>
+          </div>
+          <label class="span-4 daily-record-field">
+            <span class="field-title-row">
+              <span>每日记录</span>
+              <button id="appendDailyRecordDateBtn" type="button" class="ghost compact-button">+ 今日</button>
+            </span>
+            <textarea id="actionPlanEntryInput" rows="5" data-no-md></textarea>
+          </label>
+          <label class="span-2">
+            止盈计划
+            <textarea id="actionPlanTakeProfitInput" rows="4" data-no-md></textarea>
+          </label>
+          <label class="span-2">
+            止损计划
+            <textarea id="actionPlanStopLossInput" rows="4" data-no-md></textarea>
+          </label>
+          <label class="span-2">
+            支撑位
+            <textarea id="actionPlanSupportLevelsInput" rows="4" data-no-md placeholder="82-88（中）"></textarea>
+          </label>
+          <label class="span-2">
+            压力位
+            <textarea id="actionPlanResistanceLevelsInput" rows="4" data-no-md placeholder="95-102（中）"></textarea>
+          </label>
+          <label class="span-4">
+            思考
+            <textarea id="actionPlanThinkingInput" rows="4" data-no-md></textarea>
+          </label>
+        </div>
+        <div class="action-plan-detail-footer">
+          <button id="cancelActionPlanDetailBtn" type="button" class="ghost">关闭</button>
+          <button id="saveActionPlanDetailBtn" type="button">保存并关闭</button>
+        </div>
+      </div>
+    </aside>
+
+    <div id="actionPlanCellTooltip" class="action-plan-cell-tooltip hidden" role="tooltip"></div>
+
+    <script type="module" src="/app.js?v=20260509-groups-18"></script>
   </body>
 </html>

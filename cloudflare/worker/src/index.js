@@ -40,7 +40,15 @@ export default {
       return handleApi(request, env, url, appEnv);
     }
 
-    return env.ASSETS.fetch(request);
+    const assetResponse = await env.ASSETS.fetch(request);
+    const contentType = assetResponse.headers.get("content-type") || "";
+    if (contentType.includes("text/html")) {
+      const headers = new Headers(assetResponse.headers);
+      headers.set("Cache-Control", "no-cache, no-store, must-revalidate");
+      headers.set("Pragma", "no-cache");
+      return new Response(assetResponse.body, { status: assetResponse.status, headers });
+    }
+    return assetResponse;
   },
 };
 
@@ -1102,6 +1110,7 @@ function normalizeActionPlanItem(item, sortOrder = 0) {
     keyLevels: keyLevels || formatSupportResistanceLevels(supportLevels, resistanceLevels),
     currentPosition: normalizeActionPlanPosition(item.currentPosition || item.current_position || defaultActionPlanPositionForAction(item.actionType || item.action_type)),
     thinking: String(item.thinking || "").trim(),
+    marketType: ["美股", "大A"].includes(item.marketType || item.market_type) ? (item.marketType || item.market_type) : "美股",
     sortOrder: Number.isFinite(Number(item.sortOrder ?? item.sort_order))
       ? Number(item.sortOrder ?? item.sort_order)
       : sortOrder,
@@ -1129,6 +1138,7 @@ function dbActionPlanToApi(row) {
     keyLevels: row.key_levels || formatSupportResistanceLevels(row.support_levels || "", row.resistance_levels || ""),
     currentPosition: row.current_position || DEFAULT_ACTION_PLAN_POSITION,
     thinking: row.thinking || "",
+    marketType: row.market_type || "美股",
     sortOrder: Number(row.sort_order || 0),
     createdAt: row.created_at || null,
     updatedAt: row.updated_at || null,
@@ -1167,8 +1177,8 @@ async function replaceReviewActionPlans(env, archiveDate, actionPlans) {
       `INSERT INTO daily_review_action_plans (
         archive_date, symbol, action_type, entry_plan, take_profit_plan,
         stop_loss_plan, key_levels, support_levels, resistance_levels,
-        current_position, thinking, sort_order, created_at, updated_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        current_position, thinking, market_type, sort_order, created_at, updated_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       ON CONFLICT(archive_date, symbol) DO UPDATE SET
         action_type = excluded.action_type,
         entry_plan = excluded.entry_plan,
@@ -1179,6 +1189,7 @@ async function replaceReviewActionPlans(env, archiveDate, actionPlans) {
         resistance_levels = excluded.resistance_levels,
         current_position = excluded.current_position,
         thinking = excluded.thinking,
+        market_type = excluded.market_type,
         sort_order = excluded.sort_order,
         updated_at = excluded.updated_at`,
     )
@@ -1194,6 +1205,7 @@ async function replaceReviewActionPlans(env, archiveDate, actionPlans) {
         plan.resistanceLevels,
         plan.currentPosition,
         plan.thinking,
+        plan.marketType,
         plan.sortOrder,
         now,
         now,

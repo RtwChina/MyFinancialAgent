@@ -1,0 +1,423 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Action Plan Column Demos</title>
+    <style>
+      :root {
+        --text: #0f172a;
+        --muted: #64748b;
+        --line: rgba(15, 23, 42, 0.08);
+        --hold-bg: #e8f2ff;
+        --hold-border: #93c5fd;
+        --hold-text: #1d4ed8;
+        --open-bg: #ecfdf3;
+        --open-border: #86efac;
+        --open-text: #15803d;
+        --closed-bg: #f1f5f9;
+        --closed-border: #cbd5e1;
+        --closed-text: #475569;
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      body {
+        margin: 0;
+        background: #f6f8fb;
+        color: var(--text);
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      }
+
+      main {
+        display: grid;
+        gap: 18px;
+        padding: 24px;
+      }
+
+      h1 {
+        margin: 0;
+        font-size: 22px;
+      }
+
+      .demo-grid {
+        display: grid;
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+        gap: 18px;
+      }
+
+      .demo {
+        overflow: hidden;
+        border: 1px solid var(--line);
+        border-radius: 14px;
+        background: rgba(255, 255, 255, 0.92);
+        box-shadow: 0 18px 40px rgba(15, 23, 42, 0.08);
+      }
+
+      .demo-head {
+        display: flex;
+        align-items: baseline;
+        justify-content: space-between;
+        gap: 12px;
+        padding: 14px 16px;
+        border-bottom: 1px solid var(--line);
+        background: #ffffff;
+      }
+
+      .demo-title {
+        margin: 0;
+        font-size: 15px;
+      }
+
+      .demo-note {
+        color: var(--muted);
+        font-size: 12px;
+      }
+
+      table {
+        width: 100%;
+        min-width: 760px;
+        border-collapse: collapse;
+        table-layout: fixed;
+      }
+
+      th,
+      td {
+        padding: 10px 11px;
+        border-bottom: 1px solid var(--line);
+        text-align: left;
+        vertical-align: top;
+        font-size: 13px;
+      }
+
+      th {
+        background: #f8fafc;
+        color: #475569;
+        font-size: 12px;
+      }
+
+      tr:last-child td {
+        border-bottom: 0;
+      }
+
+      .table-wrap {
+        overflow-x: auto;
+      }
+
+      .col-target {
+        width: 132px;
+      }
+
+      .col-position {
+        width: 92px;
+      }
+
+      .col-record,
+      .col-profit,
+      .col-loss {
+        width: 150px;
+      }
+
+      .text {
+        display: -webkit-box;
+        overflow: hidden;
+        -webkit-box-orient: vertical;
+        -webkit-line-clamp: 2;
+        line-height: 1.45;
+        white-space: pre-line;
+      }
+
+      .symbol {
+        display: block;
+        font-weight: 850;
+        letter-spacing: 0;
+      }
+
+      .action {
+        display: inline-flex;
+        align-items: center;
+        min-height: 22px;
+        margin-top: 5px;
+        padding: 2px 8px;
+        border-radius: 999px;
+        border: 1px solid transparent;
+        font-size: 12px;
+        font-weight: 800;
+      }
+
+      .action.hold {
+        border-color: var(--hold-border);
+        background: var(--hold-bg);
+        color: var(--hold-text);
+      }
+
+      .action.open {
+        border-color: var(--open-border);
+        background: var(--open-bg);
+        color: var(--open-text);
+      }
+
+      .action.closed {
+        border-color: var(--closed-border);
+        background: var(--closed-bg);
+        color: var(--closed-text);
+      }
+
+      .demo-a .target-cell {
+        line-height: 1.25;
+      }
+
+      .demo-b .target-cell {
+        padding: 8px;
+      }
+
+      .demo-b .target-card {
+        display: grid;
+        gap: 5px;
+        min-height: 52px;
+        padding: 8px 9px;
+        border-radius: 10px;
+        border: 1px solid transparent;
+      }
+
+      .demo-b .target-card.hold {
+        border-color: var(--hold-border);
+        background: var(--hold-bg);
+      }
+
+      .demo-b .target-card.open {
+        border-color: var(--open-border);
+        background: var(--open-bg);
+      }
+
+      .demo-b .target-card.closed {
+        border-color: var(--closed-border);
+        background: var(--closed-bg);
+      }
+
+      .demo-b .action {
+        margin-top: 0;
+        padding: 0;
+        border: 0;
+        background: transparent;
+      }
+
+      .demo-c tr.hold td:first-child {
+        box-shadow: inset 4px 0 0 var(--hold-text);
+      }
+
+      .demo-c tr.open td:first-child {
+        box-shadow: inset 4px 0 0 var(--open-text);
+      }
+
+      .demo-c tr.closed td:first-child {
+        box-shadow: inset 4px 0 0 var(--closed-text);
+      }
+
+      .demo-c .target-cell {
+        padding-left: 14px;
+      }
+
+      .demo-c .action {
+        border-radius: 6px;
+      }
+
+      @media (max-width: 1100px) {
+        .demo-grid {
+          grid-template-columns: 1fr;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <h1>标的 + 动作合并列 demo</h1>
+      <section class="demo-grid">
+        <article class="demo demo-a">
+          <div class="demo-head">
+            <h2 class="demo-title">A. 紧凑上下排</h2>
+            <span class="demo-note">最接近当前表格</span>
+          </div>
+          <div class="table-wrap">
+            <table>
+              <colgroup>
+                <col class="col-target" />
+                <col class="col-position" />
+                <col class="col-record" />
+                <col class="col-profit" />
+                <col class="col-loss" />
+              </colgroup>
+              <thead>
+                <tr>
+                  <th>标的 / 动作</th>
+                  <th>当前仓位</th>
+                  <th>每日记录</th>
+                  <th>止盈计划</th>
+                  <th>止损计划</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td class="target-cell">
+                    <span class="symbol">MU</span>
+                    <span class="action hold">持仓观察</span>
+                  </td>
+                  <td>15%-20%</td>
+                  <td><div class="text">5 月 8 日：右侧继续观察，突破后再加仓。</div></td>
+                  <td><div class="text">收盘跌破 328 清空一半。</div></td>
+                  <td><div class="text">收盘跌破 285 降低仓位。</div></td>
+                </tr>
+                <tr>
+                  <td class="target-cell">
+                    <span class="symbol">TSLA</span>
+                    <span class="action open">准备开仓</span>
+                  </td>
+                  <td>0%</td>
+                  <td><div class="text">等突破关键压力后试一笔。</div></td>
+                  <td><div class="text">强势突破后分批止盈。</div></td>
+                  <td><div class="text">跌破平台不做。</div></td>
+                </tr>
+                <tr>
+                  <td class="target-cell">
+                    <span class="symbol">BABA</span>
+                    <span class="action closed">已清仓复盘</span>
+                  </td>
+                  <td>0%</td>
+                  <td><div class="text">复盘卖点是否太早，观察后续是否走出二次机会。</div></td>
+                  <td><div class="text">已执行清仓，后续只观察。</div></td>
+                  <td><div class="text">不重新接回，除非重新站回趋势线。</div></td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </article>
+
+        <article class="demo demo-b">
+          <div class="demo-head">
+            <h2 class="demo-title">B. 小卡片背景</h2>
+            <span class="demo-note">区分最明显</span>
+          </div>
+          <div class="table-wrap">
+            <table>
+              <colgroup>
+                <col class="col-target" />
+                <col class="col-position" />
+                <col class="col-record" />
+                <col class="col-profit" />
+                <col class="col-loss" />
+              </colgroup>
+              <thead>
+                <tr>
+                  <th>标的 / 动作</th>
+                  <th>当前仓位</th>
+                  <th>每日记录</th>
+                  <th>止盈计划</th>
+                  <th>止损计划</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td class="target-cell">
+                    <div class="target-card hold">
+                      <span class="symbol">MU</span>
+                      <span class="action hold">持仓观察</span>
+                    </div>
+                  </td>
+                  <td>15%-20%</td>
+                  <td><div class="text">5 月 8 日：右侧继续观察，突破后再加仓。</div></td>
+                  <td><div class="text">收盘跌破 328 清空一半。</div></td>
+                  <td><div class="text">收盘跌破 285 降低仓位。</div></td>
+                </tr>
+                <tr>
+                  <td class="target-cell">
+                    <div class="target-card open">
+                      <span class="symbol">TSLA</span>
+                      <span class="action open">准备开仓</span>
+                    </div>
+                  </td>
+                  <td>0%</td>
+                  <td><div class="text">等突破关键压力后试一笔。</div></td>
+                  <td><div class="text">强势突破后分批止盈。</div></td>
+                  <td><div class="text">跌破平台不做。</div></td>
+                </tr>
+                <tr>
+                  <td class="target-cell">
+                    <div class="target-card closed">
+                      <span class="symbol">BABA</span>
+                      <span class="action closed">已清仓复盘</span>
+                    </div>
+                  </td>
+                  <td>0%</td>
+                  <td><div class="text">复盘卖点是否太早，观察后续是否走出二次机会。</div></td>
+                  <td><div class="text">已执行清仓，后续只观察。</div></td>
+                  <td><div class="text">不重新接回，除非重新站回趋势线。</div></td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </article>
+
+        <article class="demo demo-c">
+          <div class="demo-head">
+            <h2 class="demo-title">C. 左侧状态条</h2>
+            <span class="demo-note">克制但可扫读</span>
+          </div>
+          <div class="table-wrap">
+            <table>
+              <colgroup>
+                <col class="col-target" />
+                <col class="col-position" />
+                <col class="col-record" />
+                <col class="col-profit" />
+                <col class="col-loss" />
+              </colgroup>
+              <thead>
+                <tr>
+                  <th>标的 / 动作</th>
+                  <th>当前仓位</th>
+                  <th>每日记录</th>
+                  <th>止盈计划</th>
+                  <th>止损计划</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr class="hold">
+                  <td class="target-cell">
+                    <span class="symbol">MU</span>
+                    <span class="action hold">持仓观察</span>
+                  </td>
+                  <td>15%-20%</td>
+                  <td><div class="text">5 月 8 日：右侧继续观察，突破后再加仓。</div></td>
+                  <td><div class="text">收盘跌破 328 清空一半。</div></td>
+                  <td><div class="text">收盘跌破 285 降低仓位。</div></td>
+                </tr>
+                <tr class="open">
+                  <td class="target-cell">
+                    <span class="symbol">TSLA</span>
+                    <span class="action open">准备开仓</span>
+                  </td>
+                  <td>0%</td>
+                  <td><div class="text">等突破关键压力后试一笔。</div></td>
+                  <td><div class="text">强势突破后分批止盈。</div></td>
+                  <td><div class="text">跌破平台不做。</div></td>
+                </tr>
+                <tr class="closed">
+                  <td class="target-cell">
+                    <span class="symbol">BABA</span>
+                    <span class="action closed">已清仓复盘</span>
+                  </td>
+                  <td>0%</td>
+                  <td><div class="text">复盘卖点是否太早，观察后续是否走出二次机会。</div></td>
+                  <td><div class="text">已执行清仓，后续只观察。</div></td>
+                  <td><div class="text">不重新接回，除非重新站回趋势线。</div></td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </article>
+      </section>
+    </main>
+  </body>
+</html>

@@ -91,6 +91,7 @@ CREATE TABLE IF NOT EXISTS daily_review_action_plans (
     current_position TEXT,
     thinking TEXT,
     sort_order INTEGER DEFAULT 0,
+    market_type TEXT DEFAULT '美股',
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
     updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
     UNIQUE(archive_date, symbol)

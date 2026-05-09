@@ -232,18 +232,31 @@ const reviewActionGroup = document.querySelector("#reviewActionGroup");
 const prevStepBtn = document.querySelector("#prevStepBtn");
 const nextStepBtn = document.querySelector("#nextStepBtn");
 const reviewModalFooter = document.querySelector(".review-modal-footer");
-const actionPlanRows = document.querySelector("#actionPlanRows");
+let actionPlanRowsUs = document.querySelector("#actionPlanRowsUs");
+let actionPlanRowsCn = document.querySelector("#actionPlanRowsCn");
 const actionPlanTools = document.querySelector(".action-plan-tools");
-const addActionPlanBtn = document.querySelector("#addActionPlanBtn");
-const sortActionPlansBtn = document.querySelector("#sortActionPlansBtn");
+const addActionPlanUsBtn = document.querySelector("#addActionPlanUsBtn");
+const addActionPlanCnBtn = document.querySelector("#addActionPlanCnBtn");
+const sortActionPlansUsBtn = document.querySelector("#sortActionPlansUsBtn");
+const sortActionPlansCnBtn = document.querySelector("#sortActionPlansCnBtn");
 const moveActionPlanUpBtn = document.querySelector("#moveActionPlanUpBtn");
 const moveActionPlanDownBtn = document.querySelector("#moveActionPlanDownBtn");
 const deleteActionPlanBtn = document.querySelector("#deleteActionPlanBtn");
-const emptyActionPlanState = document.querySelector("#emptyActionPlanState");
+const emptyActionPlanStateUs = document.querySelector("#emptyActionPlanStateUs");
+const emptyActionPlanStateCn = document.querySelector("#emptyActionPlanStateCn");
+const actionPlanDetailModal = document.querySelector("#actionPlanDetailModal");
+const actionPlanDetailBackdrop = document.querySelector("#actionPlanDetailBackdrop");
+const actionPlanDetailTitle = document.querySelector("#actionPlanDetailTitle");
+const actionPlanDetailSubtitle = document.querySelector("#actionPlanDetailSubtitle");
+const closeActionPlanDetailBtn = document.querySelector("#closeActionPlanDetailBtn");
+const cancelActionPlanDetailBtn = document.querySelector("#cancelActionPlanDetailBtn");
+const saveActionPlanDetailBtn = document.querySelector("#saveActionPlanDetailBtn");
+const actionPlanCellTooltip = document.querySelector("#actionPlanCellTooltip");
 const actionPlanEditor = document.querySelector("#actionPlanEditor");
 const actionPlanSymbolInput = document.querySelector("#actionPlanSymbolInput");
 const actionPlanActionSelect = document.querySelector("#actionPlanActionSelect");
 const actionPlanPositionSelect = document.querySelector("#actionPlanPositionSelect");
+const actionPlanMarketTypeSelect = document.querySelector("#actionPlanMarketTypeSelect");
 const actionPlanSupportLevelsInput = document.querySelector("#actionPlanSupportLevelsInput");
 const actionPlanResistanceLevelsInput = document.querySelector("#actionPlanResistanceLevelsInput");
 const actionPlanEntryInput = document.querySelector("#actionPlanEntryInput");
@@ -286,25 +299,29 @@ reviewsPageSizeSelect.addEventListener("change", () => {
   loadReviews();
 });
 
-addActionPlanBtn.addEventListener("click", () => addActionPlan());
-sortActionPlansBtn.addEventListener("click", () => sortActionPlansByPosition());
-moveActionPlanUpBtn.addEventListener("click", () => moveActionPlan(-1));
-moveActionPlanDownBtn.addEventListener("click", () => moveActionPlan(1));
-deleteActionPlanBtn.addEventListener("click", () => deleteSelectedActionPlan());
-appendDailyRecordDateBtn.addEventListener("click", () => appendDailyRecordDate());
+addActionPlanUsBtn?.addEventListener("click", () => addActionPlan("美股"));
+addActionPlanCnBtn?.addEventListener("click", () => addActionPlan("大A"));
+sortActionPlansUsBtn?.addEventListener("click", () => sortActionPlansByPosition("美股"));
+sortActionPlansCnBtn?.addEventListener("click", () => sortActionPlansByPosition("大A"));
+moveActionPlanUpBtn?.addEventListener("click", () => moveActionPlan(-1));
+moveActionPlanDownBtn?.addEventListener("click", () => moveActionPlan(1));
+deleteActionPlanBtn?.addEventListener("click", () => deleteSelectedActionPlan());
+appendDailyRecordDateBtn?.addEventListener("click", () => appendDailyRecordDate());
+closeActionPlanDetailBtn?.addEventListener("click", () => closeActionPlanDetail());
+cancelActionPlanDetailBtn?.addEventListener("click", () => closeActionPlanDetail());
+actionPlanDetailBackdrop?.addEventListener("click", () => closeActionPlanDetail());
+saveActionPlanDetailBtn?.addEventListener("click", () => saveActionPlanDetailAndClose());
+actionPlanActionSelect?.addEventListener("change", syncZeroPositionForAction);
+
 [
-  actionPlanSymbolInput,
-  actionPlanActionSelect,
-  actionPlanPositionSelect,
-  actionPlanSupportLevelsInput,
-  actionPlanResistanceLevelsInput,
   actionPlanEntryInput,
   actionPlanTakeProfitInput,
   actionPlanStopLossInput,
+  actionPlanSupportLevelsInput,
+  actionPlanResistanceLevelsInput,
   actionPlanThinkingInput,
-].forEach((field) => {
-  field.addEventListener("input", syncSelectedActionPlanFromEditor);
-  field.addEventListener("change", syncSelectedActionPlanFromEditor);
+].filter(Boolean).forEach((el) => {
+  el.addEventListener("input", () => autoResizeTextarea(el));
 });
 
 saveDraftBtn.addEventListener("click", async () => {
@@ -717,11 +734,14 @@ async function openReviewDrawer(archiveDate) {
 }
 
 function closeDrawer() {
+  closeActionPlanDetail();
   reviewDrawer.classList.add("hidden");
 }
 
 async function saveReview() {
-  syncSelectedActionPlanFromEditor();
+  if (!actionPlanDetailModal?.classList.contains("hidden")) {
+    syncSelectedActionPlanFromEditor();
+  }
   const payload = Object.fromEntries(new FormData(reviewForm).entries());
   payload.reviewStatus = state.activeBootstrap?.draft?.review_status || "initialized";
   payload.actionPlans = normalizeActionPlans(state.actionPlans);
@@ -914,6 +934,7 @@ function normalizeActionPlan(item = {}, sortOrder = 0) {
     resistanceLevels,
     keyLevels: keyLevels || formatSupportResistanceLevels(supportLevels, resistanceLevels),
     thinking: String(item.thinking || "").trim(),
+    marketType: ["美股", "大A"].includes(item.marketType || item.market_type) ? (item.marketType || item.market_type) : "美股",
     sortOrder,
   };
 }
@@ -923,6 +944,25 @@ function formatSupportResistanceLevels(supportLevels, resistanceLevels) {
   if (supportLevels) sections.push(`支撑位：\n${supportLevels}`);
   if (resistanceLevels) sections.push(`压力位：\n${resistanceLevels}`);
   return sections.join("\n\n");
+}
+
+function positionColorClass(position) {
+  switch (String(position || "").trim()) {
+    case "0%":      return "pos-0";
+    case "0-5%":    return "pos-5";
+    case "5%-10%":  return "pos-10";
+    case "10%-15%": return "pos-15";
+    case "15%-20%": return "pos-20";
+    case "20%-25%": return "pos-25";
+    case "25%-30%": return "pos-30";
+    case ">30%":    return "pos-max";
+    default:        return "pos-0";
+  }
+}
+
+function autoResizeTextarea(el) {
+  el.style.height = "auto";
+  el.style.height = `${el.scrollHeight}px`;
 }
 
 function normalizeActionPlans(items = []) {
@@ -969,55 +1009,150 @@ function formatChineseMonthDay(dateString) {
   return `${Number(match[1])} 月 ${Number(match[2])} 日：`;
 }
 
+function renderActionPlanTextCell(value, className = "") {
+  const text = String(value || "").trim();
+  const shouldShowTooltip = text.length > 18 || text.includes("\n");
+  const tooltipAttr = shouldShowTooltip ? ` data-full-text="${escapeAttribute(text)}"` : "";
+  return `<div class="action-plan-cell-text ${className}"${tooltipAttr}>${escapeHtml(text)}</div>`;
+}
+
+function actionPlanStatusClass(actionType) {
+  const normalized = normalizeActionPlanAction(actionType);
+  if (normalized === "准备开仓") return "status-open";
+  if (normalized === "已清仓复盘") return "status-closed";
+  return "status-hold";
+}
+
+function showActionPlanCellTooltip(event) {
+  const text = event.currentTarget?.dataset?.fullText || "";
+  if (!actionPlanCellTooltip || !text.trim()) return;
+  actionPlanCellTooltip.textContent = text;
+  actionPlanCellTooltip.classList.remove("hidden");
+  positionActionPlanCellTooltip(event);
+}
+
+function positionActionPlanCellTooltip(event) {
+  if (!actionPlanCellTooltip || actionPlanCellTooltip.classList.contains("hidden")) return;
+  const viewportPadding = 12;
+  const cursorOffset = 14;
+  const rect = actionPlanCellTooltip.getBoundingClientRect();
+  let left = event.clientX + cursorOffset;
+  let top = event.clientY + cursorOffset;
+  if (left + rect.width > window.innerWidth - viewportPadding) {
+    left = event.clientX - rect.width - cursorOffset;
+  }
+  if (top + rect.height > window.innerHeight - viewportPadding) {
+    top = event.clientY - rect.height - cursorOffset;
+  }
+  actionPlanCellTooltip.style.left = `${Math.max(viewportPadding, left)}px`;
+  actionPlanCellTooltip.style.top = `${Math.max(viewportPadding, top)}px`;
+}
+
+function hideActionPlanCellTooltip() {
+  if (!actionPlanCellTooltip) return;
+  actionPlanCellTooltip.classList.add("hidden");
+  actionPlanCellTooltip.textContent = "";
+}
+
+function renderActionPlanGroup(tbody, market) {
+  if (!tbody) {
+    actionPlanRowsUs = document.querySelector("#actionPlanRowsUs");
+    actionPlanRowsCn = document.querySelector("#actionPlanRowsCn");
+    tbody = market === "大A" ? actionPlanRowsCn : actionPlanRowsUs;
+    if (!tbody) return 0;
+  }
+  const selected = state.selectedActionPlanIndex;
+  const rows = state.actionPlans
+    .map((plan, index) => ({ plan, index }))
+    .filter(({ plan }) => (plan.marketType || "美股") === market);
+  tbody.innerHTML = rows.map(({ plan, index }) => `
+    <tr class="${index === selected ? "selected" : ""}" data-index="${index}">
+      <td class="action-plan-target-cell">
+        <div class="action-plan-target-stack">
+          <strong class="action-plan-symbol">${escapeHtml(plan.symbol || "未命名")}</strong>
+          <span class="action-plan-status-pill ${actionPlanStatusClass(plan.actionType)}">${escapeHtml(plan.actionType)}</span>
+        </div>
+      </td>
+      <td><span class="action-plan-position ${positionColorClass(plan.currentPosition)}">${escapeHtml(plan.currentPosition)}</span></td>
+      <td>${renderActionPlanTextCell(plan.entryPlan)}</td>
+      <td>${renderActionPlanTextCell(plan.takeProfitPlan)}</td>
+      <td>${renderActionPlanTextCell(plan.stopLossPlan)}</td>
+      <td>${renderActionPlanTextCell(plan.supportLevels, "action-plan-levels")}</td>
+      <td>${renderActionPlanTextCell(plan.resistanceLevels, "action-plan-levels")}</td>
+      <td>${renderActionPlanTextCell(plan.thinking)}</td>
+    </tr>
+  `).join("");
+  tbody.querySelectorAll("tr").forEach((row) => {
+    row.addEventListener("click", () => selectActionPlan(Number(row.dataset.index)));
+  });
+  tbody.querySelectorAll("[data-full-text]").forEach((cell) => {
+    cell.addEventListener("mouseenter", showActionPlanCellTooltip);
+    cell.addEventListener("mousemove", positionActionPlanCellTooltip);
+    cell.addEventListener("mouseleave", hideActionPlanCellTooltip);
+  });
+  const tableWrap = tbody.closest(".action-plan-table-wrap");
+  if (tableWrap) tableWrap.classList.toggle("hidden", rows.length === 0);
+  return rows.length;
+}
+
 function renderActionPlans() {
   syncLegacyAssetPlanField();
   const readOnly = state.reviewStatus === "reviewed" && !state.editMode;
-  const hasPlans = state.actionPlans.length > 0;
-  actionPlanRows.innerHTML = state.actionPlans.map((plan, index) => `
-    <tr class="${index === state.selectedActionPlanIndex ? "selected" : ""}" data-index="${index}">
-      <td><strong class="action-plan-symbol">${escapeHtml(plan.symbol)}</strong></td>
-      <td><span class="action-plan-pill">${escapeHtml(plan.actionType)}</span></td>
-      <td><span class="action-plan-position">${escapeHtml(plan.currentPosition)}</span></td>
-      <td><div class="action-plan-cell-text">${escapeHtml(plan.entryPlan)}</div></td>
-      <td><div class="action-plan-cell-text">${escapeHtml(plan.takeProfitPlan)}</div></td>
-      <td><div class="action-plan-cell-text">${escapeHtml(plan.stopLossPlan)}</div></td>
-      <td><div class="action-plan-cell-text action-plan-levels">${escapeHtml(plan.supportLevels)}</div></td>
-      <td><div class="action-plan-cell-text action-plan-levels">${escapeHtml(plan.resistanceLevels)}</div></td>
-      <td><div class="action-plan-cell-text">${escapeHtml(plan.thinking)}</div></td>
-    </tr>
-  `).join("");
-  actionPlanRows.querySelectorAll("tr").forEach((row) => {
-    row.addEventListener("click", () => selectActionPlan(Number(row.dataset.index)));
-  });
-  emptyActionPlanState.classList.toggle("hidden", hasPlans);
-  actionPlanEditor.classList.toggle("hidden", !hasPlans);
-  actionPlanTools.classList.toggle("hidden", readOnly);
-  addActionPlanBtn.disabled = readOnly;
-  sortActionPlansBtn.disabled = readOnly || state.actionPlans.length < 2;
-  moveActionPlanUpBtn.disabled = readOnly || state.selectedActionPlanIndex <= 0;
-  moveActionPlanDownBtn.disabled = readOnly || state.selectedActionPlanIndex < 0 || state.selectedActionPlanIndex >= state.actionPlans.length - 1;
-  deleteActionPlanBtn.disabled = readOnly || state.selectedActionPlanIndex < 0;
-  if (hasPlans) fillActionPlanEditor(state.actionPlans[state.selectedActionPlanIndex] || state.actionPlans[0]);
+  const usCount = renderActionPlanGroup(actionPlanRowsUs, "美股");
+  const cnCount = renderActionPlanGroup(actionPlanRowsCn, "大A");
+  const hasPlans = usCount + cnCount > 0;
+  emptyActionPlanStateUs?.classList.toggle("hidden", usCount > 0);
+  emptyActionPlanStateCn?.classList.toggle("hidden", cnCount > 0);
+  actionPlanTools?.classList.toggle("hidden", readOnly);
+  if (addActionPlanUsBtn) addActionPlanUsBtn.disabled = readOnly;
+  if (addActionPlanCnBtn) addActionPlanCnBtn.disabled = readOnly;
+  if (sortActionPlansUsBtn) sortActionPlansUsBtn.disabled = readOnly || usCount < 2;
+  if (sortActionPlansCnBtn) sortActionPlansCnBtn.disabled = readOnly || cnCount < 2;
+  const selectedPlan = state.actionPlans[state.selectedActionPlanIndex] || null;
+  const groupItems = selectedPlan
+    ? state.actionPlans.filter((p) => (p.marketType || "美股") === (selectedPlan.marketType || "美股"))
+    : [];
+  const posInGroup = selectedPlan ? groupItems.indexOf(selectedPlan) : -1;
+  if (moveActionPlanUpBtn) moveActionPlanUpBtn.disabled = readOnly || posInGroup <= 0;
+  if (moveActionPlanDownBtn) moveActionPlanDownBtn.disabled = readOnly || posInGroup < 0 || posInGroup >= groupItems.length - 1;
+  if (deleteActionPlanBtn) deleteActionPlanBtn.disabled = readOnly || state.selectedActionPlanIndex < 0;
+  if (!hasPlans) closeActionPlanDetail();
   applyActionPlanReadOnly(readOnly);
 }
 
 function fillActionPlanEditor(plan) {
   if (!plan) return;
-  actionPlanSymbolInput.value = plan.symbol || "";
-  actionPlanActionSelect.value = normalizeActionPlanAction(plan.actionType);
-  actionPlanPositionSelect.value = normalizeActionPlanPosition(plan.currentPosition);
-  actionPlanSupportLevelsInput.value = plan.supportLevels || "";
-  actionPlanResistanceLevelsInput.value = plan.resistanceLevels || "";
-  actionPlanEntryInput.value = plan.entryPlan || "";
-  actionPlanTakeProfitInput.value = plan.takeProfitPlan || "";
-  actionPlanStopLossInput.value = plan.stopLossPlan || "";
-  actionPlanThinkingInput.value = plan.thinking || "";
+  if (actionPlanSymbolInput) actionPlanSymbolInput.value = plan.symbol || "";
+  if (actionPlanActionSelect) actionPlanActionSelect.value = normalizeActionPlanAction(plan.actionType);
+  if (actionPlanPositionSelect) actionPlanPositionSelect.value = normalizeActionPlanPosition(plan.currentPosition);
+  if (actionPlanMarketTypeSelect) actionPlanMarketTypeSelect.value = plan.marketType || "美股";
+  if (actionPlanSupportLevelsInput) actionPlanSupportLevelsInput.value = plan.supportLevels || "";
+  if (actionPlanResistanceLevelsInput) actionPlanResistanceLevelsInput.value = plan.resistanceLevels || "";
+  if (actionPlanEntryInput) actionPlanEntryInput.value = plan.entryPlan || "";
+  if (actionPlanTakeProfitInput) actionPlanTakeProfitInput.value = plan.takeProfitPlan || "";
+  if (actionPlanStopLossInput) actionPlanStopLossInput.value = plan.stopLossPlan || "";
+  if (actionPlanThinkingInput) actionPlanThinkingInput.value = plan.thinking || "";
+  [
+    actionPlanEntryInput,
+    actionPlanTakeProfitInput,
+    actionPlanStopLossInput,
+    actionPlanSupportLevelsInput,
+    actionPlanResistanceLevelsInput,
+    actionPlanThinkingInput,
+  ].filter(Boolean).forEach(autoResizeTextarea);
 }
 
 function selectActionPlan(index) {
   if (index < 0 || index >= state.actionPlans.length) return;
-  state.selectedActionPlanIndex = index;
-  renderActionPlans();
+  hideActionPlanCellTooltip();
+  openActionPlanDetail(index);
+}
+
+function syncZeroPositionForAction() {
+  if (!actionPlanActionSelect || !actionPlanPositionSelect) return;
+  if (ZERO_POSITION_ACTIONS.has(actionPlanActionSelect.value)) {
+    actionPlanPositionSelect.value = "0%";
+  }
 }
 
 function syncSelectedActionPlanFromEditor() {
@@ -1035,6 +1170,7 @@ function syncSelectedActionPlanFromEditor() {
     symbol: actionPlanSymbolInput.value,
     actionType,
     currentPosition,
+    marketType: actionPlanMarketTypeSelect.value,
     supportLevels: actionPlanSupportLevelsInput.value,
     resistanceLevels: actionPlanResistanceLevelsInput.value,
     entryPlan: actionPlanEntryInput.value,
@@ -1044,6 +1180,40 @@ function syncSelectedActionPlanFromEditor() {
   }, index);
   syncLegacyAssetPlanField();
   renderActionPlanRowsOnly();
+  updateActionPlanDetailHeading();
+}
+
+function updateActionPlanDetailHeading() {
+  const symbol = String(actionPlanSymbolInput?.value || "").trim() || "未命名标的";
+  const marketType = String(actionPlanMarketTypeSelect?.value || "美股").trim();
+  const actionType = String(actionPlanActionSelect?.value || "").trim();
+  if (actionPlanDetailTitle) actionPlanDetailTitle.textContent = symbol;
+  if (actionPlanDetailSubtitle) actionPlanDetailSubtitle.textContent = [marketType, actionType].filter(Boolean).join(" · ");
+}
+
+function openActionPlanDetail(index) {
+  if (index < 0 || index >= state.actionPlans.length) return;
+  state.selectedActionPlanIndex = index;
+  renderActionPlanRowsOnly();
+  fillActionPlanEditor(state.actionPlans[index]);
+  updateActionPlanDetailHeading();
+  const readOnly = state.reviewStatus === "reviewed" && !state.editMode;
+  applyActionPlanReadOnly(readOnly);
+  actionPlanEditor?.classList.remove("hidden");
+  actionPlanDetailModal?.classList.remove("hidden");
+  saveActionPlanDetailBtn?.classList.toggle("hidden", readOnly);
+  setTimeout(() => actionPlanSymbolInput?.focus(), 0);
+}
+
+function closeActionPlanDetail() {
+  hideActionPlanCellTooltip();
+  actionPlanDetailModal?.classList.add("hidden");
+  actionPlanEditor?.classList.add("hidden");
+}
+
+function saveActionPlanDetailAndClose() {
+  syncSelectedActionPlanFromEditor();
+  closeActionPlanDetail();
 }
 
 function appendDailyRecordDate() {
@@ -1062,48 +1232,43 @@ function appendDailyRecordDate() {
     actionPlanEntryInput.selectionStart = actionPlanEntryInput.selectionEnd = actionPlanEntryInput.value.length;
   }
   actionPlanEntryInput.focus();
-  syncSelectedActionPlanFromEditor();
+  autoResizeTextarea(actionPlanEntryInput);
 }
 
 function renderActionPlanRowsOnly() {
-  const selected = state.selectedActionPlanIndex;
-  actionPlanRows.innerHTML = state.actionPlans.map((plan, index) => `
-    <tr class="${index === selected ? "selected" : ""}" data-index="${index}">
-      <td><strong class="action-plan-symbol">${escapeHtml(plan.symbol || "未命名")}</strong></td>
-      <td><span class="action-plan-pill">${escapeHtml(plan.actionType)}</span></td>
-      <td><span class="action-plan-position">${escapeHtml(plan.currentPosition)}</span></td>
-      <td><div class="action-plan-cell-text">${escapeHtml(plan.entryPlan)}</div></td>
-      <td><div class="action-plan-cell-text">${escapeHtml(plan.takeProfitPlan)}</div></td>
-      <td><div class="action-plan-cell-text">${escapeHtml(plan.stopLossPlan)}</div></td>
-      <td><div class="action-plan-cell-text action-plan-levels">${escapeHtml(plan.supportLevels)}</div></td>
-      <td><div class="action-plan-cell-text action-plan-levels">${escapeHtml(plan.resistanceLevels)}</div></td>
-      <td><div class="action-plan-cell-text">${escapeHtml(plan.thinking)}</div></td>
-    </tr>
-  `).join("");
-  actionPlanRows.querySelectorAll("tr").forEach((row) => {
-    row.addEventListener("click", () => selectActionPlan(Number(row.dataset.index)));
-  });
+  renderActionPlanGroup(actionPlanRowsUs, "美股");
+  renderActionPlanGroup(actionPlanRowsCn, "大A");
 }
 
-function addActionPlan() {
+function addActionPlan(marketType = "美股") {
   const readOnly = state.reviewStatus === "reviewed" && !state.editMode;
   if (readOnly) return;
   const used = new Set(state.actionPlans.map((item) => item.symbol).filter(Boolean));
-  const candidates = ["MU", "MSFT", "GOOGL", "LITE", "BABA", "CASH"];
+  const candidates = marketType === "大A"
+    ? ["600519", "000001", "300750", "600036", "000858"]
+    : ["MU", "MSFT", "GOOGL", "LITE", "BABA", "CASH"];
   const symbol = candidates.find((item) => !used.has(item)) || "";
-  state.actionPlans.push(normalizeActionPlan({ symbol, actionType: "准备开仓", currentPosition: "0%" }, state.actionPlans.length));
+  state.actionPlans.push(normalizeActionPlan({ symbol, actionType: "准备开仓", currentPosition: "0%", marketType }, state.actionPlans.length));
   state.selectedActionPlanIndex = state.actionPlans.length - 1;
   renderActionPlans();
+  openActionPlanDetail(state.selectedActionPlanIndex);
 }
 
 function moveActionPlan(delta) {
   const index = state.selectedActionPlanIndex;
-  const target = index + delta;
-  if (index < 0 || target < 0 || target >= state.actionPlans.length) return;
-  const [item] = state.actionPlans.splice(index, 1);
-  state.actionPlans.splice(target, 0, item);
-  state.actionPlans = state.actionPlans.map((plan, sortOrder) => ({ ...plan, sortOrder }));
-  state.selectedActionPlanIndex = target;
+  if (index < 0) return;
+  const plan = state.actionPlans[index];
+  const groupIndices = state.actionPlans
+    .map((p, i) => ({ p, i }))
+    .filter(({ p }) => (p.marketType || "美股") === (plan.marketType || "美股"))
+    .map(({ i }) => i);
+  const posInGroup = groupIndices.indexOf(index);
+  const targetPos = posInGroup + delta;
+  if (targetPos < 0 || targetPos >= groupIndices.length) return;
+  const targetIndex = groupIndices[targetPos];
+  [state.actionPlans[index], state.actionPlans[targetIndex]] = [state.actionPlans[targetIndex], state.actionPlans[index]];
+  state.actionPlans = state.actionPlans.map((p, sortOrder) => ({ ...p, sortOrder }));
+  state.selectedActionPlanIndex = targetIndex;
   renderActionPlans();
 }
 
@@ -1116,18 +1281,27 @@ function actionPlanPositionScore(plan) {
   return single ? Number(single[1]) : -1;
 }
 
-function sortActionPlansByPosition() {
+function sortActionPlansByPosition(marketType) {
   const readOnly = state.reviewStatus === "reviewed" && !state.editMode;
-  if (readOnly || state.actionPlans.length < 2) return;
+  if (readOnly) return;
   const selected = state.actionPlans[state.selectedActionPlanIndex] || null;
-  const sorted = state.actionPlans
-    .map((plan, originalIndex) => ({ plan, originalIndex }))
+  const groupIndices = state.actionPlans
+    .map((p, i) => i)
+    .filter((i) => (state.actionPlans[i].marketType || "美股") === marketType);
+  if (groupIndices.length < 2) return;
+  const sortedGroup = groupIndices
+    .map((i) => ({ plan: state.actionPlans[i], i }))
     .sort((a, b) => {
       const scoreDiff = actionPlanPositionScore(b.plan) - actionPlanPositionScore(a.plan);
-      return scoreDiff || a.originalIndex - b.originalIndex;
+      return scoreDiff || a.i - b.i;
     });
-  state.selectedActionPlanIndex = selected ? sorted.findIndex((item) => item.plan === selected) : 0;
-  state.actionPlans = sorted.map(({ plan }, sortOrder) => ({ ...plan, sortOrder }));
+  sortedGroup.forEach(({ plan }, pos) => {
+    state.actionPlans[groupIndices[pos]] = plan;
+  });
+  state.actionPlans = state.actionPlans.map((p, sortOrder) => ({ ...p, sortOrder }));
+  if (selected) {
+    state.selectedActionPlanIndex = state.actionPlans.indexOf(selected);
+  }
   renderActionPlans();
 }
 
@@ -1137,6 +1311,7 @@ function deleteSelectedActionPlan() {
   state.actionPlans.splice(index, 1);
   state.actionPlans = state.actionPlans.map((plan, sortOrder) => ({ ...plan, sortOrder }));
   state.selectedActionPlanIndex = state.actionPlans.length ? Math.min(index, state.actionPlans.length - 1) : -1;
+  closeActionPlanDetail();
   renderActionPlans();
 }
 
@@ -1148,6 +1323,7 @@ function applyActionPlanReadOnly(readOnly) {
     actionPlanSymbolInput,
     actionPlanActionSelect,
     actionPlanPositionSelect,
+    actionPlanMarketTypeSelect,
     actionPlanSupportLevelsInput,
     actionPlanResistanceLevelsInput,
     actionPlanEntryInput,
@@ -1155,7 +1331,7 @@ function applyActionPlanReadOnly(readOnly) {
     actionPlanTakeProfitInput,
     actionPlanStopLossInput,
     actionPlanThinkingInput,
-  ].forEach((field) => {
+  ].filter(Boolean).forEach((field) => {
     field.disabled = readOnly;
     if ("readOnly" in field) field.readOnly = readOnly;
   });
@@ -2034,6 +2210,12 @@ function escapeHtml(value) {
     .replaceAll("&", "&amp;")
     .replaceAll("<", "&lt;")
     .replaceAll(">", "&gt;");
+}
+
+function escapeAttribute(value) {
+  return escapeHtml(value)
+    .replaceAll('"', "&quot;")
+    .replaceAll("'", "&#39;");
 }
 
 async function fetchJson(url, options = {}) {
