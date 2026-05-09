@@ -142,7 +142,7 @@ async function handleApi(request, env, url, appEnv) {
         return json(await updateSymbol(env, symbolId, await request.json()), 200, request);
       }
       if (request.method === "DELETE") {
-        return json(await deleteSymbol(env, symbolId), 200, request);
+        return json(await deleteSymbol(env, symbolId, url.searchParams.get("hard") === "1"), 200, request);
       }
     }
     // ── Screening Keywords Management ─────────────────────────
@@ -189,6 +189,11 @@ async function handleApi(request, env, url, appEnv) {
 
     if (url.pathname === "/api/reviews" && request.method === "GET") {
       return json(await getReviews(env, url), 200, request);
+    }
+
+    const actionPlanSymbolsMatch = url.pathname.match(/^\/api\/reviews\/(\d{4}-\d{2}-\d{2})\/action-plan-symbols$/);
+    if (actionPlanSymbolsMatch && request.method === "GET") {
+      return json(await getActionPlanSymbolCatalog(env, actionPlanSymbolsMatch[1]), 200, request);
     }
 
     const reviewMatch = url.pathname.match(/^\/api\/reviews\/(\d{4}-\d{2}-\d{2})(?:\/(bootstrap|complete|initialize|delete|snapshot))?$/);
@@ -1157,6 +1162,117 @@ async function listReviewActionPlans(env, archiveDate) {
   return (rows.results || []).map(dbActionPlanToApi);
 }
 
+function shiftDate(dateString, days) {
+  const date = new Date(`${dateString}T00:00:00Z`);
+  date.setUTCDate(date.getUTCDate() + days);
+  return date.toISOString().slice(0, 10);
+}
+
+function computePercentChange(currentPrice, baselinePrice) {
+  const current = Number(currentPrice);
+  const baseline = Number(baselinePrice);
+  if (!Number.isFinite(current) || !Number.isFinite(baseline) || baseline === 0) return null;
+  return ((current - baseline) / baseline) * 100;
+}
+
+async function getLatestPricePointMap(env, symbols, targetDate) {
+  if (!symbols.length) return new Map();
+  const rows = [];
+  const chunkSize = 80;
+  for (let index = 0; index < symbols.length; index += chunkSize) {
+    const chunk = symbols.slice(index, index + chunkSize);
+    const placeholders = chunk.map(() => "?").join(", ");
+    const result = await env.DB.prepare(
+      `SELECT p.symbol, p.stock_name, p.yahoo_symbol, p.current_price, p.change_percent, p.k_date
+       FROM stock_raw p
+       JOIN (
+         SELECT symbol, MAX(k_date) AS latest_k_date
+         FROM stock_raw
+         WHERE symbol IN (${placeholders})
+           AND k_date <= ?
+           AND current_price IS NOT NULL
+         GROUP BY symbol
+       ) latest
+         ON latest.symbol = p.symbol
+        AND latest.latest_k_date = p.k_date
+       WHERE p.current_price IS NOT NULL`,
+    ).bind(...chunk, targetDate).all();
+    rows.push(...(result.results || []));
+  }
+  const points = new Map();
+  for (const row of rows) points.set(row.symbol, row);
+  return points;
+}
+
+function buildActionPlanSymbolMetrics(latest, weekBaseline, monthBaseline) {
+  if (!latest) {
+    return {
+      latestDate: null,
+      latestPrice: null,
+      dayChangePercent: null,
+      weekChangePercent: null,
+      monthChangePercent: null,
+    };
+  }
+  return {
+    latestDate: latest.k_date || null,
+    latestPrice: latest.current_price == null ? null : Number(latest.current_price),
+    dayChangePercent: latest.change_percent == null ? null : Number(latest.change_percent),
+    weekChangePercent: weekBaseline ? computePercentChange(latest.current_price, weekBaseline.current_price) : null,
+    monthChangePercent: monthBaseline ? computePercentChange(latest.current_price, monthBaseline.current_price) : null,
+  };
+}
+
+async function getActionPlanSymbolCatalog(env, archiveDate) {
+  const result = await env.DB.prepare(
+    `SELECT id, symbol, yahoo_symbol, display_name, symbol_type, aliases, is_active, sort_order, created_at, updated_at
+     FROM tracked_symbols
+     WHERE is_active = 1
+     ORDER BY symbol_type, sort_order, id`,
+  ).all();
+  const symbolRows = result.results || [];
+  const symbols = symbolRows.map((row) => row.symbol).filter(Boolean);
+  const [latestPoints, weekBaselines, monthBaselines] = await Promise.all([
+    getLatestPricePointMap(env, symbols, archiveDate),
+    getLatestPricePointMap(env, symbols, shiftDate(archiveDate, -7)),
+    getLatestPricePointMap(env, symbols, shiftDate(archiveDate, -30)),
+  ]);
+  const items = [];
+  for (const row of symbolRows) {
+    const symbolItem = enrichSymbolItem(row);
+    items.push({
+      id: symbolItem.id,
+      symbol: symbolItem.symbol,
+      yahooSymbol: symbolItem.yahoo_symbol,
+      displayName: symbolItem.display_name,
+      symbolType: symbolItem.symbol_type,
+      sortOrder: symbolItem.sort_order,
+      metrics: buildActionPlanSymbolMetrics(
+        latestPoints.get(symbolItem.symbol),
+        weekBaselines.get(symbolItem.symbol),
+        monthBaselines.get(symbolItem.symbol),
+      ),
+    });
+  }
+  return { items, total: items.length, archiveDate };
+}
+
+async function assertActionPlanSymbolsManaged(env, actionPlans) {
+  const symbols = [...new Set((actionPlans || []).map((plan) => plan.symbol).filter(Boolean))];
+  if (!symbols.length) return;
+  const placeholders = symbols.map(() => "?").join(", ");
+  const result = await env.DB.prepare(
+    `SELECT symbol FROM tracked_symbols WHERE symbol IN (${placeholders})`,
+  ).bind(...symbols).all();
+  const existing = new Set((result.results || []).map((row) => row.symbol));
+  const missing = symbols.filter((symbol) => !existing.has(symbol));
+  if (missing.length) {
+    const error = new Error(`操作计划标的未在标的管理中：${missing.join(", ")}`);
+    error.statusCode = 400;
+    throw error;
+  }
+}
+
 function normalizeActionPlansForSave(actionPlans) {
   const normalized = [];
   const seen = new Set();
@@ -1290,6 +1406,9 @@ async function saveReviewDraft(env, archiveDate, body) {
   const normalizedActionPlans = hasStructuredActionPlans
     ? normalizeActionPlansForSave(body.actionPlans)
     : [];
+  if (hasStructuredActionPlans) {
+    await assertActionPlanSymbolsManaged(env, normalizedActionPlans);
+  }
 
   await env.DB.prepare(
     `INSERT INTO daily_review_archive (
@@ -1756,35 +1875,88 @@ async function updateSymbol(env, id, body) {
   ).bind(id).first();
   if (!existing) { const e = new Error("Symbol not found"); e.statusCode = 404; throw e; }
 
+  const oldSymbol = String(existing.symbol || "").trim().toUpperCase();
   const symbol = (body.symbol || existing.symbol).trim().toUpperCase();
+  if (symbol !== oldSymbol) {
+    const duplicate = await env.DB.prepare(
+      `SELECT id FROM tracked_symbols WHERE symbol = ? AND id != ? LIMIT 1`,
+    ).bind(symbol, id).first();
+    if (duplicate) {
+      const e = new Error("symbol already exists");
+      e.statusCode = 409;
+      throw e;
+    }
+  }
   const displayName = (body.display_name || existing.display_name).trim();
   const aliases = body.aliases != null
     ? normalizeAliases(body.aliases, symbol, displayName)
     : JSON.parse(existing.aliases || "[]");
+  if (oldSymbol && oldSymbol !== symbol && !aliases.includes(oldSymbol)) aliases.push(oldSymbol);
+  if (symbol && !aliases.includes(symbol)) aliases.unshift(symbol);
 
-  await env.DB.prepare(
+  const statements = [
+    env.DB.prepare(
     `UPDATE tracked_symbols SET
        symbol = ?, yahoo_symbol = ?, display_name = ?, symbol_type = ?,
        aliases = ?, is_active = ?, sort_order = ?, updated_at = ?
      WHERE id = ?`,
-  ).bind(
-    symbol,
-    (body.yahoo_symbol != null ? body.yahoo_symbol : existing.yahoo_symbol) || null,
-    displayName,
-    body.symbol_type || existing.symbol_type,
-    JSON.stringify(aliases),
-    body.is_active != null ? Number(body.is_active) : existing.is_active,
-    body.sort_order != null ? Number(body.sort_order) : existing.sort_order,
-    isoNow(),
-    id,
-  ).run();
+    ).bind(
+      symbol,
+      (body.yahoo_symbol != null ? body.yahoo_symbol : existing.yahoo_symbol) || null,
+      displayName,
+      body.symbol_type || existing.symbol_type,
+      JSON.stringify(aliases),
+      body.is_active != null ? Number(body.is_active) : existing.is_active,
+      body.sort_order != null ? Number(body.sort_order) : existing.sort_order,
+      isoNow(),
+      id,
+    ),
+  ];
+  if (oldSymbol && oldSymbol !== symbol) {
+    statements.push(
+      env.DB.prepare(`UPDATE stock_raw SET symbol = ? WHERE symbol = ?`).bind(symbol, oldSymbol),
+      env.DB.prepare(`UPDATE daily_review_action_plans SET symbol = ?, updated_at = ? WHERE symbol = ?`).bind(symbol, isoNow(), oldSymbol),
+    );
+    const relatedUpdates = await buildRelatedSymbolRenameUpdates(env, oldSymbol, symbol);
+    statements.push(...relatedUpdates);
+  }
+  await env.DB.batch(statements);
   const updated = await env.DB.prepare(`SELECT * FROM tracked_symbols WHERE id = ? LIMIT 1`).bind(id).first();
   return { ok: true, item: enrichSymbolItem(updated) };
 }
 
-async function deleteSymbol(env, id) {
+async function buildRelatedSymbolRenameUpdates(env, oldSymbol, newSymbol) {
+  const updates = [];
+  const tables = ["news_raw_data", "daily_review_archive_news"];
+  for (const table of tables) {
+    const { results } = await env.DB.prepare(
+      `SELECT id, related_symbols FROM ${table} WHERE related_symbols LIKE ?`,
+    ).bind(`%${oldSymbol}%`).all();
+    for (const row of results || []) {
+      const symbols = parseStoredSymbols(row.related_symbols);
+      if (!symbols || !symbols.includes(oldSymbol)) continue;
+      const renamed = symbols.map((item) => (item === oldSymbol ? newSymbol : item));
+      const unique = [...new Set(renamed)];
+      updates.push(
+        env.DB.prepare(`UPDATE ${table} SET related_symbols = ? WHERE id = ?`).bind(JSON.stringify(unique), row.id),
+      );
+    }
+  }
+  return updates;
+}
+
+async function deleteSymbol(env, id, hardDelete = false) {
   const existing = await env.DB.prepare(`SELECT * FROM tracked_symbols WHERE id = ? LIMIT 1`).bind(id).first();
   if (!existing) { const e = new Error("Symbol not found"); e.statusCode = 404; throw e; }
+  if (hardDelete) {
+    if (Number(existing.is_active) === 1) {
+      const e = new Error("Only hidden symbols can be permanently deleted");
+      e.statusCode = 400;
+      throw e;
+    }
+    await env.DB.prepare(`DELETE FROM tracked_symbols WHERE id = ?`).bind(id).run();
+    return { ok: true, deleted: true, symbol: existing.symbol };
+  }
   // 软删除
   await env.DB.prepare(`UPDATE tracked_symbols SET is_active = 0, updated_at = ? WHERE id = ?`).bind(isoNow(), id).run();
   const updated = await env.DB.prepare(`SELECT * FROM tracked_symbols WHERE id = ? LIMIT 1`).bind(id).first();

@@ -51,18 +51,6 @@ body::before {
   mask-image: linear-gradient(180deg, rgba(0, 0, 0, 0.16), transparent 72%);
 }
 
-body::after {
-  content: "";
-  position: fixed;
-  inset: auto auto 5% 5%;
-  width: 240px;
-  height: 240px;
-  border-radius: 50%;
-  pointer-events: none;
-  background: radial-gradient(circle, rgba(255, 255, 255, 0.54), rgba(255, 255, 255, 0));
-  filter: blur(10px);
-}
-
 .shell {
   width: min(1400px, calc(100vw - 32px));
   margin: 0 auto;
@@ -2146,6 +2134,10 @@ textarea[name="reviewerNewsNotes"] {
   gap: 12px;
 }
 
+.action-plan-detail-head > div:first-child {
+  min-width: 190px;
+}
+
 .action-plan-detail-head h3 {
   margin: 0;
   font-size: 1.15rem;
@@ -2260,15 +2252,15 @@ textarea[name="reviewerNewsNotes"] {
   justify-self: start;
 }
 
-.action-plan-editor label.compact-symbol input,
+.action-plan-editor label.compact-symbol select,
 .action-plan-editor label.compact-action select,
 .action-plan-editor label.compact-position select,
 .action-plan-editor label.compact-market-type select {
   flex: 0 0 auto;
 }
 
-.action-plan-editor label.compact-symbol input {
-  width: 82px;
+.action-plan-editor label.compact-symbol select {
+  width: 190px;
 }
 
 .action-plan-editor label.compact-action select {
@@ -2294,6 +2286,51 @@ textarea[name="reviewerNewsNotes"] {
   padding: 9px 10px;
   outline: none;
   font-weight: 500;
+}
+
+.action-plan-metrics {
+  display: grid;
+  grid-template-columns: 1.25fr repeat(3, minmax(76px, 1fr));
+  gap: 8px;
+  width: min(620px, 58%);
+  margin-left: auto;
+}
+
+.action-plan-metric {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+  padding: 8px 11px;
+  border-left: 1px solid rgba(15, 23, 42, 0.1);
+  background: transparent;
+}
+
+.action-plan-metric.metric-price {
+  border-left: 0;
+  border-radius: 14px;
+  background: rgba(239, 246, 255, 0.84);
+  padding-left: 13px;
+}
+
+.action-plan-metric span {
+  color: #64748b;
+  font-size: 0.72rem;
+  font-weight: 800;
+}
+
+.action-plan-metric strong {
+  color: var(--text);
+  font-size: 0.95rem;
+  font-weight: 900;
+  line-height: 1.15;
+}
+
+.action-plan-metric.metric-up strong {
+  color: #047857;
+}
+
+.action-plan-metric.metric-down strong {
+  color: #b42318;
 }
 
 .action-plan-editor textarea {
@@ -3139,6 +3176,33 @@ textarea[name="reviewerNewsNotes"] {
     border-radius: 18px;
   }
 
+  .action-plan-top-row,
+  .action-plan-metrics {
+    grid-template-columns: 1fr;
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .action-plan-metrics {
+    width: 100%;
+    margin-left: 0;
+  }
+
+  .action-plan-metric,
+  .action-plan-metric.metric-price {
+    border-left: 0;
+    border: 1px solid rgba(15, 23, 42, 0.08);
+    border-radius: 12px;
+    background: rgba(248, 250, 252, 0.88);
+  }
+
+  .action-plan-editor label.compact-symbol select,
+  .action-plan-editor label.compact-action select,
+  .action-plan-editor label.compact-position select,
+  .action-plan-editor label.compact-market-type select {
+    width: 100%;
+  }
+
   .action-plan-detail-modal {
     padding: 12px;
   }
@@ -3344,7 +3408,8 @@ details[open] > .price-section-head::before {
 }
 
 /* Edit button */
-.symbol-edit-btn {
+.symbol-edit-btn,
+.symbol-hard-delete-btn {
   display: inline-flex;
   align-items: center;
   cursor: pointer;
@@ -3364,6 +3429,17 @@ details[open] > .price-section-head::before {
 .symbol-edit-btn:hover {
   background: rgba(37, 99, 235, 0.12);
   border-color: rgba(37, 99, 235, 0.36);
+}
+
+.symbol-hard-delete-btn {
+  color: #dc2626;
+  background: rgba(220, 38, 38, 0.06);
+  border-color: rgba(220, 38, 38, 0.2);
+}
+
+.symbol-hard-delete-btn:hover {
+  background: rgba(220, 38, 38, 0.12);
+  border-color: rgba(220, 38, 38, 0.36);
 }
 
 .symbols-content {
@@ -3697,7 +3773,7 @@ details[open] > .price-section-head::before {
 }
 
 .symbol-col-name {
-  width: 130px;
+  width: 220px;
   color: var(--text);
 }
 
@@ -3705,7 +3781,11 @@ details[open] > .price-section-head::before {
   display: inline-flex;
   align-items: center;
   gap: 8px;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
+}
+
+.symbol-name-stack strong {
+  white-space: nowrap;
 }
 
 .symbol-col-codes {
@@ -3722,7 +3802,7 @@ details[open] > .price-section-head::before {
 }
 
 .symbol-col-actions {
-  width: 140px;
+  width: 190px;
   text-align: right;
   padding-right: 10px !important;
   white-space: nowrap;

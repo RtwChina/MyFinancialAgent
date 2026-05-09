@@ -1,4 +1,5 @@
 import { test, expect } from '@playwright/test';
+import { execFileSync } from 'node:child_process';
 
 const BASE_URL = 'http://127.0.0.1:8787';
 const REVIEW_DATE = '2026-03-13';
@@ -6,6 +7,33 @@ const SORT_REVIEW_DATE = '2026-03-12';
 const ZERO_REVIEW_DATE = '2026-03-14';
 const CARRY_SOURCE_DATE = '2026-03-09';
 const CARRY_TARGET_DATE = '2026-03-10';
+
+function d1(command) {
+  return execFileSync(
+    'npx',
+    ['wrangler', 'd1', 'execute', 'my-financial-agent', '--local', '--command', command],
+    { cwd: `${process.cwd()}/cloudflare`, encoding: 'utf8' },
+  );
+}
+
+function seedTrackedSymbol({ symbol, yahooSymbol = symbol, displayName, symbolType = 'stock', active = 1, sortOrder = 1000 }) {
+  d1(`INSERT INTO tracked_symbols (symbol, yahoo_symbol, display_name, symbol_type, aliases, is_active, sort_order, created_at, updated_at)
+      VALUES ('${symbol}', '${yahooSymbol}', '${displayName}', '${symbolType}', '["${symbol}","${displayName}"]', ${active}, ${sortOrder}, datetime('now'), datetime('now'))
+      ON CONFLICT(symbol) DO UPDATE SET
+        yahoo_symbol=excluded.yahoo_symbol,
+        display_name=excluded.display_name,
+        symbol_type=excluded.symbol_type,
+        aliases=excluded.aliases,
+        is_active=excluded.is_active,
+        sort_order=excluded.sort_order,
+      updated_at=datetime('now');`);
+}
+
+function seedPlanSymbols(symbols) {
+  symbols.forEach((symbol, index) => {
+    seedTrackedSymbol({ symbol, displayName: symbol, sortOrder: 5000 + index });
+  });
+}
 
 test('review can be completed, reopened, edited, and saved again', async ({ page, request }) => {
   await request.post(`${BASE_URL}/api/reviews/${REVIEW_DATE}/initialize`);
@@ -32,7 +60,7 @@ test('review can be completed, reopened, edited, and saved again', async ({ page
     await page.locator('#actionPlanRowsUs tr').first().click();
   }
   await expect(page.locator('#actionPlanDetailModal')).toBeVisible();
-  await page.locator('#actionPlanSymbolInput').fill('MU');
+  await page.locator('#actionPlanSymbolSelect').selectOption('MU');
   await page.locator('#actionPlanActionSelect').selectOption('持仓观察');
   await page.locator('#actionPlanPositionSelect').selectOption('0-5%');
   await page.locator('#actionPlanEntryInput').fill('本地冒烟：回踩支撑区再观察。');
@@ -83,6 +111,7 @@ test('review can be completed, reopened, edited, and saved again', async ({ page
 });
 
 test('action plans can be auto sorted by current position descending', async ({ page, request }) => {
+  seedPlanSymbols(['LOW', 'HIGH', 'MID', 'SMALL']);
   await request.post(`${BASE_URL}/api/reviews/${SORT_REVIEW_DATE}`, {
     data: {
       reviewStatus: 'draft',
@@ -126,6 +155,7 @@ test('action plans can be auto sorted by current position descending', async ({ 
 });
 
 test('opening and closed action plans default current position to zero', async ({ page, request }) => {
+  seedPlanSymbols(['BASE']);
   await request.post(`${BASE_URL}/api/reviews/${ZERO_REVIEW_DATE}`, {
     data: {
       reviewStatus: 'draft',
@@ -169,6 +199,7 @@ test('opening and closed action plans default current position to zero', async (
 });
 
 test('new review carries forward previous structured action plans without legacy asset text', async ({ request }) => {
+  seedPlanSymbols(['CARRY']);
   await request.post(`${BASE_URL}/api/reviews/${CARRY_SOURCE_DATE}`, {
     data: {
       reviewStatus: 'reviewed',
@@ -210,6 +241,7 @@ test('new review carries forward previous structured action plans without legacy
 
 test('daily record button inserts the review date into the entry plan field', async ({ page, request }) => {
   const dailyRecordDate = '2026-05-08';
+  seedPlanSymbols(['DATEBTN']);
   await request.post(`${BASE_URL}/api/reviews/${dailyRecordDate}`, {
     data: {
       reviewStatus: 'draft',
@@ -250,6 +282,7 @@ test('daily record button inserts the review date into the entry plan field', as
 
 test('action plan details open in a modal instead of inline under the table', async ({ page, request }) => {
   const detailModalDate = '2026-05-09';
+  seedPlanSymbols(['MODAL']);
   await request.post(`${BASE_URL}/api/reviews/${detailModalDate}`, {
     data: {
       reviewStatus: 'draft',
@@ -291,9 +324,140 @@ test('action plan details open in a modal instead of inline under the table', as
   }));
 });
 
+test('action plans choose managed symbols and persist system codes', async ({ page, request }) => {
+  const managedDate = '2026-02-14';
+  seedTrackedSymbol({ symbol: 'MSFT', displayName: '微软', sortOrder: 10 });
+  seedTrackedSymbol({ symbol: '159206.SZ', displayName: '卫星ETF', sortOrder: 11 });
+  seedTrackedSymbol({ symbol: 'HIDDENX', displayName: '隐藏测试', active: 0, sortOrder: 12 });
+  d1(`DELETE FROM daily_review_action_plans WHERE archive_date='${managedDate}';
+      DELETE FROM daily_review_archive WHERE archive_date='${managedDate}';`);
+
+  await request.post(`${BASE_URL}/api/reviews/${managedDate}`, {
+    data: {
+      reviewStatus: 'draft',
+      reviewerNewsNotes: '管理标的冒烟：新闻总结。',
+      marketSentiment: '管理标的冒烟：大盘盘点。',
+      sectorRotation: '管理标的冒烟：板块轮动。',
+      tradingSummary: '',
+      actionPlans: [],
+    },
+  });
+
+  await page.goto(BASE_URL, { waitUntil: 'networkidle' });
+  const row = page.locator('#reviewsList tr', { hasText: managedDate }).first();
+  await expect(row).toBeVisible();
+  await row.getByRole('button', { name: /开始复盘|继续复盘|进入复盘|查看/ }).click();
+  await expect(page.locator('#reviewDrawer')).toBeVisible();
+  await page.getByText('4. 操作计划', { exact: true }).click();
+
+  await page.locator('#addActionPlanUsBtn').click();
+  await expect(page.locator('#actionPlanDetailModal')).toBeVisible();
+  await expect(page.locator('#actionPlanSymbolSelect')).toBeVisible();
+  await expect(page.locator('#actionPlanSymbolSelect option', { hasText: '隐藏测试' })).toHaveCount(0);
+  await page.locator('#actionPlanSymbolSelect').selectOption('MSFT');
+  await expect(page.locator('#actionPlanDetailTitle')).toHaveText('MSFT');
+  await page.locator('#saveActionPlanDetailBtn').click();
+
+  await page.locator('#addActionPlanCnBtn').click();
+  await expect(page.locator('#actionPlanDetailModal')).toBeVisible();
+  await page.locator('#actionPlanSymbolSelect').selectOption('159206.SZ');
+  await expect(page.locator('#actionPlanMarketTypeSelect')).toHaveValue('大A');
+  await page.locator('#saveActionPlanDetailBtn').click();
+
+  await page.locator('#saveDraftBtn').click();
+  const bootstrap = await request.get(`${BASE_URL}/api/reviews/${managedDate}/bootstrap`);
+  const bootstrapJson = await bootstrap.json();
+  expect(bootstrapJson.actionPlans).toEqual(expect.arrayContaining([
+    expect.objectContaining({ symbol: 'MSFT', marketType: '美股' }),
+    expect.objectContaining({ symbol: '159206.SZ', marketType: '大A' }),
+  ]));
+});
+
+test('action plan save rejects symbols outside symbol management', async ({ request }) => {
+  const unmanagedDate = '2026-02-15';
+  d1(`DELETE FROM tracked_symbols WHERE symbol='FAKE123';
+      DELETE FROM daily_review_action_plans WHERE archive_date='${unmanagedDate}';
+      DELETE FROM daily_review_archive WHERE archive_date='${unmanagedDate}';`);
+
+  const response = await request.post(`${BASE_URL}/api/reviews/${unmanagedDate}`, {
+    data: {
+      reviewStatus: 'draft',
+      reviewerNewsNotes: '非管理标的冒烟：新闻总结。',
+      marketSentiment: '非管理标的冒烟：大盘盘点。',
+      sectorRotation: '非管理标的冒烟：板块轮动。',
+      tradingSummary: '',
+      actionPlans: [
+        { symbol: 'FAKE123', actionType: '持仓观察', currentPosition: '0-5%', marketType: '美股' },
+      ],
+    },
+  });
+
+  expect(response.ok()).toBeFalsy();
+  const output = d1(`SELECT COUNT(*) AS cnt FROM daily_review_action_plans WHERE archive_date='${unmanagedDate}' AND symbol='FAKE123';`);
+  expect(output).toContain('"cnt": 0');
+});
+
+test('action plan detail modal shows price metrics and missing fallbacks', async ({ page, request }) => {
+  const metricsDate = '2026-02-16';
+  seedTrackedSymbol({ symbol: 'MSFT', displayName: '微软', sortOrder: 10 });
+  seedTrackedSymbol({ symbol: 'NEWPX', displayName: '新标的无价格', sortOrder: 11 });
+  d1(`DELETE FROM stock_raw WHERE symbol IN ('MSFT','NEWPX');
+      DELETE FROM daily_review_action_plans WHERE archive_date='${metricsDate}';
+      DELETE FROM daily_review_archive WHERE archive_date='${metricsDate}';
+      INSERT INTO stock_raw (k_date, stock_name, symbol, yahoo_symbol, current_price, change_percent, volume, captured_at)
+        VALUES ('2026-02-16', '微软', 'MSFT', 'MSFT', 110, 2.5, 100, datetime('now'));
+      INSERT INTO stock_raw (k_date, stock_name, symbol, yahoo_symbol, current_price, change_percent, volume, captured_at)
+        VALUES ('2026-02-09', '微软', 'MSFT', 'MSFT', 100, 1.0, 100, datetime('now'));
+      INSERT INTO stock_raw (k_date, stock_name, symbol, yahoo_symbol, current_price, change_percent, volume, captured_at)
+        VALUES ('2026-01-16', '微软', 'MSFT', 'MSFT', 80, -1.0, 100, datetime('now'));`);
+
+  await request.post(`${BASE_URL}/api/reviews/${metricsDate}`, {
+    data: {
+      reviewStatus: 'draft',
+      reviewerNewsNotes: '价格指标冒烟：新闻总结。',
+      marketSentiment: '价格指标冒烟：大盘盘点。',
+      sectorRotation: '价格指标冒烟：板块轮动。',
+      tradingSummary: '',
+      actionPlans: [
+        { symbol: 'MSFT', actionType: '持仓观察', currentPosition: '0-5%', marketType: '美股' },
+        { symbol: 'NEWPX', actionType: '准备开仓', currentPosition: '0%', marketType: '美股' },
+      ],
+    },
+  });
+
+  await page.goto(BASE_URL, { waitUntil: 'networkidle' });
+  const row = page.locator('#reviewsList tr', { hasText: metricsDate }).first();
+  await expect(row).toBeVisible();
+  await row.getByRole('button', { name: /开始复盘|继续复盘|进入复盘|查看/ }).click();
+  await expect(page.locator('#reviewDrawer')).toBeVisible();
+  await page.getByText('4. 操作计划', { exact: true }).click();
+
+  await page.locator('#actionPlanRowsUs tr', { hasText: 'MSFT' }).click();
+  await expect(page.locator('#actionPlanMetrics')).toBeVisible();
+  await expect(page.locator('[data-metric="latest-price"]')).toContainText('110.00');
+  await expect(page.locator('[data-metric="day-change"]')).toContainText('+2.50%');
+  await expect(page.locator('[data-metric="week-change"]')).toContainText('+10.00%');
+  await expect(page.locator('[data-metric="month-change"]')).toContainText('+37.50%');
+  await page.locator('#cancelActionPlanDetailBtn').click();
+
+  await page.locator('#actionPlanRowsUs tr', { hasText: 'NEWPX' }).click();
+  await expect(page.locator('#actionPlanMetrics')).toBeVisible();
+  await expect(page.locator('#actionPlanMetrics')).toContainText('暂无');
+  await page.locator('#actionPlanEntryInput').fill('价格缺失也可以编辑。');
+  await page.locator('#saveActionPlanDetailBtn').click();
+  await page.locator('#saveDraftBtn').click();
+
+  const bootstrap = await request.get(`${BASE_URL}/api/reviews/${metricsDate}/bootstrap`);
+  const bootstrapJson = await bootstrap.json();
+  expect(bootstrapJson.actionPlans).toEqual(expect.arrayContaining([
+    expect.objectContaining({ symbol: 'NEWPX', entryPlan: '价格缺失也可以编辑。' }),
+  ]));
+});
+
 test('long action plan table text shows a full hover tooltip', async ({ page, request }) => {
   const tooltipDate = '2026-05-10';
   const longRecord = '5 月 10 日：这是一段很长的每日记录，用来验证鼠标悬停时可以显示完整内容，而不会把表格撑高。';
+  seedPlanSymbols(['TIP']);
   await request.post(`${BASE_URL}/api/reviews/${tooltipDate}`, {
     data: {
       reviewStatus: 'draft',
@@ -329,6 +493,7 @@ test('long action plan table text shows a full hover tooltip', async ({ page, re
 
 test('action plan list combines symbol and action into one colored status column', async ({ page, request }) => {
   const statusDate = '2026-05-11';
+  seedPlanSymbols(['HOLD', 'OPEN', 'DONE']);
   await request.post(`${BASE_URL}/api/reviews/${statusDate}`, {
     data: {
       reviewStatus: 'draft',
@@ -367,6 +532,7 @@ test('action plan list combines symbol and action into one colored status column
 
 test('review section titles are emphasized in red', async ({ page, request }) => {
   const titleStyleDate = '2026-05-13';
+  seedPlanSymbols(['STYLE']);
   await request.post(`${BASE_URL}/api/reviews/${titleStyleDate}`, {
     data: {
       reviewStatus: 'draft',

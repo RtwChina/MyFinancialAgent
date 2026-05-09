@@ -4,7 +4,7 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>My Financial Agent</title>
-    <link rel="stylesheet" href="/styles.css?v=20260509-groups-18" />
+    <link rel="stylesheet" href="/styles.css?v=20260509-groups-26" />
   </head>
   <body>
     <div class="shell">
@@ -593,13 +593,20 @@
             <h3 id="actionPlanDetailTitle">标的详情</h3>
             <p id="actionPlanDetailSubtitle" class="muted">查看与编辑当前标的的操作计划。</p>
           </div>
+          <div id="actionPlanMetrics" class="action-plan-metrics">
+            <div class="action-plan-metric metric-price" data-metric="latest-price"><span>当前最近价格</span><strong>暂无</strong></div>
+            <div class="action-plan-metric" data-metric="day-change"><span>复盘日</span><strong>暂无</strong></div>
+            <div class="action-plan-metric" data-metric="week-change"><span>近一周</span><strong>暂无</strong></div>
+            <div class="action-plan-metric" data-metric="month-change"><span>近一月</span><strong>暂无</strong></div>
+          </div>
           <button id="closeActionPlanDetailBtn" type="button" class="ghost compact-button">关闭</button>
         </div>
         <div id="actionPlanEditor" class="action-plan-editor hidden">
           <div class="action-plan-top-row">
             <label class="compact compact-symbol">
               标的
-              <input id="actionPlanSymbolInput" type="text" placeholder="MU">
+              <select id="actionPlanSymbolSelect"></select>
+              <input id="actionPlanSymbolInput" type="hidden">
             </label>
             <label class="compact compact-action">
               动作
@@ -667,6 +674,6 @@
 
     <div id="actionPlanCellTooltip" class="action-plan-cell-tooltip hidden" role="tooltip"></div>
 
-    <script type="module" src="/app.js?v=20260509-groups-18"></script>
+    <script type="module" src="/app.js?v=20260509-groups-26"></script>
   </body>
 </html>

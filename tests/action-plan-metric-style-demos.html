@@ -1,0 +1,391 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>操作计划指标样式 Demo</title>
+    <style>
+      :root {
+        --text: #101827;
+        --muted: #64748b;
+        --line: rgba(15, 23, 42, 0.11);
+        --soft: #f8fafc;
+        --soft-blue: #eef5ff;
+        --blue: #2563eb;
+        --green: #059669;
+        --red: #b42318;
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      body {
+        margin: 0;
+        padding: 28px;
+        color: var(--text);
+        background: linear-gradient(180deg, #f7f9fd, #eef3f9);
+        font-family: "SF Pro Display", "SF Pro Text", -apple-system, BlinkMacSystemFont, "PingFang SC", sans-serif;
+      }
+
+      main {
+        display: grid;
+        gap: 28px;
+        max-width: 1500px;
+        margin: 0 auto;
+      }
+
+      .demo-title {
+        display: flex;
+        align-items: end;
+        justify-content: space-between;
+        gap: 24px;
+      }
+
+      h1 {
+        margin: 0;
+        font-size: 28px;
+      }
+
+      .hint {
+        margin: 6px 0 0;
+        color: var(--muted);
+        font-size: 15px;
+      }
+
+      .demo-card {
+        border: 1px solid rgba(148, 163, 184, 0.4);
+        border-radius: 24px;
+        background: rgba(255, 255, 255, 0.88);
+        box-shadow: 0 22px 60px rgba(15, 23, 42, 0.08);
+        padding: 24px;
+      }
+
+      .demo-head {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 20px;
+        margin-bottom: 18px;
+      }
+
+      .demo-name {
+        display: grid;
+        gap: 5px;
+      }
+
+      .demo-name strong {
+        font-size: 22px;
+      }
+
+      .demo-name span {
+        color: var(--muted);
+        font-weight: 700;
+      }
+
+      .demo-tag {
+        display: inline-flex;
+        align-items: center;
+        height: 30px;
+        padding: 0 12px;
+        border-radius: 999px;
+        background: #eef2ff;
+        color: #1d4ed8;
+        font-size: 13px;
+        font-weight: 800;
+      }
+
+      .form-row {
+        display: flex;
+        align-items: center;
+        gap: 14px;
+        padding: 16px;
+        border: 1px solid rgba(37, 99, 235, 0.18);
+        border-radius: 18px;
+      }
+
+      .field {
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+        color: var(--muted);
+        font-size: 14px;
+        font-weight: 800;
+      }
+
+      .select-like {
+        min-width: 130px;
+        padding: 10px 14px;
+        border: 1px solid var(--line);
+        border-radius: 12px;
+        background: white;
+        color: #334155;
+        font-size: 15px;
+        font-weight: 700;
+      }
+
+      .notes {
+        margin-top: 18px;
+        display: grid;
+        gap: 10px;
+      }
+
+      .note-line {
+        height: 56px;
+        border: 1px solid var(--line);
+        border-radius: 16px;
+        background: white;
+      }
+
+      .metric-grid {
+        display: grid;
+        gap: 10px;
+      }
+
+      .metric {
+        min-width: 0;
+      }
+
+      .metric span {
+        display: block;
+        color: var(--muted);
+        font-size: 13px;
+        font-weight: 800;
+      }
+
+      .metric strong {
+        display: block;
+        margin-top: 4px;
+        color: var(--text);
+        font-size: 21px;
+        font-weight: 950;
+      }
+
+      .up strong { color: var(--green); }
+      .down strong { color: var(--red); }
+
+      /* A: current, calmer */
+      .variant-a .metric-grid {
+        grid-template-columns: repeat(4, minmax(0, 1fr));
+        margin-top: 12px;
+      }
+
+      .variant-a .metric {
+        padding: 12px 14px;
+        border: 1px solid rgba(15, 23, 42, 0.08);
+        border-radius: 14px;
+        background: #fbfdff;
+      }
+
+      /* B: header right summary */
+      .variant-b .demo-head {
+        align-items: start;
+      }
+
+      .variant-b .metric-grid {
+        width: min(720px, 58%);
+        grid-template-columns: 1.2fr repeat(3, 1fr);
+        gap: 8px;
+      }
+
+      .variant-b .metric {
+        padding: 9px 12px;
+        border-left: 1px solid rgba(15, 23, 42, 0.1);
+      }
+
+      .variant-b .metric:first-child {
+        border-left: 0;
+        border-radius: 14px;
+        background: var(--soft-blue);
+        padding-left: 14px;
+      }
+
+      .variant-b .metric strong {
+        font-size: 18px;
+      }
+
+      .variant-b .form-row {
+        margin-top: 6px;
+      }
+
+      /* C: color logic emphasized */
+      .variant-c .metric-grid {
+        grid-template-columns: 1.15fr repeat(3, 1fr);
+        margin-top: 12px;
+      }
+
+      .variant-c .metric {
+        padding: 13px 15px;
+        border: 1px solid rgba(15, 23, 42, 0.08);
+        border-radius: 16px;
+        background: white;
+      }
+
+      .variant-c .metric.price {
+        background: #f8fafc;
+      }
+
+      .variant-c .metric.up {
+        background: #ecfdf5;
+        border-color: rgba(5, 150, 105, 0.18);
+      }
+
+      .variant-c .metric.down {
+        background: #fff1f2;
+        border-color: rgba(180, 35, 24, 0.18);
+      }
+
+      /* D: compact toolbar line */
+      .variant-d .metric-strip {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        margin: 6px 0 12px;
+        padding: 8px;
+        border: 1px solid rgba(15, 23, 42, 0.08);
+        border-radius: 999px;
+        background: #f8fafc;
+      }
+
+      .variant-d .metric {
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+        min-height: 34px;
+        padding: 0 12px;
+        border-radius: 999px;
+        background: white;
+        border: 1px solid rgba(15, 23, 42, 0.07);
+      }
+
+      .variant-d .metric span,
+      .variant-d .metric strong {
+        display: inline;
+        margin: 0;
+        font-size: 13px;
+      }
+
+      .variant-d .metric strong {
+        font-size: 15px;
+      }
+
+      @media (max-width: 900px) {
+        body { padding: 16px; }
+        .demo-head,
+        .form-row {
+          align-items: stretch;
+          flex-direction: column;
+        }
+        .variant-a .metric-grid,
+        .variant-b .metric-grid,
+        .variant-c .metric-grid {
+          width: 100%;
+          grid-template-columns: repeat(2, minmax(0, 1fr));
+        }
+        .variant-d .metric-strip {
+          border-radius: 18px;
+          flex-wrap: wrap;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <section class="demo-title">
+        <div>
+          <h1>操作计划指标样式 Demo</h1>
+          <p class="hint">看“当前最近价格 / 复盘日涨幅 / 近一周 / 近一月”的位置和颜色逻辑。</p>
+        </div>
+        <span class="demo-tag">MSFT 示例数据</span>
+      </section>
+
+      <section class="demo-card variant-a">
+        <div class="demo-head">
+          <div class="demo-name">
+            <strong>A. 现在版优化：表单下方，卡片更轻</strong>
+            <span>优点：最接近当前页面，改动小，信息稳定。</span>
+          </div>
+        </div>
+        <div class="form-row">
+          <span class="field">标的 <b class="select-like">微软 / MSFT</b></span>
+          <span class="field">动作 <b class="select-like">持仓观察</b></span>
+          <span class="field">当前仓位 <b class="select-like">20%-25%</b></span>
+          <span class="field">市场 <b class="select-like">美股</b></span>
+        </div>
+        <div class="metric-grid">
+          <div class="metric price"><span>当前最近价格</span><strong>415.12</strong></div>
+          <div class="metric down"><span>复盘日涨幅</span><strong>-1.34%</strong></div>
+          <div class="metric up"><span>近一周涨幅</span><strong>+0.16%</strong></div>
+          <div class="metric up"><span>近一月涨幅</span><strong>+10.90%</strong></div>
+        </div>
+        <div class="notes"><div class="note-line"></div><div class="note-line"></div></div>
+      </section>
+
+      <section class="demo-card variant-b">
+        <div class="demo-head">
+          <div class="demo-name">
+            <strong>B. 推荐：指标放标题右侧</strong>
+            <span>优点：打开弹窗第一眼就看到价格上下文，下面表单更清爽。</span>
+          </div>
+          <div class="metric-grid">
+            <div class="metric price"><span>当前最近价格</span><strong>415.12</strong></div>
+            <div class="metric down"><span>复盘日</span><strong>-1.34%</strong></div>
+            <div class="metric up"><span>近一周</span><strong>+0.16%</strong></div>
+            <div class="metric up"><span>近一月</span><strong>+10.90%</strong></div>
+          </div>
+        </div>
+        <div class="form-row">
+          <span class="field">标的 <b class="select-like">微软 / MSFT</b></span>
+          <span class="field">动作 <b class="select-like">持仓观察</b></span>
+          <span class="field">当前仓位 <b class="select-like">20%-25%</b></span>
+          <span class="field">市场 <b class="select-like">美股</b></span>
+        </div>
+        <div class="notes"><div class="note-line"></div><div class="note-line"></div></div>
+      </section>
+
+      <section class="demo-card variant-c">
+        <div class="demo-head">
+          <div class="demo-name">
+            <strong>C. 涨跌色强调版</strong>
+            <span>优点：涨跌一眼能扫出来；缺点是指标区域更抢眼。</span>
+          </div>
+        </div>
+        <div class="form-row">
+          <span class="field">标的 <b class="select-like">微软 / MSFT</b></span>
+          <span class="field">动作 <b class="select-like">持仓观察</b></span>
+          <span class="field">当前仓位 <b class="select-like">20%-25%</b></span>
+          <span class="field">市场 <b class="select-like">美股</b></span>
+        </div>
+        <div class="metric-grid">
+          <div class="metric price"><span>当前最近价格</span><strong>415.12</strong></div>
+          <div class="metric down"><span>复盘日涨幅</span><strong>-1.34%</strong></div>
+          <div class="metric up"><span>近一周涨幅</span><strong>+0.16%</strong></div>
+          <div class="metric up"><span>近一月涨幅</span><strong>+10.90%</strong></div>
+        </div>
+        <div class="notes"><div class="note-line"></div><div class="note-line"></div></div>
+      </section>
+
+      <section class="demo-card variant-d">
+        <div class="demo-head">
+          <div class="demo-name">
+            <strong>D. 紧凑条形版</strong>
+            <span>优点：占高度最少；缺点是数值不如卡片醒目。</span>
+          </div>
+        </div>
+        <div class="metric-strip">
+          <div class="metric price"><span>当前</span><strong>415.12</strong></div>
+          <div class="metric down"><span>复盘日</span><strong>-1.34%</strong></div>
+          <div class="metric up"><span>一周</span><strong>+0.16%</strong></div>
+          <div class="metric up"><span>一月</span><strong>+10.90%</strong></div>
+        </div>
+        <div class="form-row">
+          <span class="field">标的 <b class="select-like">微软 / MSFT</b></span>
+          <span class="field">动作 <b class="select-like">持仓观察</b></span>
+          <span class="field">当前仓位 <b class="select-like">20%-25%</b></span>
+          <span class="field">市场 <b class="select-like">美股</b></span>
+        </div>
+        <div class="notes"><div class="note-line"></div><div class="note-line"></div></div>
+      </section>
+    </main>
+  </body>
+</html>

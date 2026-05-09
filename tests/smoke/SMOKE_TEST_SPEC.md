@@ -1,6 +1,6 @@
 # MyFinancialAgent 冒烟测试规范
 
-最后更新：2026-03-18（fix-review-date-price-alignment 新增 SMK-010/011）
+最后更新：2026-05-09（link-action-plans-to-tracked-symbols 新增 SMK-012/013）
 
 ## 1. 定位
 
@@ -57,6 +57,8 @@
 12. `SMK-009` 已复盘重新编辑并保存 UI 冒烟
 13. `SMK-010` 复盘候选日来自 ^GSPC（不受跨市场日期影响）
 14. `SMK-011` 跨市场日期混合时美股个股价格仍展示
+15. `SMK-012` 操作计划标的来自标的管理
+16. `SMK-013` 操作计划弹窗展示价格指标
 
 ## 5. 准备命令
 
@@ -260,6 +262,38 @@ npx wrangler d1 execute my-financial-agent-test \
   - `latestClosedDate` 不等于 `2099-12-31`
   - 来自 `GSPC` 的最大 `k_date`（即 seed 中的最近日期）
 - 阻断级别：阻断（主链路修复核心验证）
+
+### `SMK-012` 操作计划标的来自标的管理
+
+- 执行命令：
+
+```bash
+npx playwright test tests/smoke/review_edit_cycle.spec.js --grep "managed symbols" --reporter=line
+```
+
+- 当前校验点：
+  - 操作计划新增时出现标的选择器，而不是自由文本输入
+  - 选择器从启用的 `tracked_symbols` 加载显示名称和系统代码
+  - 美股/大A 分组由点击的添加按钮或详情弹窗市场字段决定
+  - 保存草稿后，`bootstrap.actionPlans[].symbol` 只包含系统代码
+  - 非 `tracked_symbols.symbol` 的操作计划保存请求返回错误
+- 阻断级别：阻断
+
+### `SMK-013` 操作计划弹窗展示价格指标
+
+- 执行命令：
+
+```bash
+npx playwright test tests/smoke/review_edit_cycle.spec.js --grep "price metrics" --reporter=line
+```
+
+- 当前校验点：
+  - 弹窗顶部展示当前最近价格、复盘日涨幅、近一周涨幅、近一月涨幅
+  - 当前最近价格取 `stock_raw.k_date <= archive_date` 的最近记录
+  - 近一周/近一月使用目标日期之前的最近可用基准价计算
+  - 缺少价格历史时指标显示 `暂无`
+  - 指标缺失不阻塞非价格字段保存
+- 阻断级别：阻断
 
 ### `SMK-011` 跨市场日期混合时美股个股价格仍展示
 

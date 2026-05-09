@@ -53,10 +53,10 @@ const state = {
   editMode: false,
   actionPlans: [],
   selectedActionPlanIndex: -1,
+  actionPlanSymbolCatalog: [],
   dailyInsight: null,
   homepageInsightSections: [],
   symbolsLoaded: false,
-  symbolResolveResult: null,
   keywordsLoaded: false,
   activeKeywordType: "macro",
   readmeLoaded: false,
@@ -254,6 +254,8 @@ const saveActionPlanDetailBtn = document.querySelector("#saveActionPlanDetailBtn
 const actionPlanCellTooltip = document.querySelector("#actionPlanCellTooltip");
 const actionPlanEditor = document.querySelector("#actionPlanEditor");
 const actionPlanSymbolInput = document.querySelector("#actionPlanSymbolInput");
+const actionPlanSymbolSelect = document.querySelector("#actionPlanSymbolSelect");
+const actionPlanMetrics = document.querySelector("#actionPlanMetrics");
 const actionPlanActionSelect = document.querySelector("#actionPlanActionSelect");
 const actionPlanPositionSelect = document.querySelector("#actionPlanPositionSelect");
 const actionPlanMarketTypeSelect = document.querySelector("#actionPlanMarketTypeSelect");
@@ -312,6 +314,12 @@ cancelActionPlanDetailBtn?.addEventListener("click", () => closeActionPlanDetail
 actionPlanDetailBackdrop?.addEventListener("click", () => closeActionPlanDetail());
 saveActionPlanDetailBtn?.addEventListener("click", () => saveActionPlanDetailAndClose());
 actionPlanActionSelect?.addEventListener("change", syncZeroPositionForAction);
+actionPlanMarketTypeSelect?.addEventListener("change", updateActionPlanDetailHeading);
+actionPlanSymbolSelect?.addEventListener("change", () => {
+  if (actionPlanSymbolInput) actionPlanSymbolInput.value = actionPlanSymbolSelect.value;
+  updateActionPlanDetailHeading();
+  renderActionPlanMetrics(actionPlanSymbolSelect.value);
+});
 
 [
   actionPlanEntryInput,
@@ -683,9 +691,13 @@ function renderReviewsPagination(data) {
 }
 
 async function openReviewDrawer(archiveDate) {
-  const data = await fetchJson(`/api/reviews/${archiveDate}/bootstrap`);
+  const [data, symbolCatalog] = await Promise.all([
+    fetchJson(`/api/reviews/${archiveDate}/bootstrap`),
+    fetchJson(`/api/reviews/${archiveDate}/action-plan-symbols`),
+  ]);
   state.activeDate = archiveDate;
   state.activeBootstrap = data;
+  state.actionPlanSymbolCatalog = symbolCatalog.items || [];
 
   const cycle = buildReviewCycle(archiveDate);
   archiveDateLabel.textContent = `${archiveDate} · 美股交易日`;
@@ -740,7 +752,7 @@ function closeDrawer() {
 
 async function saveReview() {
   if (!actionPlanDetailModal?.classList.contains("hidden")) {
-    syncSelectedActionPlanFromEditor();
+    if (syncSelectedActionPlanFromEditor() === false) return;
   }
   const payload = Object.fromEntries(new FormData(reviewForm).entries());
   payload.reviewStatus = state.activeBootstrap?.draft?.review_status || "initialized";
@@ -965,6 +977,17 @@ function autoResizeTextarea(el) {
   el.style.height = `${el.scrollHeight}px`;
 }
 
+function resizeActionPlanTextareas() {
+  [
+    actionPlanEntryInput,
+    actionPlanTakeProfitInput,
+    actionPlanStopLossInput,
+    actionPlanSupportLevelsInput,
+    actionPlanResistanceLevelsInput,
+    actionPlanThinkingInput,
+  ].filter(Boolean).forEach(autoResizeTextarea);
+}
+
 function normalizeActionPlans(items = []) {
   const seen = new Set();
   const normalized = [];
@@ -1014,6 +1037,15 @@ function renderActionPlanTextCell(value, className = "") {
   const shouldShowTooltip = text.length > 18 || text.includes("\n");
   const tooltipAttr = shouldShowTooltip ? ` data-full-text="${escapeAttribute(text)}"` : "";
   return `<div class="action-plan-cell-text ${className}"${tooltipAttr}>${escapeHtml(text)}</div>`;
+}
+
+function findActionPlanSymbol(symbol) {
+  const normalized = String(symbol || "").trim().toUpperCase();
+  return state.actionPlanSymbolCatalog.find((item) => item.symbol === normalized) || null;
+}
+
+function actionPlanSymbolLabel(symbol) {
+  return symbol || "未命名";
 }
 
 function actionPlanStatusClass(actionType) {
@@ -1069,7 +1101,7 @@ function renderActionPlanGroup(tbody, market) {
     <tr class="${index === selected ? "selected" : ""}" data-index="${index}">
       <td class="action-plan-target-cell">
         <div class="action-plan-target-stack">
-          <strong class="action-plan-symbol">${escapeHtml(plan.symbol || "未命名")}</strong>
+          <strong class="action-plan-symbol">${escapeHtml(actionPlanSymbolLabel(plan.symbol))}</strong>
           <span class="action-plan-status-pill ${actionPlanStatusClass(plan.actionType)}">${escapeHtml(plan.actionType)}</span>
         </div>
       </td>
@@ -1120,9 +1152,60 @@ function renderActionPlans() {
   applyActionPlanReadOnly(readOnly);
 }
 
+function renderActionPlanSymbolOptions(selectedSymbol = "") {
+  if (!actionPlanSymbolSelect) return;
+  const selected = String(selectedSymbol || "").trim().toUpperCase();
+  const existing = selected && !state.actionPlanSymbolCatalog.some((item) => item.symbol === selected)
+    ? [{ symbol: selected, displayName: selected, symbolType: "stock", unmanaged: true }]
+    : [];
+  const options = [...existing, ...state.actionPlanSymbolCatalog];
+  actionPlanSymbolSelect.innerHTML = options.map((item) => {
+    const label = item.displayName && item.displayName !== item.symbol
+      ? `${item.displayName} / ${item.symbol}`
+      : item.symbol;
+    const suffix = item.unmanaged ? "（未在标的管理）" : "";
+    return `<option value="${escapeHtml(item.symbol)}" ${item.symbol === selected ? "selected" : ""}>${escapeHtml(label + suffix)}</option>`;
+  }).join("");
+}
+
+function formatMetricNumber(value) {
+  if (value == null || value === "") return "暂无";
+  const number = Number(value);
+  return Number.isFinite(number) ? number.toFixed(2) : "暂无";
+}
+
+function formatMetricPercent(value) {
+  if (value == null || value === "") return "暂无";
+  const number = Number(value);
+  if (!Number.isFinite(number)) return "暂无";
+  return `${number > 0 ? "+" : ""}${number.toFixed(2)}%`;
+}
+
+function setMetricValue(metric, value) {
+  const card = actionPlanMetrics?.querySelector(`[data-metric="${metric}"]`);
+  const target = card?.querySelector("strong");
+  if (target) target.textContent = value;
+  if (card) {
+    card.classList.toggle("metric-up", String(value).startsWith("+"));
+    card.classList.toggle("metric-down", String(value).startsWith("-"));
+  }
+}
+
+function renderActionPlanMetrics(symbol) {
+  if (!actionPlanMetrics) return;
+  const metrics = findActionPlanSymbol(symbol)?.metrics || {};
+  setMetricValue("latest-price", formatMetricNumber(metrics.latestPrice));
+  setMetricValue("day-change", formatMetricPercent(metrics.dayChangePercent));
+  setMetricValue("week-change", formatMetricPercent(metrics.weekChangePercent));
+  setMetricValue("month-change", formatMetricPercent(metrics.monthChangePercent));
+}
+
 function fillActionPlanEditor(plan) {
   if (!plan) return;
   if (actionPlanSymbolInput) actionPlanSymbolInput.value = plan.symbol || "";
+  renderActionPlanSymbolOptions(plan.symbol || "");
+  if (actionPlanSymbolSelect) actionPlanSymbolSelect.value = plan.symbol || "";
+  renderActionPlanMetrics(plan.symbol || "");
   if (actionPlanActionSelect) actionPlanActionSelect.value = normalizeActionPlanAction(plan.actionType);
   if (actionPlanPositionSelect) actionPlanPositionSelect.value = normalizeActionPlanPosition(plan.currentPosition);
   if (actionPlanMarketTypeSelect) actionPlanMarketTypeSelect.value = plan.marketType || "美股";
@@ -1132,14 +1215,7 @@ function fillActionPlanEditor(plan) {
   if (actionPlanTakeProfitInput) actionPlanTakeProfitInput.value = plan.takeProfitPlan || "";
   if (actionPlanStopLossInput) actionPlanStopLossInput.value = plan.stopLossPlan || "";
   if (actionPlanThinkingInput) actionPlanThinkingInput.value = plan.thinking || "";
-  [
-    actionPlanEntryInput,
-    actionPlanTakeProfitInput,
-    actionPlanStopLossInput,
-    actionPlanSupportLevelsInput,
-    actionPlanResistanceLevelsInput,
-    actionPlanThinkingInput,
-  ].filter(Boolean).forEach(autoResizeTextarea);
+  resizeActionPlanTextareas();
 }
 
 function selectActionPlan(index) {
@@ -1165,9 +1241,16 @@ function syncSelectedActionPlanFromEditor() {
   if (actionPlanPositionSelect.value !== currentPosition) {
     actionPlanPositionSelect.value = currentPosition;
   }
+  const selectedSymbol = String(actionPlanSymbolSelect?.value || actionPlanSymbolInput?.value || "").trim().toUpperCase();
+  const duplicate = state.actionPlans.some((plan, i) => i !== index && plan.symbol === selectedSymbol);
+  if (duplicate) {
+    window.alert(`操作计划中已经有 ${selectedSymbol}，不能重复添加。`);
+    return false;
+  }
+  if (actionPlanSymbolInput) actionPlanSymbolInput.value = selectedSymbol;
   state.actionPlans[index] = normalizeActionPlan({
     ...state.actionPlans[index],
-    symbol: actionPlanSymbolInput.value,
+    symbol: selectedSymbol,
     actionType,
     currentPosition,
     marketType: actionPlanMarketTypeSelect.value,
@@ -1181,6 +1264,7 @@ function syncSelectedActionPlanFromEditor() {
   syncLegacyAssetPlanField();
   renderActionPlanRowsOnly();
   updateActionPlanDetailHeading();
+  return true;
 }
 
 function updateActionPlanDetailHeading() {
@@ -1202,7 +1286,10 @@ function openActionPlanDetail(index) {
   actionPlanEditor?.classList.remove("hidden");
   actionPlanDetailModal?.classList.remove("hidden");
   saveActionPlanDetailBtn?.classList.toggle("hidden", readOnly);
-  setTimeout(() => actionPlanSymbolInput?.focus(), 0);
+  requestAnimationFrame(() => {
+    resizeActionPlanTextareas();
+    actionPlanSymbolSelect?.focus();
+  });
 }
 
 function closeActionPlanDetail() {
@@ -1212,7 +1299,7 @@ function closeActionPlanDetail() {
 }
 
 function saveActionPlanDetailAndClose() {
-  syncSelectedActionPlanFromEditor();
+  if (syncSelectedActionPlanFromEditor() === false) return;
   closeActionPlanDetail();
 }
 
@@ -1244,10 +1331,11 @@ function addActionPlan(marketType = "美股") {
   const readOnly = state.reviewStatus === "reviewed" && !state.editMode;
   if (readOnly) return;
   const used = new Set(state.actionPlans.map((item) => item.symbol).filter(Boolean));
-  const candidates = marketType === "大A"
-    ? ["600519", "000001", "300750", "600036", "000858"]
-    : ["MU", "MSFT", "GOOGL", "LITE", "BABA", "CASH"];
-  const symbol = candidates.find((item) => !used.has(item)) || "";
+  const symbol = (state.actionPlanSymbolCatalog || []).find((item) => !used.has(item.symbol))?.symbol || "";
+  if (!symbol) {
+    window.alert("没有可添加的标的，请先在标的管理中新增或显示标的。");
+    return;
+  }
   state.actionPlans.push(normalizeActionPlan({ symbol, actionType: "准备开仓", currentPosition: "0%", marketType }, state.actionPlans.length));
   state.selectedActionPlanIndex = state.actionPlans.length - 1;
   renderActionPlans();
@@ -1321,6 +1409,7 @@ function syncLegacyAssetPlanField() {
 function applyActionPlanReadOnly(readOnly) {
   [
     actionPlanSymbolInput,
+    actionPlanSymbolSelect,
     actionPlanActionSelect,
     actionPlanPositionSelect,
     actionPlanMarketTypeSelect,
@@ -2345,6 +2434,9 @@ function buildSymbolRow(item) {
   const activeLabel = item.is_active ? "显示中" : "已隐藏";
   const activeClass = item.is_active ? "status-active" : "status-hidden";
   const toggleLabel = item.is_active ? "隐藏" : "显示";
+  const deleteButton = item.is_active
+    ? ""
+    : `<button class="symbol-hard-delete-btn" data-action="hard-delete" data-id="${escapeHtml(String(item.id))}" data-symbol="${escapeHtml(item.symbol)}">删除</button>`;
 
   row.innerHTML = `
     <td class="symbol-col-drag"><span class="symbol-drag-handle" title="拖拽排序">⠿</span></td>
@@ -2367,6 +2459,7 @@ function buildSymbolRow(item) {
     <td class="symbol-col-actions">
       <button class="symbol-edit-btn" data-action="edit" data-id="${escapeHtml(String(item.id))}">编辑</button>
       <button class="symbol-toggle-btn ${activeClass}" data-action="toggle" data-id="${escapeHtml(String(item.id))}" data-symbol="${escapeHtml(item.symbol)}" data-active="${item.is_active ? "1" : "0"}">${toggleLabel}</button>
+      ${deleteButton}
     </td>
   `;
 
@@ -2403,6 +2496,16 @@ function buildSymbolRow(item) {
       }
     } catch (err) {
       window.alert(`${actionLabel}失败: ${err.message}`);
+    }
+  });
+  row.querySelector("[data-action='hard-delete']")?.addEventListener("click", async (e) => {
+    const { id, symbol } = e.currentTarget.dataset;
+    if (!window.confirm(`确认彻底删除标的 ${symbol}？这个操作不会删除历史价格、新闻或复盘记录，但标的管理中将不再保留该项。`)) return;
+    try {
+      await fetchJson(`/api/symbols/${id}?hard=1`, { method: "DELETE" });
+      row.remove();
+    } catch (err) {
+      window.alert(`删除失败: ${err.message}`);
     }
   });
   return row;
@@ -2473,9 +2576,10 @@ function initSymbolDragDrop(tbody) {
   });
 }
 
-function showSymbolForm(prefill = {}) {
+function showSymbolForm(prefill = {}, options = {}) {
   const preview = document.querySelector("#symbolResolvePreview");
   const isEdit = Boolean(prefill.id);
+  const submitLabel = options.submitLabel || (isEdit ? "保存修改" : "添加标的");
   const aliasStr = Array.isArray(prefill.aliases)
     ? prefill.aliases.join(", ")
     : String(prefill.aliases || "");
@@ -2487,7 +2591,7 @@ function showSymbolForm(prefill = {}) {
         <div class="symbol-manual-grid">
           <label>
             <small>系统代码</small>
-            <input type="text" name="symbol" value="${escapeHtml(prefill.symbol || "")}" placeholder="如 MU、GSPC、SOXX" ${isEdit ? "readonly" : ""} required />
+            <input type="text" name="symbol" value="${escapeHtml(prefill.symbol || "")}" placeholder="如 MU、GSPC、SOXX" required />
           </label>
           <label>
             <small>Yahoo 代码</small>
@@ -2511,7 +2615,7 @@ function showSymbolForm(prefill = {}) {
           </label>
         </div>
         <div class="action-row">
-          <button type="submit">${isEdit ? "保存修改" : "添加标的"}</button>
+          <button type="submit" data-submit-label="${escapeHtml(submitLabel)}">${escapeHtml(submitLabel)}</button>
           <button type="button" id="symbolFormCancelBtn" class="ghost">取消</button>
         </div>
         ${prefill.id ? `<input type="hidden" name="id" value="${prefill.id}" />` : ""}
@@ -2567,7 +2671,7 @@ async function submitSymbolForm(formData) {
     await loadSymbols();
   } catch (err) {
     window.alert(`操作失败: ${err.message}`);
-    if (submitBtn) { submitBtn.disabled = false; submitBtn.textContent = id ? "保存修改" : "添加标的"; }
+    if (submitBtn) { submitBtn.disabled = false; submitBtn.textContent = submitBtn.dataset.submitLabel || (id ? "保存修改" : "添加标的"); }
   }
 }
 
@@ -2591,57 +2695,13 @@ async function resolveSymbolInput() {
     });
     const item = data.resolved;
     if (!item) throw new Error("AI 未能识别该标的，请尝试更具体的名称或代码。");
-    state.symbolResolveResult = item;
-    preview.innerHTML = `
-      <div class="symbol-resolve-card">
-        <div class="symbol-resolve-info">
-          <div><small>系统代码</small><strong>${escapeHtml(item.symbol)}</strong></div>
-          <div><small>Yahoo 代码</small><strong>${escapeHtml(item.yahoo_symbol || "-")}</strong></div>
-          <div><small>显示名称</small><strong>${escapeHtml(item.display_name || "-")}</strong></div>
-          <div><small>类型</small><strong>${escapeHtml(symbolTypeLabel(item.symbol_type))}</strong></div>
-        </div>
-        <div class="action-row">
-          <button id="symbolConfirmBtn" type="button">确认添加</button>
-          <button id="symbolCancelResolveBtn" type="button" class="ghost">取消</button>
-        </div>
-      </div>
-    `;
-    preview.querySelector("#symbolConfirmBtn").addEventListener("click", confirmAddSymbol);
-    preview.querySelector("#symbolCancelResolveBtn").addEventListener("click", () => {
-      preview.classList.add("hidden");
-      state.symbolResolveResult = null;
-    });
+    showSymbolForm(item, { submitLabel: "确认添加" });
   } catch (err) {
     preview.innerHTML = `<div class="empty-state">解析失败: ${escapeHtml(err.message)}</div>`;
   } finally {
     btn.disabled = false;
     btn.textContent = "智能解析";
   }
-}
-
-async function confirmAddSymbol() {
-  const item = state.symbolResolveResult;
-  if (!item) return;
-  const confirmBtn = document.querySelector("#symbolConfirmBtn");
-  if (confirmBtn) { confirmBtn.disabled = true; confirmBtn.textContent = "添加中..."; }
-  try {
-    await fetchJson("/api/symbols", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(item),
-    });
-    document.querySelector("#symbolResolveInput").value = "";
-    document.querySelector("#symbolResolvePreview").classList.add("hidden");
-    state.symbolResolveResult = null;
-    await loadSymbols();
-  } catch (err) {
-    window.alert(`添加失败: ${err.message}`);
-    if (confirmBtn) { confirmBtn.disabled = false; confirmBtn.textContent = "确认添加"; }
-  }
-}
-
-function symbolTypeLabel(type) {
-  return { index: "大盘/指数", sector: "板块/ETF", stock: "个股" }[type] || type || "未知";
 }
 
 // ── Keywords Management ───────────────────────────────────────────────────────
