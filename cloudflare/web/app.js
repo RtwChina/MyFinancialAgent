@@ -1166,7 +1166,7 @@ function buildReviewNoteSubsection(field, sectionIndex, childIndex, child, readO
     ["删除", () => deleteReviewNoteSubsection(field, sectionIndex, childIndex), false],
   ], readOnly));
   const textarea = document.createElement("textarea");
-  textarea.rows = 5;
+  textarea.rows = 2;
   textarea.placeholder = "正文";
   textarea.dataset.noMd = "";
   textarea.value = child.body || "";

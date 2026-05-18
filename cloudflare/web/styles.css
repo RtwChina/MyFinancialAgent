@@ -2004,7 +2004,9 @@ textarea[name="reviewerNewsNotes"] {
 
 .structured-note-subsection textarea,
 .review-field.wide .structured-note-subsection textarea {
-  min-height: 132px;
+  min-height: 58px;
+  height: auto;
+  overflow: hidden;
   line-height: 1.65;
   resize: vertical;
 }
