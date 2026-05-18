@@ -1965,11 +1965,18 @@ textarea[name="reviewerNewsNotes"] {
 .structured-note-section {
   display: grid;
   gap: 10px;
-  padding: 14px;
+  padding: 10px;
   border: 1px solid rgba(15, 23, 42, 0.09);
   border-radius: 8px;
   background: #ffffff;
   box-shadow: 0 12px 28px rgba(15, 23, 42, 0.05);
+}
+
+.structured-note-section-head {
+  padding: 9px 11px;
+  border: 1px solid rgba(37, 99, 235, 0.16);
+  border-radius: 8px;
+  background: linear-gradient(180deg, #f8fbff, #eef5ff);
 }
 
 .structured-note-section-head input,
@@ -1986,6 +1993,8 @@ textarea[name="reviewerNewsNotes"] {
 
 .structured-note-section-head input {
   font-size: 1rem;
+  border-bottom-color: transparent;
+  color: #1e3a8a;
 }
 
 .structured-note-subsections {
