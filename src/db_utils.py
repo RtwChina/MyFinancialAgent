@@ -29,6 +29,7 @@ ACTION_PLAN_POSITIONS = ("0%", "0-5%", "5%-10%", "10%-15%", "15%-20%", "20%-25%"
 DEFAULT_ACTION_PLAN_ACTION = "持仓观察"
 DEFAULT_ACTION_PLAN_POSITION = "0-5%"
 ZERO_POSITION_ACTIONS = {"准备开仓", "已清仓复盘"}
+DEFAULT_ACCOUNT_BY_MARKET = {"美股": 1, "大A": 2}
 
 
 def normalize_action_plan_action(value: Any) -> str:
@@ -56,6 +57,7 @@ def normalize_action_plan_item(item: Dict[str, Any], sort_order: int = 0) -> Opt
     resistance_levels = str(item.get("resistance_levels") or item.get("resistanceLevels") or "").strip()
     key_levels = str(item.get("key_levels") or item.get("keyLevels") or "").strip()
     return {
+        "account_id": int(item.get("account_id") or item.get("accountId") or DEFAULT_ACCOUNT_BY_MARKET.get(item.get("market_type") or item.get("marketType") or "美股", 4)),
         "symbol": symbol,
         "action_type": normalize_action_plan_action(item.get("action_type") or item.get("actionType")),
         "entry_plan": str(item.get("entry_plan") or item.get("entryPlan") or "").strip(),
@@ -68,6 +70,7 @@ def normalize_action_plan_item(item: Dict[str, Any], sort_order: int = 0) -> Opt
             item.get("current_position") or item.get("currentPosition") or default_action_plan_position_for_action(item.get("action_type") or item.get("actionType"))
         ),
         "thinking": str(item.get("thinking") or "").strip(),
+        "market_type": str(item.get("market_type") or item.get("marketType") or "美股").strip() or "美股",
         "sort_order": int(item.get("sort_order") if item.get("sort_order") is not None else item.get("sortOrder") or sort_order),
     }
 
@@ -530,10 +533,12 @@ def list_review_action_plans(archive_date: str, db_path: str = None) -> List[Dic
     cursor = conn.cursor()
     cursor.execute(
         '''
-        SELECT *
-        FROM daily_review_action_plans
-        WHERE archive_date = ?
-        ORDER BY sort_order ASC, symbol ASC
+        SELECT p.*, a.name AS account_name, a.currency AS account_currency,
+            a.sort_order AS account_sort_order, a.enabled AS account_enabled
+        FROM daily_review_action_plans p
+        LEFT JOIN investment_accounts a ON a.id = p.account_id
+        WHERE p.archive_date = ?
+        ORDER BY COALESCE(a.sort_order, 999) ASC, p.sort_order ASC, p.symbol ASC
         ''',
         (archive_date,),
     )
@@ -549,12 +554,13 @@ def replace_review_action_plans(
 ) -> List[Dict[str, Any]]:
     """替换指定复盘日的结构化操作计划，并只删除当前 archive_date 下缺失的行。"""
     normalized: List[Dict[str, Any]] = []
-    seen_symbols: set[str] = set()
+    seen_keys: set[tuple[int, str]] = set()
     for index, item in enumerate(action_plans or []):
         plan = normalize_action_plan_item(item, index)
-        if not plan or plan["symbol"] in seen_symbols:
+        key = (int(plan["account_id"]), plan["symbol"]) if plan else (0, "")
+        if not plan or key in seen_keys:
             continue
-        seen_symbols.add(plan["symbol"])
+        seen_keys.add(key)
         normalized.append(plan)
 
     conn = get_db_connection(db_path)
@@ -564,11 +570,11 @@ def replace_review_action_plans(
         cursor.execute(
             '''
             INSERT INTO daily_review_action_plans (
-                archive_date, symbol, action_type, entry_plan, take_profit_plan,
+                archive_date, account_id, symbol, action_type, entry_plan, take_profit_plan,
                 stop_loss_plan, key_levels, support_levels, resistance_levels,
-                current_position, thinking, sort_order, created_at, updated_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            ON CONFLICT(archive_date, symbol) DO UPDATE SET
+                current_position, thinking, market_type, sort_order, created_at, updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(archive_date, account_id, symbol) DO UPDATE SET
                 action_type = excluded.action_type,
                 entry_plan = excluded.entry_plan,
                 take_profit_plan = excluded.take_profit_plan,
@@ -578,11 +584,13 @@ def replace_review_action_plans(
                 resistance_levels = excluded.resistance_levels,
                 current_position = excluded.current_position,
                 thinking = excluded.thinking,
+                market_type = excluded.market_type,
                 sort_order = excluded.sort_order,
                 updated_at = excluded.updated_at
             ''',
             (
                 archive_date,
+                plan["account_id"],
                 plan["symbol"],
                 plan["action_type"],
                 plan["entry_plan"],
@@ -593,6 +601,7 @@ def replace_review_action_plans(
                 plan["resistance_levels"],
                 plan["current_position"],
                 plan["thinking"],
+                plan["market_type"],
                 int(plan.get("sort_order", index)),
                 now,
                 now,
@@ -600,14 +609,15 @@ def replace_review_action_plans(
         )
 
     if normalized:
-        placeholders = ", ".join("?" for _ in normalized)
+        conditions = " OR ".join("(account_id = ? AND symbol = ?)" for _ in normalized)
+        values = [value for plan in normalized for value in (plan["account_id"], plan["symbol"])]
         cursor.execute(
             f'''
             DELETE FROM daily_review_action_plans
             WHERE archive_date = ?
-              AND symbol NOT IN ({placeholders})
+              AND NOT ({conditions})
             ''',
-            (archive_date, *[plan["symbol"] for plan in normalized]),
+            (archive_date, *values),
         )
     else:
         cursor.execute(

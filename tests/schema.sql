@@ -75,11 +75,59 @@ CREATE INDEX IF NOT EXISTS idx_daily_review_archive_date ON daily_review_archive
 CREATE INDEX IF NOT EXISTS idx_daily_review_archive_status_date ON daily_review_archive(review_status, archive_date);
 
 -- ============================================================
+-- review_account_snapshots: 复盘日账户快照
+-- ============================================================
+CREATE TABLE IF NOT EXISTS review_account_snapshots (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    archive_date TEXT NOT NULL UNIQUE,
+    accounts_snapshot TEXT NOT NULL,
+    snapshot_source TEXT NOT NULL DEFAULT 'manual_review',
+    notes TEXT,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX IF NOT EXISTS idx_review_account_snapshots_date
+    ON review_account_snapshots(archive_date);
+
+-- ============================================================
+-- investment_accounts: 股票/基金账户管理
+-- ============================================================
+CREATE TABLE IF NOT EXISTS investment_accounts (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name TEXT NOT NULL,
+    broker TEXT,
+    account_type TEXT NOT NULL DEFAULT 'stock',
+    region TEXT,
+    currency TEXT NOT NULL DEFAULT 'CNY',
+    total_assets REAL,
+    available_cash REAL,
+    enabled INTEGER NOT NULL DEFAULT 1,
+    sort_order INTEGER DEFAULT 0,
+    notes TEXT,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE(name)
+);
+
+CREATE INDEX IF NOT EXISTS idx_investment_accounts_enabled_sort
+    ON investment_accounts(enabled, sort_order, id);
+
+INSERT INTO investment_accounts (name, broker, account_type, region, currency, enabled, sort_order)
+VALUES
+    ('老虎-美股', '老虎', 'stock', 'US', 'USD', 1, 10),
+    ('东方财富-国内', '东方财富', 'stock', 'CN', 'CNY', 1, 20),
+    ('天天基金-国内', '天天基金', 'fund', 'CN', 'CNY', 1, 30),
+    ('未分配账户', '', 'mixed', '', 'CNY', 1, 999)
+ON CONFLICT(name) DO NOTHING;
+
+-- ============================================================
 -- daily_review_action_plans: 结构化操作计划
 -- ============================================================
 CREATE TABLE IF NOT EXISTS daily_review_action_plans (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     archive_date TEXT NOT NULL,
+    account_id INTEGER NOT NULL,
     symbol TEXT NOT NULL,
     action_type TEXT,
     entry_plan TEXT,
@@ -94,13 +142,15 @@ CREATE TABLE IF NOT EXISTS daily_review_action_plans (
     market_type TEXT DEFAULT '美股',
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
     updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-    UNIQUE(archive_date, symbol)
+    UNIQUE(archive_date, account_id, symbol)
 );
 
 CREATE INDEX IF NOT EXISTS idx_daily_review_action_plans_date
     ON daily_review_action_plans(archive_date, sort_order);
 CREATE INDEX IF NOT EXISTS idx_daily_review_action_plans_symbol_date
     ON daily_review_action_plans(symbol, archive_date DESC);
+CREATE INDEX IF NOT EXISTS idx_daily_review_action_plans_account_date
+    ON daily_review_action_plans(account_id, archive_date DESC, sort_order);
 
 -- ============================================================
 -- daily_news_ai_analysis: AI 新闻分析

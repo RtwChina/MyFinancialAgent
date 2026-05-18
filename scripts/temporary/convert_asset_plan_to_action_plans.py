@@ -417,6 +417,7 @@ def sql_quote(value: Any) -> str:
 def write_insert_sql(preview: Dict[str, Any], output_path: Path) -> int:
     columns = [
         "archive_date",
+        "account_id",
         "symbol",
         "action_type",
         "entry_plan",
@@ -427,6 +428,7 @@ def write_insert_sql(preview: Dict[str, Any], output_path: Path) -> int:
         "resistance_levels",
         "current_position",
         "thinking",
+        "market_type",
         "sort_order",
         "created_at",
         "updated_at",
@@ -446,6 +448,7 @@ def write_insert_sql(preview: Dict[str, Any], output_path: Path) -> int:
                 continue
             values = [
                 item["archive_date"],
+                int(plan.get("account_id") or 4),
                 symbol,
                 normalize_action(plan.get("action_type")),
                 plan.get("entry_plan") or "",
@@ -456,12 +459,13 @@ def write_insert_sql(preview: Dict[str, Any], output_path: Path) -> int:
                 plan.get("resistance_levels") or "",
                 normalize_position(plan.get("current_position")),
                 plan.get("thinking") or "",
+                plan.get("market_type") or "美股",
                 int(plan.get("sort_order") or 0),
                 "CURRENT_TIMESTAMP",
                 "CURRENT_TIMESTAMP",
             ]
             sql_values = [
-                str(value) if column in {"sort_order"} else "CURRENT_TIMESTAMP" if column in {"created_at", "updated_at"} else sql_quote(value)
+                str(value) if column in {"account_id", "sort_order"} else "CURRENT_TIMESTAMP" if column in {"created_at", "updated_at"} else sql_quote(value)
                 for column, value in zip(columns, values)
             ]
             statements.append(
@@ -469,11 +473,11 @@ def write_insert_sql(preview: Dict[str, Any], output_path: Path) -> int:
                 + ", ".join(columns)
                 + ") VALUES ("
                 + ", ".join(sql_values)
-                + ") ON CONFLICT(archive_date, symbol) DO UPDATE SET "
+                + ") ON CONFLICT(archive_date, account_id, symbol) DO UPDATE SET "
                 + ", ".join(
                     f"{column} = excluded.{column}"
                     for column in columns
-                    if column not in {"archive_date", "symbol", "created_at"}
+                    if column not in {"archive_date", "account_id", "symbol", "created_at"}
                 )
                 + ";"
             )
@@ -500,11 +504,11 @@ def apply_preview(conn: sqlite3.Connection, preview: Dict[str, Any], override_ex
             conn.execute(
                 """
 	                INSERT INTO daily_review_action_plans (
-	                    archive_date, symbol, action_type, entry_plan, take_profit_plan,
+	                    archive_date, account_id, symbol, action_type, entry_plan, take_profit_plan,
 	                    stop_loss_plan, key_levels, support_levels, resistance_levels,
-	                    current_position, thinking, sort_order, created_at, updated_at
-	                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                ON CONFLICT(archive_date, symbol) DO UPDATE SET
+	                    current_position, thinking, market_type, sort_order, created_at, updated_at
+	                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(archive_date, account_id, symbol) DO UPDATE SET
                     action_type = excluded.action_type,
                     entry_plan = excluded.entry_plan,
                     take_profit_plan = excluded.take_profit_plan,
@@ -512,13 +516,15 @@ def apply_preview(conn: sqlite3.Connection, preview: Dict[str, Any], override_ex
 	                    key_levels = excluded.key_levels,
 	                    support_levels = excluded.support_levels,
 	                    resistance_levels = excluded.resistance_levels,
-	                    current_position = excluded.current_position,
+                    current_position = excluded.current_position,
                     thinking = excluded.thinking,
+                    market_type = excluded.market_type,
                     sort_order = excluded.sort_order,
                     updated_at = excluded.updated_at
                 """,
                 (
                     archive_date,
+                    int(plan.get("account_id") or 4),
                     symbol,
                     normalize_action(plan.get("action_type")),
                     plan.get("entry_plan") or "",
@@ -527,8 +533,9 @@ def apply_preview(conn: sqlite3.Connection, preview: Dict[str, Any], override_ex
 	                    plan.get("key_levels") or "",
 	                    plan.get("support_levels") or "",
 	                    plan.get("resistance_levels") or "",
-	                    normalize_position(plan.get("current_position")),
+                    normalize_position(plan.get("current_position")),
                     plan.get("thinking") or "",
+                    plan.get("market_type") or "美股",
                     int(plan.get("sort_order") or 0),
                     now,
                     now,
@@ -537,6 +544,18 @@ def apply_preview(conn: sqlite3.Connection, preview: Dict[str, Any], override_ex
             inserted += 1
     conn.commit()
     return inserted
+
+
+def count_unassigned_action_plans(conn: sqlite3.Connection) -> int:
+    row = conn.execute(
+        """
+        SELECT COUNT(*) AS cnt
+        FROM daily_review_action_plans p
+        JOIN investment_accounts a ON a.id = p.account_id
+        WHERE a.name = '未分配账户'
+        """
+    ).fetchone()
+    return int(row["cnt"] if row else 0)
 
 
 def parse_args() -> argparse.Namespace:
@@ -612,6 +631,7 @@ def main() -> int:
         preview = json.loads(preview_path.read_text(encoding="utf-8"))
         inserted = apply_preview(conn, preview, args.override_existing)
         print(f"Applied {inserted} action plan rows from {preview_path}")
+        print(f"Unassigned action plan rows: {count_unassigned_action_plans(conn)}")
         return 0
 
 

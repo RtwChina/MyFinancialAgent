@@ -24,6 +24,7 @@
               <button class="nav-chip active" data-view="reviews">复盘工作台</button>
               <button class="nav-chip" data-view="news">新闻检索</button>
               <button class="nav-chip" data-view="symbols">标的管理</button>
+              <button class="nav-chip" data-view="accounts">账户管理</button>
               <button class="nav-chip" data-view="keywords">关键词管理</button>
               <button class="nav-chip" data-view="readme">ReadMe</button>
             </nav>
@@ -182,11 +183,11 @@
                 <table class="review-table">
                   <thead>
                     <tr>
-                      <th>复盘日</th>
-                      <th>大盘盘点</th>
-                      <th>板块轮动</th>
-                      <th>操作计划</th>
-                      <th>状态</th>
+                      <th>
+                        <span class="review-date-head" title="复盘日按美股交易日归档；北京时间通常覆盖当日 21:30 到次日 04:00。">复盘日</span>
+                      </th>
+                      <th>账户估算影响</th>
+                      <th>当日主线</th>
                       <th>操作</th>
                     </tr>
                   </thead>
@@ -262,6 +263,38 @@
                   <tbody id="symbolsStockList"></tbody>
                 </table>
               </div>
+            </div>
+          </section>
+        </section>
+
+        <section id="accountsView" class="view">
+          <section class="panel symbols-panel">
+            <div class="panel-header">
+              <div>
+                <h2>账户管理</h2>
+                <p class="toolbar-caption">维护每个股票/基金账户的总资产与可用资金，操作计划会按账户分组。</p>
+              </div>
+              <div class="panel-header-meta">
+                <button id="newAccountBtn" class="ghost">新增账户</button>
+                <button id="refreshAccountsBtn" class="ghost">刷新</button>
+              </div>
+            </div>
+            <div id="accountFormPreview" class="symbol-resolve-preview hidden"></div>
+            <div class="symbols-table-wrap">
+              <table class="symbols-table accounts-table">
+                <thead>
+                  <tr>
+                    <th>账户</th>
+                    <th>类型</th>
+                    <th>币种</th>
+                    <th>总资产</th>
+                    <th>可用资金</th>
+                    <th>状态</th>
+                    <th></th>
+                  </tr>
+                </thead>
+                <tbody id="accountsList"></tbody>
+              </table>
             </div>
           </section>
         </section>
@@ -469,84 +502,9 @@
                     <strong class="review-section-title">个股与资产操作计划</strong>
                     <small class="muted">每个标的一行，表格扫全局，下方编辑当前选中标的。</small>
                   </div>
-                  <div class="action-plan-tools">
-                    <button id="moveActionPlanUpBtn" type="button" class="ghost compact-button">上移</button>
-                    <button id="moveActionPlanDownBtn" type="button" class="ghost compact-button">下移</button>
-                    <button id="deleteActionPlanBtn" type="button" class="ghost compact-button danger">删除</button>
-                  </div>
                 </div>
 
-                <div class="action-plan-group market-us-group">
-                  <div class="action-plan-group-head">
-                    <span class="action-plan-group-label market-us-label">美股</span>
-                    <button id="addActionPlanUsBtn" type="button" class="ghost compact-button">添加标的</button>
-                    <button id="sortActionPlansUsBtn" type="button" class="ghost compact-button">自动排序</button>
-                  </div>
-                  <div class="action-plan-table-wrap">
-                    <table class="action-plan-table">
-                      <colgroup>
-                        <col class="col-symbol">
-                        <col class="col-position">
-                        <col class="col-entry">
-                        <col class="col-take-profit">
-                        <col class="col-stop-loss">
-                        <col class="col-support">
-                        <col class="col-resistance">
-                        <col class="col-thinking">
-                      </colgroup>
-                      <thead>
-                        <tr>
-                          <th>标的 / 动作</th>
-                          <th>当前仓位</th>
-                          <th>每日记录</th>
-                          <th>止盈计划</th>
-                          <th>止损计划</th>
-                          <th>支撑位</th>
-                          <th>压力位</th>
-                          <th>思考</th>
-                        </tr>
-                      </thead>
-                      <tbody id="actionPlanRowsUs"></tbody>
-                    </table>
-                  </div>
-                  <div id="emptyActionPlanStateUs" class="empty-state hidden">还没有美股操作计划，点击”添加标的”开始填写。</div>
-                </div>
-
-                <div class="action-plan-group market-cn-group">
-                  <div class="action-plan-group-head">
-                    <span class="action-plan-group-label market-cn-label">大A</span>
-                    <button id="addActionPlanCnBtn" type="button" class="ghost compact-button">添加标的</button>
-                    <button id="sortActionPlansCnBtn" type="button" class="ghost compact-button">自动排序</button>
-                  </div>
-                  <div class="action-plan-table-wrap">
-                    <table class="action-plan-table">
-                      <colgroup>
-                        <col class="col-symbol">
-                        <col class="col-position">
-                        <col class="col-entry">
-                        <col class="col-take-profit">
-                        <col class="col-stop-loss">
-                        <col class="col-support">
-                        <col class="col-resistance">
-                        <col class="col-thinking">
-                      </colgroup>
-                      <thead>
-                        <tr>
-                          <th>标的 / 动作</th>
-                          <th>当前仓位</th>
-                          <th>每日记录</th>
-                          <th>止盈计划</th>
-                          <th>止损计划</th>
-                          <th>支撑位</th>
-                          <th>压力位</th>
-                          <th>思考</th>
-                        </tr>
-                      </thead>
-                      <tbody id="actionPlanRowsCn"></tbody>
-                    </table>
-                  </div>
-                  <div id="emptyActionPlanStateCn" class="empty-state hidden">还没有大A操作计划，点击”添加标的”开始填写。</div>
-                </div>
+                <div id="actionPlanAccountGroups" class="action-plan-account-groups"></div>
 
               </div>
             </section>
@@ -556,6 +514,15 @@
                 <span class="review-section-title">深度思考与交易总结（可选）</span>
                 <textarea name="tradingSummary" rows="12" placeholder="今天真正重要的判断是什么？自己最可能犯的错是什么？下一次怎么做得更好？"></textarea>
               </label>
+              <div class="review-field wide">
+                <div class="snapshot-head">
+                  <div>
+                    <strong class="review-section-title">账户每日快照</strong>
+                    <small class="muted">完成复盘时保存本复盘日的一条账户快照，可调整资金和当天盈亏。</small>
+                  </div>
+                </div>
+                <div id="accountSnapshotBox" class="account-snapshot-box"></div>
+              </div>
             </section>
           </form>
 
@@ -603,6 +570,10 @@
         </div>
         <div id="actionPlanEditor" class="action-plan-editor hidden">
           <div class="action-plan-top-row">
+            <label class="compact compact-account">
+              账户
+              <select id="actionPlanAccountSelect"></select>
+            </label>
             <label class="compact compact-symbol">
               标的
               <select id="actionPlanSymbolSelect"></select>
@@ -627,13 +598,6 @@
                 <option>20%-25%</option>
                 <option>25%-30%</option>
                 <option>&gt;30%</option>
-              </select>
-            </label>
-            <label class="compact compact-market-type">
-              市场
-              <select id="actionPlanMarketTypeSelect">
-                <option>美股</option>
-                <option>大A</option>
               </select>
             </label>
           </div>

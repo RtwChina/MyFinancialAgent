@@ -1,0 +1,637 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>账户估算影响可视化方案</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --bg: #f4f6f9;
+      --paper: #fff;
+      --ink: #121826;
+      --muted: #667085;
+      --faint: #98a2b3;
+      --line: #e6ebf1;
+      --head: #f8fafc;
+      --red: #ad514d;
+      --red-soft: #f2d7d3;
+      --green: #237a60;
+      --green-soft: #cfe9dd;
+      --zero: #7b8794;
+      --track: #e9eef4;
+      --shadow: 0 18px 42px rgba(17, 24, 39, .08);
+    }
+
+    * { box-sizing: border-box; }
+
+    body {
+      margin: 0;
+      padding: 28px;
+      background: var(--bg);
+      color: var(--ink);
+      font-family: ui-sans-serif, -apple-system, BlinkMacSystemFont, "PingFang SC", "Microsoft YaHei", sans-serif;
+      -webkit-font-smoothing: antialiased;
+    }
+
+    h1 {
+      margin: 0 0 8px;
+      font-size: 30px;
+      line-height: 1.25;
+      letter-spacing: 0;
+      text-wrap: balance;
+    }
+
+    .lead {
+      margin: 0 0 26px;
+      color: var(--muted);
+      font-size: 14px;
+      line-height: 1.7;
+    }
+
+    .stack { display: grid; gap: 26px; }
+
+    .demo {
+      overflow: hidden;
+      border: 1px solid var(--line);
+      border-radius: 16px;
+      background: var(--paper);
+      box-shadow: var(--shadow);
+    }
+
+    .demo-title {
+      display: flex;
+      align-items: flex-end;
+      justify-content: space-between;
+      gap: 18px;
+      padding: 18px 20px;
+      border-bottom: 1px solid var(--line);
+      background: linear-gradient(180deg, #ffffff, #fbfcfe);
+    }
+
+    h2 {
+      margin: 0;
+      font-size: 18px;
+      line-height: 1.35;
+      letter-spacing: 0;
+    }
+
+    .demo-title p {
+      margin: 5px 0 0;
+      color: var(--muted);
+      font-size: 13px;
+    }
+
+    .tagline {
+      color: #475467;
+      font-size: 12px;
+      font-weight: 760;
+      white-space: nowrap;
+    }
+
+    table {
+      width: 100%;
+      min-width: 980px;
+      border-collapse: collapse;
+      table-layout: fixed;
+    }
+
+    th {
+      padding: 12px 18px;
+      background: var(--head);
+      color: #64748b;
+      font-size: 13px;
+      font-weight: 760;
+      text-align: left;
+    }
+
+    td {
+      padding: 17px 18px;
+      border-top: 1px solid var(--line);
+      vertical-align: middle;
+    }
+
+    th:nth-child(1), td:nth-child(1) { width: 150px; }
+    th:nth-child(2), td:nth-child(2) { width: 500px; }
+    th:nth-child(4), td:nth-child(4) { width: 154px; }
+
+    .date {
+      display: block;
+      color: #101828;
+      font-size: 18px;
+      font-weight: 820;
+      font-variant-numeric: tabular-nums;
+      white-space: nowrap;
+    }
+
+    .theme {
+      color: #5f6f85;
+      font-size: 15px;
+      line-height: 1.58;
+    }
+
+    .actions {
+      display: flex;
+      justify-content: flex-end;
+      gap: 8px;
+      white-space: nowrap;
+    }
+
+    button {
+      min-width: 58px;
+      height: 34px;
+      border: 1px solid #dfe5ed;
+      border-radius: 999px;
+      background: #fff;
+      color: #111827;
+      font-size: 14px;
+      font-weight: 800;
+      cursor: default;
+    }
+
+    button:focus-visible {
+      outline: 3px solid rgba(47, 95, 155, .28);
+      outline-offset: 2px;
+    }
+
+    button.primary {
+      border-color: #111827;
+      background: #111827;
+      color: #fff;
+      box-shadow: 0 12px 24px rgba(17, 24, 39, .18);
+    }
+
+    .account {
+      color: #344054;
+      font-weight: 760;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .bucket-viz {
+      display: grid;
+      gap: 10px;
+    }
+
+    .bucket-row {
+      display: grid;
+      grid-template-columns: 118px minmax(260px, 1fr);
+      align-items: center;
+      gap: 14px;
+      min-height: 28px;
+    }
+
+    .buckets {
+      display: grid;
+      grid-template-columns: repeat(8, 1fr);
+      gap: 4px;
+      max-width: 300px;
+    }
+
+    .bucket {
+      height: 16px;
+      border: 1px solid #e0e6ee;
+      border-radius: 4px;
+      background: #f8fafc;
+    }
+
+    .bucket.neg-4 { background: #b65a55; border-color: #b65a55; }
+    .bucket.neg-3 { background: #cc7b74; border-color: #cc7b74; }
+    .bucket.neg-2 { background: #dfa39d; border-color: #dfa39d; }
+    .bucket.neg-1 { background: #efcbc7; border-color: #efcbc7; }
+    .bucket.pos-1 { background: #cfe8dc; border-color: #cfe8dc; }
+    .bucket.pos-2 { background: #a6d7c2; border-color: #a6d7c2; }
+    .bucket.pos-3 { background: #74bd9e; border-color: #74bd9e; }
+    .bucket.pos-4 { background: #2f8d6b; border-color: #2f8d6b; }
+
+    .bucket.empty {
+      background: repeating-linear-gradient(45deg, #eef2f6 0 5px, #f8fafc 5px 10px);
+      border-color: #edf1f5;
+    }
+
+    .bucket-axis {
+      display: grid;
+      grid-template-columns: 118px minmax(260px, 1fr);
+      gap: 14px;
+      color: var(--faint);
+      font-size: 11px;
+      font-variant-numeric: tabular-nums;
+    }
+
+    .bucket-axis .axis {
+      display: grid;
+      grid-template-columns: 1fr 1fr 1fr;
+      max-width: 300px;
+    }
+
+    .bucket-axis span:nth-child(2) { text-align: center; }
+    .bucket-axis span:nth-child(3) { text-align: right; }
+
+    .viz {
+      display: grid;
+      gap: 9px;
+    }
+
+    .viz-row {
+      display: grid;
+      grid-template-columns: 118px minmax(250px, 1fr);
+      align-items: center;
+      gap: 13px;
+      min-height: 25px;
+    }
+
+    .axis-labels {
+      display: grid;
+      grid-template-columns: 118px 1fr;
+      gap: 13px;
+      color: var(--faint);
+      font-size: 11px;
+      font-variant-numeric: tabular-nums;
+    }
+
+    .axis-labels .labels {
+      display: grid;
+      grid-template-columns: 1fr 1fr 1fr;
+    }
+
+    .axis-labels span:nth-child(2) { text-align: center; }
+    .axis-labels span:nth-child(3) { text-align: right; }
+
+    .dot-track,
+    .bullet-track,
+    .band-track,
+    .mini-track {
+      position: relative;
+      display: block;
+      height: 10px;
+      border-radius: 999px;
+      background: var(--track);
+    }
+
+    .zero {
+      position: absolute;
+      top: -5px;
+      bottom: -5px;
+      left: 50%;
+      width: 1px;
+      background: rgba(17, 24, 39, .32);
+      transform: translateX(-50%);
+    }
+
+    .dot {
+      position: absolute;
+      top: 50%;
+      left: var(--x);
+      width: 15px;
+      height: 15px;
+      border: 3px solid #fff;
+      border-radius: 50%;
+      background: var(--dot);
+      box-shadow: 0 4px 12px rgba(17, 24, 39, .2);
+      transform: translate(-50%, -50%);
+    }
+
+    .empty-track {
+      position: absolute;
+      inset: 0;
+      border-radius: inherit;
+      background: repeating-linear-gradient(90deg, #e9eef4 0 8px, #f7f9fb 8px 16px);
+    }
+
+    /* 1. Cleveland dot plot */
+    .dot-plot .dot-track {
+      height: 2px;
+      background:
+        linear-gradient(90deg, transparent 0 49.8%, rgba(17, 24, 39, .28) 49.8% 50.2%, transparent 50.2%),
+        linear-gradient(90deg, #e4b6b1, #e9eef4 50%, #b6decf);
+    }
+
+    .dot-plot .viz-row {
+      min-height: 30px;
+    }
+
+    /* 2. Bullet graph */
+    .bullet-track {
+      height: 16px;
+      overflow: hidden;
+      background:
+        linear-gradient(90deg,
+          #ead0cc 0 25%,
+          #f4e5e2 25% 37.5%,
+          #edf1f5 37.5% 62.5%,
+          #dff0e8 62.5% 75%,
+          #b9ddcf 75% 100%);
+      border-radius: 5px;
+    }
+
+    .bullet-marker {
+      position: absolute;
+      top: 2px;
+      bottom: 2px;
+      left: var(--x);
+      width: 4px;
+      border-radius: 999px;
+      background: var(--dot);
+      box-shadow: 0 0 0 2px rgba(255,255,255,.9);
+      transform: translateX(-50%);
+    }
+
+    /* 3. diverging band */
+    .band-track {
+      height: 12px;
+      background:
+        linear-gradient(90deg,
+          #ad514d 0%,
+          #e8bbb6 32%,
+          #edf1f5 47%,
+          #edf1f5 53%,
+          #a9d9c6 68%,
+          #237a60 100%);
+    }
+
+    .band-track::before,
+    .band-track::after {
+      content: "";
+      position: absolute;
+      top: -3px;
+      bottom: -3px;
+      width: 1px;
+      background: rgba(17,24,39,.14);
+    }
+
+    .band-track::before { left: 25%; }
+    .band-track::after { right: 25%; }
+
+    /* 4. segmented dot */
+    .segmented .band-track {
+      height: 16px;
+      border-radius: 6px;
+      background:
+        linear-gradient(90deg,
+          #b65a55 0 12.5%,
+          #d38a83 12.5% 25%,
+          #efc9c4 25% 37.5%,
+          #eef2f6 37.5% 62.5%,
+          #c8e5d9 62.5% 75%,
+          #7fbea0 75% 87.5%,
+          #2d8b6a 87.5% 100%);
+    }
+
+    .segmented .band-track::before,
+    .segmented .band-track::after { display: none; }
+
+    /* 5. small multiples */
+    .multi {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 10px;
+    }
+
+    .mini-card {
+      min-width: 0;
+      padding: 10px 10px 11px;
+      border: 1px solid #e8edf3;
+      border-radius: 10px;
+      background: #fbfcfe;
+    }
+
+    .mini-card .account {
+      display: block;
+      margin-bottom: 10px;
+      color: #667085;
+      font-size: 12px;
+    }
+
+    .mini-track {
+      height: 8px;
+      background:
+        linear-gradient(90deg, #e7bdb8, #edf1f5 50%, #b9dfd0);
+    }
+
+    .mini-track .dot {
+      width: 13px;
+      height: 13px;
+      border-width: 2px;
+    }
+
+    @media (max-width: 900px) {
+      body { padding: 18px; }
+      .demo { overflow-x: auto; }
+    }
+  </style>
+</head>
+<body>
+  <h1>账户估算影响可视化方案</h1>
+  <p class="lead">参考 dot plot、bullet graph 和 diverging scale 的表达方式：不展示词语，不把数字当主视觉，只表达每个账户在 -4 到 +4 的位置。</p>
+
+  <main class="stack">
+    <section class="demo">
+      <div class="demo-title">
+        <div>
+          <h2>方案 0：区间格点图</h2>
+          <p>8 个格子对应 -4 到 +4 的区间。只点亮所在区间，不用词、不用百分比，也不像进度条。</p>
+        </div>
+        <span class="tagline">新试</span>
+      </div>
+      <table>
+        <thead><tr><th>复盘日</th><th>账户估算影响</th><th>当日主线</th><th>操作</th></tr></thead>
+        <tbody>
+          <tr>
+            <td><span class="date">2026-05-15</span></td>
+            <td>
+              <div class="bucket-viz">
+                <div class="bucket-row">
+                  <span class="account">老虎-美股</span>
+                  <span class="buckets"><i class="bucket"></i><i class="bucket"></i><i class="bucket neg-2"></i><i class="bucket"></i><i class="bucket"></i><i class="bucket"></i><i class="bucket"></i><i class="bucket"></i></span>
+                </div>
+                <div class="bucket-row">
+                  <span class="account">东方财富</span>
+                  <span class="buckets"><i class="bucket"></i><i class="bucket"></i><i class="bucket neg-2"></i><i class="bucket"></i><i class="bucket"></i><i class="bucket"></i><i class="bucket"></i><i class="bucket"></i></span>
+                </div>
+                <div class="bucket-row">
+                  <span class="account">天天基金</span>
+                  <span class="buckets"><i class="bucket empty"></i><i class="bucket empty"></i><i class="bucket empty"></i><i class="bucket empty"></i><i class="bucket empty"></i><i class="bucket empty"></i><i class="bucket empty"></i><i class="bucket empty"></i></span>
+                </div>
+                <div class="bucket-axis"><span></span><span class="axis"><span>-4</span><span>0</span><span>+4</span></span></div>
+              </div>
+            </td>
+            <td class="theme">标普 7501 压不住；黄金慢慢走出压力区间，通胀重新抬头...</td>
+            <td><div class="actions"><button type="button">查看</button><button type="button" class="primary">编辑</button></div></td>
+          </tr>
+          <tr>
+            <td><span class="date">2026-05-14</span></td>
+            <td>
+              <div class="bucket-viz">
+                <div class="bucket-row">
+                  <span class="account">老虎-美股</span>
+                  <span class="buckets"><i class="bucket"></i><i class="bucket"></i><i class="bucket"></i><i class="bucket"></i><i class="bucket pos-1"></i><i class="bucket"></i><i class="bucket"></i><i class="bucket"></i></span>
+                </div>
+                <div class="bucket-row">
+                  <span class="account">东方财富</span>
+                  <span class="buckets"><i class="bucket neg-4"></i><i class="bucket"></i><i class="bucket"></i><i class="bucket"></i><i class="bucket"></i><i class="bucket"></i><i class="bucket"></i><i class="bucket"></i></span>
+                </div>
+                <div class="bucket-row">
+                  <span class="account">天天基金</span>
+                  <span class="buckets"><i class="bucket empty"></i><i class="bucket empty"></i><i class="bucket empty"></i><i class="bucket empty"></i><i class="bucket empty"></i><i class="bucket empty"></i><i class="bucket empty"></i><i class="bucket empty"></i></span>
+                </div>
+                <div class="bucket-axis"><span></span><span class="axis"><span>-4</span><span>0</span><span>+4</span></span></div>
+              </div>
+            </td>
+            <td class="theme">半导体与黄金成为当日主要变量，利率压力继续约束估值...</td>
+            <td><div class="actions"><button type="button">查看</button><button type="button" class="primary">编辑</button></div></td>
+          </tr>
+        </tbody>
+      </table>
+    </section>
+
+    <section class="demo">
+      <div class="demo-title">
+        <div>
+          <h2>方案 1：Cleveland Dot Plot</h2>
+          <p>最接近专业数据可视化：一条细轴，一个点。克制、清楚、不像进度条。</p>
+        </div>
+        <span class="tagline">推荐</span>
+      </div>
+      <table>
+        <thead><tr><th>复盘日</th><th>账户估算影响</th><th>当日主线</th><th>操作</th></tr></thead>
+        <tbody>
+          <tr>
+            <td><span class="date">2026-05-15</span></td>
+            <td>
+              <div class="viz dot-plot">
+                <div class="viz-row"><span class="account">老虎-美股</span><span class="dot-track"><i class="zero"></i><i class="dot" style="--x: 32%; --dot: #ad514d"></i></span></div>
+                <div class="viz-row"><span class="account">东方财富</span><span class="dot-track"><i class="zero"></i><i class="dot" style="--x: 32%; --dot: #ad514d"></i></span></div>
+                <div class="viz-row"><span class="account">天天基金</span><span class="dot-track"><i class="empty-track"></i></span></div>
+                <div class="axis-labels"><span></span><span class="labels"><span>-4</span><span>0</span><span>+4</span></span></div>
+              </div>
+            </td>
+            <td class="theme">标普 7501 压不住；黄金慢慢走出压力区间，通胀重新抬头...</td>
+            <td><div class="actions"><button type="button">查看</button><button type="button" class="primary">编辑</button></div></td>
+          </tr>
+          <tr>
+            <td><span class="date">2026-05-14</span></td>
+            <td>
+              <div class="viz dot-plot">
+                <div class="viz-row"><span class="account">老虎-美股</span><span class="dot-track"><i class="zero"></i><i class="dot" style="--x: 58%; --dot: #237a60"></i></span></div>
+                <div class="viz-row"><span class="account">东方财富</span><span class="dot-track"><i class="zero"></i><i class="dot" style="--x: 6%; --dot: #9c3f3c"></i></span></div>
+                <div class="viz-row"><span class="account">天天基金</span><span class="dot-track"><i class="empty-track"></i></span></div>
+                <div class="axis-labels"><span></span><span class="labels"><span>-4</span><span>0</span><span>+4</span></span></div>
+              </div>
+            </td>
+            <td class="theme">半导体与黄金成为当日主要变量，利率压力继续约束估值...</td>
+            <td><div class="actions"><button type="button">查看</button><button type="button" class="primary">编辑</button></div></td>
+          </tr>
+        </tbody>
+      </table>
+    </section>
+
+    <section class="demo">
+      <div class="demo-title">
+        <div>
+          <h2>方案 2：Bullet Graph</h2>
+          <p>有背景区间和标记线。比 dot plot 更像 dashboard，但稍微厚一点。</p>
+        </div>
+      </div>
+      <table>
+        <thead><tr><th>复盘日</th><th>账户估算影响</th><th>当日主线</th><th>操作</th></tr></thead>
+        <tbody>
+          <tr>
+            <td><span class="date">2026-05-15</span></td>
+            <td>
+              <div class="viz">
+                <div class="viz-row"><span class="account">老虎-美股</span><span class="bullet-track"><i class="zero"></i><i class="bullet-marker" style="--x: 32%; --dot: #ad514d"></i></span></div>
+                <div class="viz-row"><span class="account">东方财富</span><span class="bullet-track"><i class="zero"></i><i class="bullet-marker" style="--x: 32%; --dot: #ad514d"></i></span></div>
+                <div class="viz-row"><span class="account">天天基金</span><span class="bullet-track"><i class="empty-track"></i></span></div>
+                <div class="axis-labels"><span></span><span class="labels"><span>-4</span><span>0</span><span>+4</span></span></div>
+              </div>
+            </td>
+            <td class="theme">标普 7501 压不住；黄金慢慢走出压力区间，通胀重新抬头...</td>
+            <td><div class="actions"><button type="button">查看</button><button type="button" class="primary">编辑</button></div></td>
+          </tr>
+        </tbody>
+      </table>
+    </section>
+
+    <section class="demo">
+      <div class="demo-title">
+        <div>
+          <h2>方案 3：Diverging Scale Dot</h2>
+          <p>用红到绿的连续背景强调位置，但点仍然是主信息。</p>
+        </div>
+      </div>
+      <table>
+        <thead><tr><th>复盘日</th><th>账户估算影响</th><th>当日主线</th><th>操作</th></tr></thead>
+        <tbody>
+          <tr>
+            <td><span class="date">2026-05-15</span></td>
+            <td>
+              <div class="viz">
+                <div class="viz-row"><span class="account">老虎-美股</span><span class="band-track"><i class="zero"></i><i class="dot" style="--x: 32%; --dot: #ad514d"></i></span></div>
+                <div class="viz-row"><span class="account">东方财富</span><span class="band-track"><i class="zero"></i><i class="dot" style="--x: 32%; --dot: #ad514d"></i></span></div>
+                <div class="viz-row"><span class="account">天天基金</span><span class="band-track"><i class="empty-track"></i></span></div>
+                <div class="axis-labels"><span></span><span class="labels"><span>-4</span><span>0</span><span>+4</span></span></div>
+              </div>
+            </td>
+            <td class="theme">标普 7501 压不住；黄金慢慢走出压力区间，通胀重新抬头...</td>
+            <td><div class="actions"><button type="button">查看</button><button type="button" class="primary">编辑</button></div></td>
+          </tr>
+        </tbody>
+      </table>
+    </section>
+
+    <section class="demo">
+      <div class="demo-title">
+        <div>
+          <h2>方案 4：分段 Diverging Dot</h2>
+          <p>把 -4 到 +4 分成明显色块，位置更容易看，但视觉更重。</p>
+        </div>
+      </div>
+      <table>
+        <thead><tr><th>复盘日</th><th>账户估算影响</th><th>当日主线</th><th>操作</th></tr></thead>
+        <tbody>
+          <tr>
+            <td><span class="date">2026-05-15</span></td>
+            <td>
+              <div class="viz segmented">
+                <div class="viz-row"><span class="account">老虎-美股</span><span class="band-track"><i class="zero"></i><i class="dot" style="--x: 32%; --dot: #ad514d"></i></span></div>
+                <div class="viz-row"><span class="account">东方财富</span><span class="band-track"><i class="zero"></i><i class="dot" style="--x: 32%; --dot: #ad514d"></i></span></div>
+                <div class="viz-row"><span class="account">天天基金</span><span class="band-track"><i class="empty-track"></i></span></div>
+                <div class="axis-labels"><span></span><span class="labels"><span>-4</span><span>0</span><span>+4</span></span></div>
+              </div>
+            </td>
+            <td class="theme">标普 7501 压不住；黄金慢慢走出压力区间，通胀重新抬头...</td>
+            <td><div class="actions"><button type="button">查看</button><button type="button" class="primary">编辑</button></div></td>
+          </tr>
+        </tbody>
+      </table>
+    </section>
+
+    <section class="demo">
+      <div class="demo-title">
+        <div>
+          <h2>方案 5：三账户 Small Multiples</h2>
+          <p>每个账户独立小轴，最容易比较账户，但横向空间占用最大。</p>
+        </div>
+      </div>
+      <table>
+        <thead><tr><th>复盘日</th><th>账户估算影响</th><th>当日主线</th><th>操作</th></tr></thead>
+        <tbody>
+          <tr>
+            <td><span class="date">2026-05-15</span></td>
+            <td>
+              <div class="multi">
+                <div class="mini-card"><span class="account">老虎-美股</span><span class="mini-track"><i class="zero"></i><i class="dot" style="--x: 32%; --dot: #ad514d"></i></span></div>
+                <div class="mini-card"><span class="account">东方财富</span><span class="mini-track"><i class="zero"></i><i class="dot" style="--x: 32%; --dot: #ad514d"></i></span></div>
+                <div class="mini-card"><span class="account">天天基金</span><span class="mini-track"><i class="empty-track"></i></span></div>
+              </div>
+            </td>
+            <td class="theme">标普 7501 压不住；黄金慢慢走出压力区间，通胀重新抬头...</td>
+            <td><div class="actions"><button type="button">查看</button><button type="button" class="primary">编辑</button></div></td>
+          </tr>
+        </tbody>
+      </table>
+    </section>
+  </main>
+</body>
+</html>

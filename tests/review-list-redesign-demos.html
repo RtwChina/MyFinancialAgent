@@ -1,0 +1,479 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>截断版 - 跨色相配色</title>
+  <style>
+    :root {
+      --ink: #0f172a;
+      --muted: #667085;
+      --line: #e5e7eb;
+      --bg: #f4f7fb;
+      --shadow: 0 22px 60px rgba(15, 23, 42, 0.10);
+    }
+
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      color: var(--ink);
+      background: linear-gradient(180deg, rgba(37, 99, 235, 0.08), transparent 280px), var(--bg);
+      font-family: ui-sans-serif, -apple-system, BlinkMacSystemFont, "SF Pro Text", "PingFang SC", sans-serif;
+      line-height: 1.45;
+    }
+
+    main {
+      width: min(1100px, calc(100vw - 32px));
+      margin: 32px auto 64px;
+      display: grid;
+      gap: 28px;
+    }
+
+    h1 { font-size: 26px; }
+    h2 { font-size: 18px; }
+
+    .page-head p { color: var(--muted); font-size: 14px; margin-top: 6px; }
+
+    .section { display: grid; gap: 14px; }
+    .section-header { display: grid; gap: 4px; }
+    .section-header p { color: var(--muted); font-size: 13px; }
+
+    .shell {
+      border: 1px solid rgba(15, 23, 42, 0.08);
+      border-radius: 18px;
+      background: rgba(255, 255, 255, 0.84);
+      box-shadow: var(--shadow);
+      overflow: hidden;
+    }
+
+    .demo-table {
+      width: 100%;
+      border-collapse: collapse;
+    }
+
+    .demo-table th,
+    .demo-table td {
+      padding: 14px 16px;
+      border-bottom: 1px solid rgba(15, 23, 42, 0.06);
+      vertical-align: middle;
+      text-align: left;
+    }
+
+    .demo-table th {
+      color: #667085;
+      font-size: 13px;
+      background: #f8fafc;
+    }
+
+    .review-date { font-weight: 900; font-size: 15px; white-space: nowrap; }
+    .theme-text { color: #344054; font-size: 13px; }
+
+    button { border: 0; cursor: pointer; font: inherit; font-weight: 800; white-space: nowrap; }
+    .btn-ghost { min-height: 32px; padding: 6px 12px; border-radius: 999px; color: var(--ink); background: white; border: 1px solid var(--line); font-size: 13px; }
+    .btn-primary { min-height: 32px; padding: 6px 14px; border-radius: 999px; color: white; background: #101828; font-size: 13px; }
+    .action-pair { display: inline-flex; gap: 8px; }
+
+    .impact-stack { display: grid; gap: 9px; }
+
+    .impact-account {
+      color: #344054;
+      font-size: 12px;
+      font-weight: 850;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .impact-row {
+      display: grid;
+      grid-template-columns: 80px 100px;
+      align-items: center;
+      gap: 10px;
+    }
+
+    .meter-cut {
+      position: relative;
+      display: inline-grid;
+      gap: 2px;
+      height: 10px;
+      overflow: visible;
+    }
+
+    .meter-cut.cols-1 { grid-template-columns: 1fr; width: 25%; }
+    .meter-cut.cols-2 { grid-template-columns: 1fr 1fr; width: 50%; }
+    .meter-cut.cols-3 { grid-template-columns: 1fr 1fr 1fr; width: 75%; }
+    .meter-cut.cols-4 { grid-template-columns: 1fr 1fr 1fr 1fr; width: 100%; }
+
+    .meter-cut .seg { border-radius: 3px; }
+
+    .meter-cut .dot {
+      position: absolute;
+      top: 50%;
+      width: 12px;
+      height: 12px;
+      border-radius: 50%;
+      border: 2.5px solid white;
+      background: #1f2937;
+      box-shadow: 0 2px 5px rgba(0,0,0,0.25);
+      transform: translate(-50%, -50%);
+      z-index: 4;
+    }
+
+    /*
+      跨色相思路:
+      盈利: 从暖色调的偏黄/青绿 → 纯绿 → 深绿, 每格色相有变化
+      亏损: 从暖色调的橙/粉 → 纯红 → 深红/暗紫, 每格色相有变化
+    */
+
+    /* --- C1: 黄绿 → 绿 → 翠 → 墨绿 | 橙 → 珊瑚 → 红 → 暗红 --- */
+    .c1.gain .seg:nth-child(1) { background: #a3e635; }
+    .c1.gain .seg:nth-child(2) { background: #22c55e; }
+    .c1.gain .seg:nth-child(3) { background: #0d9488; }
+    .c1.gain .seg:nth-child(4) { background: #1e4d3a; }
+    .c1.loss .seg:nth-child(1) { background: #fb923c; }
+    .c1.loss .seg:nth-child(2) { background: #f87171; }
+    .c1.loss .seg:nth-child(3) { background: #dc2626; }
+    .c1.loss .seg:nth-child(4) { background: #7f1d1d; }
+
+    /* --- C2: 青 → 绿 → 深绿 → 墨绿 | 粉橙 → 玫红 → 红 → 暗酒红 --- */
+    .c2.gain .seg:nth-child(1) { background: #2dd4bf; }
+    .c2.gain .seg:nth-child(2) { background: #22c55e; }
+    .c2.gain .seg:nth-child(3) { background: #16a34a; }
+    .c2.gain .seg:nth-child(4) { background: #14532d; }
+    .c2.loss .seg:nth-child(1) { background: #fb7185; }
+    .c2.loss .seg:nth-child(2) { background: #ef4444; }
+    .c2.loss .seg:nth-child(3) { background: #be123c; }
+    .c2.loss .seg:nth-child(4) { background: #881337; }
+
+    /* --- C3: 薄荷 → 翡翠 → 深翠 → 墨绿 | 杏橙 → 桃红 → 深红 → 暗褐红 --- */
+    .c3.gain .seg:nth-child(1) { background: #6ee7b7; }
+    .c3.gain .seg:nth-child(2) { background: #34d399; }
+    .c3.gain .seg:nth-child(3) { background: #059669; }
+    .c3.gain .seg:nth-child(4) { background: #064e3b; }
+    .c3.loss .seg:nth-child(1) { background: #fdba74; }
+    .c3.loss .seg:nth-child(2) { background: #f87171; }
+    .c3.loss .seg:nth-child(3) { background: #dc2626; }
+    .c3.loss .seg:nth-child(4) { background: #7f1d1d; }
+
+    /* --- C4: 柠檬绿 → 草绿 → 森绿 → 深墨 | 琥珀 → 橙红 → 红 → 深栗 --- */
+    .c4.gain .seg:nth-child(1) { background: #bef264; }
+    .c4.gain .seg:nth-child(2) { background: #4ade80; }
+    .c4.gain .seg:nth-child(3) { background: #16a34a; }
+    .c4.gain .seg:nth-child(4) { background: #14532d; }
+    .c4.loss .seg:nth-child(1) { background: #fbbf24; }
+    .c4.loss .seg:nth-child(2) { background: #f87171; }
+    .c4.loss .seg:nth-child(3) { background: #dc2626; }
+    .c4.loss .seg:nth-child(4) { background: #7f1d1d; }
+
+    /* --- C5: 青绿 → 绿 → 深绿 → 墨 | 橙黄 → 橙 → 红橙 → 深红 (完全避开红绿同色) --- */
+    .c5.gain .seg:nth-child(1) { background: #5eead4; }
+    .c5.gain .seg:nth-child(2) { background: #14b8a6; }
+    .c5.gain .seg:nth-child(3) { background: #0f766e; }
+    .c5.gain .seg:nth-child(4) { background: #134e4a; }
+    .c5.loss .seg:nth-child(1) { background: #fbbf24; }
+    .c5.loss .seg:nth-child(2) { background: #f97316; }
+    .c5.loss .seg:nth-child(3) { background: #ea580c; }
+    .c5.loss .seg:nth-child(4) { background: #7c2d12; }
+
+    /* ============================================================
+       色板预览
+       ============================================================ */
+    .swatch-row {
+      display: grid;
+      grid-template-columns: 50px repeat(4, 1fr) 8px repeat(4, 1fr);
+      gap: 2px;
+      align-items: center;
+      height: 32px;
+    }
+    .swatch-row .label {
+      font-size: 13px;
+      font-weight: 800;
+      color: #344054;
+    }
+    .swatch-row .spacer { }
+    .swatch-row .sw {
+      height: 100%;
+      border-radius: 4px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 10px;
+      font-weight: 700;
+    }
+    .swatch-row .sw.light { color: rgba(0,0,0,0.4); }
+    .swatch-row .sw.dark { color: rgba(255,255,255,0.6); }
+
+    .note { font-size: 12px; color: #94a3b8; margin-top: 8px; }
+
+    .compare-table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 13px;
+    }
+    .compare-table th,
+    .compare-table td {
+      padding: 10px 14px;
+      border-bottom: 1px solid #f1f5f9;
+      text-align: left;
+      vertical-align: middle;
+    }
+    .compare-table th {
+      color: #667085;
+      font-size: 12px;
+      border-bottom: 2px solid #e2e8f0;
+    }
+
+    @media (max-width: 760px) {
+      main { width: min(100vw - 20px, 1100px); margin-top: 18px; }
+      .shell { overflow-x: auto; }
+      .demo-table { min-width: 700px; }
+    }
+  </style>
+</head>
+<body>
+  <main>
+    <header class="page-head">
+      <h1>跨色相配色 - 提高区分度</h1>
+      <p>每格用不同色相，但整体仍保持"暖色系=亏损、冷色系=盈利"的直觉。格与格之间不只是深浅变化，色调也变。</p>
+    </header>
+
+    <!-- C1 -->
+    <section class="section">
+      <div class="section-header">
+        <h2>C1: 黄绿 → 绿 → 翠 → 墨绿 | 橙 → 珊瑚 → 红 → 暗红</h2>
+        <p>盈利从黄绿色起步，逐步偏蓝绿。亏损从橙色起步，逐步偏深红。每格色相都不同。</p>
+      </div>
+      <div class="shell">
+        <table class="demo-table">
+          <thead><tr><th style="width:110px">复盘日</th><th>账户估算影响</th><th style="width:230px">当日主线</th><th style="width:110px;text-align:right">操作</th></tr></thead>
+          <tbody>
+            <tr>
+              <td><span class="review-date">05-17</span></td>
+              <td>
+                <div class="impact-stack">
+                  <div class="impact-row"><span class="impact-account">老虎-美股</span><div class="meter-cut cols-2 c1 gain"><div class="seg"></div><div class="seg"></div><div class="dot" style="left: 75%"></div></div></div>
+                  <div class="impact-row"><span class="impact-account">东方财富</span><div class="meter-cut cols-1 c1 loss"><div class="seg"></div><div class="dot" style="left: 75%"></div></div></div>
+                  <div class="impact-row"><span class="impact-account">天天基金</span><div class="meter-cut cols-1 c1 gain"><div class="seg"></div><div class="dot" style="left: 12%"></div></div></div>
+                </div>
+              </td>
+              <td><span class="theme-text">AI 资金回流，半导体强于大盘</span></td>
+              <td style="text-align:right"><span class="action-pair"><button class="btn-ghost">查看</button><button class="btn-primary">编辑</button></span></td>
+            </tr>
+            <tr>
+              <td><span class="review-date">05-16</span></td>
+              <td>
+                <div class="impact-stack">
+                  <div class="impact-row"><span class="impact-account">老虎-美股</span><div class="meter-cut cols-4 c1 gain"><div class="seg"></div><div class="seg"></div><div class="seg"></div><div class="seg"></div><div class="dot" style="left: 87.5%"></div></div></div>
+                  <div class="impact-row"><span class="impact-account">东方财富</span><div class="meter-cut cols-3 c1 loss"><div class="seg"></div><div class="seg"></div><div class="seg"></div><div class="dot" style="left: 100%"></div></div></div>
+                  <div class="impact-row"><span class="impact-account">天天基金</span><div class="meter-cut cols-1 c1 gain"><div class="seg"></div><div class="dot" style="left: 50%"></div></div></div>
+                </div>
+              </td>
+              <td><span class="theme-text">关税谈判落地，科技股大涨</span></td>
+              <td style="text-align:right"><span class="action-pair"><button class="btn-ghost">查看</button><button class="btn-primary">编辑</button></span></td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <!-- C2 -->
+    <section class="section">
+      <div class="section-header">
+        <h2>C2: 青 → 绿 → 深绿 → 墨绿 | 粉红 → 红 → 玫红 → 酒红</h2>
+        <p>盈利从青色起步偏绿。亏损从粉红起步偏深玫红。</p>
+      </div>
+      <div class="shell">
+        <table class="demo-table">
+          <thead><tr><th style="width:110px">复盘日</th><th>账户估算影响</th><th style="width:230px">当日主线</th><th style="width:110px;text-align:right">操作</th></tr></thead>
+          <tbody>
+            <tr>
+              <td><span class="review-date">05-17</span></td>
+              <td>
+                <div class="impact-stack">
+                  <div class="impact-row"><span class="impact-account">老虎-美股</span><div class="meter-cut cols-2 c2 gain"><div class="seg"></div><div class="seg"></div><div class="dot" style="left: 75%"></div></div></div>
+                  <div class="impact-row"><span class="impact-account">东方财富</span><div class="meter-cut cols-1 c2 loss"><div class="seg"></div><div class="dot" style="left: 75%"></div></div></div>
+                  <div class="impact-row"><span class="impact-account">天天基金</span><div class="meter-cut cols-1 c2 gain"><div class="seg"></div><div class="dot" style="left: 12%"></div></div></div>
+                </div>
+              </td>
+              <td><span class="theme-text">AI 资金回流，半导体强于大盘</span></td>
+              <td style="text-align:right"><span class="action-pair"><button class="btn-ghost">查看</button><button class="btn-primary">编辑</button></span></td>
+            </tr>
+            <tr>
+              <td><span class="review-date">05-16</span></td>
+              <td>
+                <div class="impact-stack">
+                  <div class="impact-row"><span class="impact-account">老虎-美股</span><div class="meter-cut cols-4 c2 gain"><div class="seg"></div><div class="seg"></div><div class="seg"></div><div class="seg"></div><div class="dot" style="left: 87.5%"></div></div></div>
+                  <div class="impact-row"><span class="impact-account">东方财富</span><div class="meter-cut cols-3 c2 loss"><div class="seg"></div><div class="seg"></div><div class="seg"></div><div class="dot" style="left: 100%"></div></div></div>
+                  <div class="impact-row"><span class="impact-account">天天基金</span><div class="meter-cut cols-1 c2 gain"><div class="seg"></div><div class="dot" style="left: 50%"></div></div></div>
+                </div>
+              </td>
+              <td><span class="theme-text">关税谈判落地，科技股大涨</span></td>
+              <td style="text-align:right"><span class="action-pair"><button class="btn-ghost">查看</button><button class="btn-primary">编辑</button></span></td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <!-- C3 -->
+    <section class="section">
+      <div class="section-header">
+        <h2>C3: 薄荷 → 翡翠 → 深翠 → 墨绿 | 杏橙 → 红 → 深红 → 暗红</h2>
+        <p>盈利从薄荷绿起步。亏损从杏橙色起步，跨到红色。前 2 格色相差异大，一眼可辨。</p>
+      </div>
+      <div class="shell">
+        <table class="demo-table">
+          <thead><tr><th style="width:110px">复盘日</th><th>账户估算影响</th><th style="width:230px">当日主线</th><th style="width:110px;text-align:right">操作</th></tr></thead>
+          <tbody>
+            <tr>
+              <td><span class="review-date">05-17</span></td>
+              <td>
+                <div class="impact-stack">
+                  <div class="impact-row"><span class="impact-account">老虎-美股</span><div class="meter-cut cols-2 c3 gain"><div class="seg"></div><div class="seg"></div><div class="dot" style="left: 75%"></div></div></div>
+                  <div class="impact-row"><span class="impact-account">东方财富</span><div class="meter-cut cols-1 c3 loss"><div class="seg"></div><div class="dot" style="left: 75%"></div></div></div>
+                  <div class="impact-row"><span class="impact-account">天天基金</span><div class="meter-cut cols-1 c3 gain"><div class="seg"></div><div class="dot" style="left: 12%"></div></div></div>
+                </div>
+              </td>
+              <td><span class="theme-text">AI 资金回流，半导体强于大盘</span></td>
+              <td style="text-align:right"><span class="action-pair"><button class="btn-ghost">查看</button><button class="btn-primary">编辑</button></span></td>
+            </tr>
+            <tr>
+              <td><span class="review-date">05-16</span></td>
+              <td>
+                <div class="impact-stack">
+                  <div class="impact-row"><span class="impact-account">老虎-美股</span><div class="meter-cut cols-4 c3 gain"><div class="seg"></div><div class="seg"></div><div class="seg"></div><div class="seg"></div><div class="dot" style="left: 87.5%"></div></div></div>
+                  <div class="impact-row"><span class="impact-account">东方财富</span><div class="meter-cut cols-3 c3 loss"><div class="seg"></div><div class="seg"></div><div class="seg"></div><div class="dot" style="left: 100%"></div></div></div>
+                  <div class="impact-row"><span class="impact-account">天天基金</span><div class="meter-cut cols-1 c3 gain"><div class="seg"></div><div class="dot" style="left: 50%"></div></div></div>
+                </div>
+              </td>
+              <td><span class="theme-text">关税谈判落地，科技股大涨</span></td>
+              <td style="text-align:right"><span class="action-pair"><button class="btn-ghost">查看</button><button class="btn-primary">编辑</button></span></td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <!-- C4 -->
+    <section class="section">
+      <div class="section-header">
+        <h2>C4: 柠檬 → 草绿 → 森绿 → 墨绿 | 琥珀 → 红 → 深红 → 栗红</h2>
+        <p>盈利从亮柠檬黄绿起步，跳跃感最强。亏损从琥珀黄起步，到深红收尾。</p>
+      </div>
+      <div class="shell">
+        <table class="demo-table">
+          <thead><tr><th style="width:110px">复盘日</th><th>账户估算影响</th><th style="width:230px">当日主线</th><th style="width:110px;text-align:right">操作</th></tr></thead>
+          <tbody>
+            <tr>
+              <td><span class="review-date">05-17</span></td>
+              <td>
+                <div class="impact-stack">
+                  <div class="impact-row"><span class="impact-account">老虎-美股</span><div class="meter-cut cols-2 c4 gain"><div class="seg"></div><div class="seg"></div><div class="dot" style="left: 75%"></div></div></div>
+                  <div class="impact-row"><span class="impact-account">东方财富</span><div class="meter-cut cols-1 c4 loss"><div class="seg"></div><div class="dot" style="left: 75%"></div></div></div>
+                  <div class="impact-row"><span class="impact-account">天天基金</span><div class="meter-cut cols-1 c4 gain"><div class="seg"></div><div class="dot" style="left: 12%"></div></div></div>
+                </div>
+              </td>
+              <td><span class="theme-text">AI 资金回流，半导体强于大盘</span></td>
+              <td style="text-align:right"><span class="action-pair"><button class="btn-ghost">查看</button><button class="btn-primary">编辑</button></span></td>
+            </tr>
+            <tr>
+              <td><span class="review-date">05-16</span></td>
+              <td>
+                <div class="impact-stack">
+                  <div class="impact-row"><span class="impact-account">老虎-美股</span><div class="meter-cut cols-4 c4 gain"><div class="seg"></div><div class="seg"></div><div class="seg"></div><div class="seg"></div><div class="dot" style="left: 87.5%"></div></div></div>
+                  <div class="impact-row"><span class="impact-account">东方财富</span><div class="meter-cut cols-3 c4 loss"><div class="seg"></div><div class="seg"></div><div class="seg"></div><div class="dot" style="left: 100%"></div></div></div>
+                  <div class="impact-row"><span class="impact-account">天天基金</span><div class="meter-cut cols-1 c4 gain"><div class="seg"></div><div class="dot" style="left: 50%"></div></div></div>
+                </div>
+              </td>
+              <td><span class="theme-text">关税谈判落地，科技股大涨</span></td>
+              <td style="text-align:right"><span class="action-pair"><button class="btn-ghost">查看</button><button class="btn-primary">编辑</button></span></td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <!-- C5 -->
+    <section class="section">
+      <div class="section-header">
+        <h2>C5: 青绿 → 蓝绿 → 深蓝绿 → 墨 | 琥珀 → 橙 → 红橙 → 深红</h2>
+        <p>盈利走青蓝绿色系，亏损走橙黄暖色系。完全不同的色相通道，区分度最高，也最色弱友好。</p>
+      </div>
+      <div class="shell">
+        <table class="demo-table">
+          <thead><tr><th style="width:110px">复盘日</th><th>账户估算影响</th><th style="width:230px">当日主线</th><th style="width:110px;text-align:right">操作</th></tr></thead>
+          <tbody>
+            <tr>
+              <td><span class="review-date">05-17</span></td>
+              <td>
+                <div class="impact-stack">
+                  <div class="impact-row"><span class="impact-account">老虎-美股</span><div class="meter-cut cols-2 c5 gain"><div class="seg"></div><div class="seg"></div><div class="dot" style="left: 75%"></div></div></div>
+                  <div class="impact-row"><span class="impact-account">东方财富</span><div class="meter-cut cols-1 c5 loss"><div class="seg"></div><div class="dot" style="left: 75%"></div></div></div>
+                  <div class="impact-row"><span class="impact-account">天天基金</span><div class="meter-cut cols-1 c5 gain"><div class="seg"></div><div class="dot" style="left: 12%"></div></div></div>
+                </div>
+              </td>
+              <td><span class="theme-text">AI 资金回流，半导体强于大盘</span></td>
+              <td style="text-align:right"><span class="action-pair"><button class="btn-ghost">查看</button><button class="btn-primary">编辑</button></span></td>
+            </tr>
+            <tr>
+              <td><span class="review-date">05-16</span></td>
+              <td>
+                <div class="impact-stack">
+                  <div class="impact-row"><span class="impact-account">老虎-美股</span><div class="meter-cut cols-4 c5 gain"><div class="seg"></div><div class="seg"></div><div class="seg"></div><div class="seg"></div><div class="dot" style="left: 87.5%"></div></div></div>
+                  <div class="impact-row"><span class="impact-account">东方财富</span><div class="meter-cut cols-3 c5 loss"><div class="seg"></div><div class="seg"></div><div class="seg"></div><div class="dot" style="left: 100%"></div></div></div>
+                  <div class="impact-row"><span class="impact-account">天天基金</span><div class="meter-cut cols-1 c5 gain"><div class="seg"></div><div class="dot" style="left: 50%"></div></div></div>
+                </div>
+              </td>
+              <td><span class="theme-text">关税谈判落地，科技股大涨</span></td>
+              <td style="text-align:right"><span class="action-pair"><button class="btn-ghost">查看</button><button class="btn-primary">编辑</button></span></td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <!-- =====================================================
+         色板一览
+         ===================================================== -->
+    <section class="section">
+      <div class="section-header">
+        <h2>色板一览</h2>
+      </div>
+      <div class="shell" style="padding: 20px; display: grid; gap: 10px;">
+        <div class="swatch-row">
+          <span class="label">C1</span>
+          <div class="sw light" style="background:#a3e635">1</div><div class="sw dark" style="background:#22c55e">2</div><div class="sw dark" style="background:#0d9488">3</div><div class="sw dark" style="background:#1e4d3a">4</div>
+          <div class="spacer"></div>
+          <div class="sw light" style="background:#fb923c">1</div><div class="sw light" style="background:#f87171">2</div><div class="sw dark" style="background:#dc2626">3</div><div class="sw dark" style="background:#7f1d1d">4</div>
+        </div>
+        <div class="swatch-row">
+          <span class="label">C2</span>
+          <div class="sw light" style="background:#2dd4bf">1</div><div class="sw dark" style="background:#22c55e">2</div><div class="sw dark" style="background:#16a34a">3</div><div class="sw dark" style="background:#14532d">4</div>
+          <div class="spacer"></div>
+          <div class="sw light" style="background:#fb7185">1</div><div class="sw dark" style="background:#ef4444">2</div><div class="sw dark" style="background:#be123c">3</div><div class="sw dark" style="background:#881337">4</div>
+        </div>
+        <div class="swatch-row">
+          <span class="label">C3</span>
+          <div class="sw light" style="background:#6ee7b7">1</div><div class="sw light" style="background:#34d399">2</div><div class="sw dark" style="background:#059669">3</div><div class="sw dark" style="background:#064e3b">4</div>
+          <div class="spacer"></div>
+          <div class="sw light" style="background:#fdba74">1</div><div class="sw light" style="background:#f87171">2</div><div class="sw dark" style="background:#dc2626">3</div><div class="sw dark" style="background:#7f1d1d">4</div>
+        </div>
+        <div class="swatch-row">
+          <span class="label">C4</span>
+          <div class="sw light" style="background:#bef264">1</div><div class="sw light" style="background:#4ade80">2</div><div class="sw dark" style="background:#16a34a">3</div><div class="sw dark" style="background:#14532d">4</div>
+          <div class="spacer"></div>
+          <div class="sw light" style="background:#fbbf24">1</div><div class="sw light" style="background:#f87171">2</div><div class="sw dark" style="background:#dc2626">3</div><div class="sw dark" style="background:#7f1d1d">4</div>
+        </div>
+        <div class="swatch-row">
+          <span class="label">C5</span>
+          <div class="sw light" style="background:#5eead4">1</div><div class="sw dark" style="background:#14b8a6">2</div><div class="sw dark" style="background:#0f766e">3</div><div class="sw dark" style="background:#134e4a">4</div>
+          <div class="spacer"></div>
+          <div class="sw light" style="background:#fbbf24">1</div><div class="sw light" style="background:#f97316">2</div><div class="sw dark" style="background:#ea580c">3</div><div class="sw dark" style="background:#7c2d12">4</div>
+        </div>
+        <p class="note">左 = 盈利 4 阶，右 = 亏损 4 阶。每格色相都不同，不只是明暗变化。</p>
+      </div>
+    </section>
+
+  </main>
+</body>
+</html>

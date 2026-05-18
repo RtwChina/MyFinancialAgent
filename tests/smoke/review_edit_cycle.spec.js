@@ -1,7 +1,7 @@
 import { test, expect } from '@playwright/test';
 import { execFileSync } from 'node:child_process';
 
-const BASE_URL = 'http://127.0.0.1:8787';
+const BASE_URL = process.env.BASE_URL || 'http://127.0.0.1:8787';
 const REVIEW_DATE = '2026-03-13';
 const SORT_REVIEW_DATE = '2026-03-12';
 const ZERO_REVIEW_DATE = '2026-03-14';
