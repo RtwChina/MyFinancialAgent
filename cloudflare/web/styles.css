@@ -1964,20 +1964,33 @@ textarea[name="reviewerNewsNotes"] {
 
 .structured-note-section {
   display: grid;
-  gap: 10px;
-  padding: 10px;
+  grid-template-columns: 40px minmax(0, 1fr);
+  gap: 0;
+  padding: 0;
   border: 1px solid rgba(15, 23, 42, 0.09);
   border-radius: 8px;
   background: #ffffff;
   box-shadow: 0 12px 28px rgba(15, 23, 42, 0.05);
   transition: border-color 0.16s ease, box-shadow 0.16s ease, opacity 0.16s ease, transform 0.16s ease;
+  overflow: hidden;
+}
+
+.structured-note-section-index {
+  grid-row: 1 / span 4;
+  display: grid;
+  place-items: start center;
+  padding-top: 13px;
+  background: #172033;
+  color: #ffffff;
+  font-size: 0.92rem;
+  font-weight: 900;
+  letter-spacing: 0;
 }
 
 .structured-note-section-head {
-  padding: 9px 11px;
-  border: 1px solid rgba(37, 99, 235, 0.16);
-  border-radius: 8px;
-  background: linear-gradient(180deg, #f8fbff, #eef5ff);
+  padding: 9px 10px;
+  border-bottom: 1px solid var(--line);
+  background: #ffffff;
 }
 
 .structured-note-section-head input,
@@ -1995,12 +2008,13 @@ textarea[name="reviewerNewsNotes"] {
 .structured-note-section-head input {
   font-size: 1rem;
   border-bottom-color: transparent;
-  color: #1e3a8a;
+  color: #172033;
 }
 
 .structured-note-subsections {
   display: grid;
   gap: 10px;
+  padding: 10px 10px 0;
 }
 
 .structured-note-subsection {
@@ -2051,6 +2065,11 @@ textarea[name="reviewerNewsNotes"] {
   min-height: 30px;
   padding: 5px 9px;
   font-size: 0.78rem;
+}
+
+.structured-note-add-sub {
+  margin: 10px;
+  width: fit-content;
 }
 
 .structured-note-tools .structured-note-drag-handle {

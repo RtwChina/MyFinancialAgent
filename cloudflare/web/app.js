@@ -1114,6 +1114,10 @@ function renderStructuredNoteEditor(field, container) {
   blocks.forEach((section, sectionIndex) => {
     const sectionEl = document.createElement("article");
     sectionEl.className = "structured-note-section";
+    const indexEl = document.createElement("div");
+    indexEl.className = "structured-note-section-index";
+    indexEl.textContent = String(sectionIndex + 1);
+    sectionEl.appendChild(indexEl);
     const head = document.createElement("div");
     head.className = "structured-note-section-head";
     const titleInput = document.createElement("input");
