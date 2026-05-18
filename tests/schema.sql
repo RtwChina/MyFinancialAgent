@@ -65,7 +65,9 @@ CREATE TABLE IF NOT EXISTS daily_review_archive (
     review_status TEXT NOT NULL DEFAULT 'draft',
     reviewer_news_notes TEXT,
     market_sentiment TEXT,
+    market_sentiment_blocks_json TEXT,
     sector_rotation TEXT,
+    sector_rotation_blocks_json TEXT,
     trading_summary TEXT,
     reviewed_at DATETIME,
     updated_at DATETIME DEFAULT CURRENT_TIMESTAMP

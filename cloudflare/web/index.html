@@ -489,17 +489,29 @@
             </section>
 
             <section class="review-step-panel hidden" data-step="market">
-              <label class="review-field wide">
-                <span class="review-section-title">大盘盘点</span>
-                <textarea name="marketSentiment" rows="12" placeholder="记录美元、利率、VIX、成交量、风险偏好这些真正驱动大盘的变量。"></textarea>
-              </label>
+              <div class="review-field wide structured-note-field">
+                <div class="structured-note-head">
+                  <div>
+                    <strong class="review-section-title">大盘盘点</strong>
+                  </div>
+                  <button type="button" class="compact-button" data-note-add-section="marketSentiment">+ 一级</button>
+                </div>
+                <div id="marketSentimentBlockEditor" class="structured-note-editor" data-note-field="marketSentiment"></div>
+                <textarea name="marketSentiment" class="structured-note-compat-textarea hidden" data-no-md aria-hidden="true"></textarea>
+              </div>
             </section>
 
             <section class="review-step-panel hidden" data-step="rotation">
-              <label class="review-field wide">
-                <span class="review-section-title">大宗商品与板块轮动</span>
-                <textarea name="sectorRotation" rows="12" placeholder="写原油、黄金、铜、半导体、AI、金融等方向里，今天谁在领涨或承压。"></textarea>
-              </label>
+              <div class="review-field wide structured-note-field">
+                <div class="structured-note-head">
+                  <div>
+                    <strong class="review-section-title">大宗商品与板块轮动</strong>
+                  </div>
+                  <button type="button" class="compact-button" data-note-add-section="sectorRotation">+ 一级</button>
+                </div>
+                <div id="sectorRotationBlockEditor" class="structured-note-editor" data-note-field="sectorRotation"></div>
+                <textarea name="sectorRotation" class="structured-note-compat-textarea hidden" data-no-md aria-hidden="true"></textarea>
+              </div>
             </section>
 
             <section class="review-step-panel hidden" data-step="plan">

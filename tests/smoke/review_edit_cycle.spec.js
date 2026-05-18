@@ -7,6 +7,7 @@ const SORT_REVIEW_DATE = '2026-03-12';
 const ZERO_REVIEW_DATE = '2026-03-14';
 const CARRY_SOURCE_DATE = '2026-03-09';
 const CARRY_TARGET_DATE = '2026-03-10';
+const NOTE_BLOCK_REVIEW_DATE = '2026-03-15';
 
 function d1(command) {
   return execFileSync(
@@ -35,6 +36,16 @@ function seedPlanSymbols(symbols) {
   });
 }
 
+async function fillStructuredNote(page, field, sectionTitle, subsectionTitle, body) {
+  const editor = page.locator(`#${field}BlockEditor`);
+  if (await editor.locator('.structured-note-section').count() === 0) {
+    await page.locator(`[data-note-add-section="${field}"]`).click();
+  }
+  await editor.locator('.structured-note-section').first().locator('.structured-note-section-head input').fill(sectionTitle);
+  await editor.locator('.structured-note-subsection').first().locator('.structured-note-subsection-head input').fill(subsectionTitle);
+  await editor.locator('.structured-note-subsection').first().locator('textarea').fill(body);
+}
+
 test('review can be completed, reopened, edited, and saved again', async ({ page, request }) => {
   await request.post(`${BASE_URL}/api/reviews/${REVIEW_DATE}/initialize`);
 
@@ -50,9 +61,9 @@ test('review can be completed, reopened, edited, and saved again', async ({ page
   }
   await page.locator('textarea[name="reviewerNewsNotes"]').fill('本地冒烟：先完成一轮复盘。');
   await page.getByRole('button', { name: '下一步' }).click();
-  await page.locator('textarea[name="marketSentiment"]').fill('本地冒烟：大盘变量已记录。');
+  await fillStructuredNote(page, 'marketSentiment', '标普500', '流动性', '本地冒烟：大盘变量已记录。');
   await page.getByRole('button', { name: '下一步' }).click();
-  await page.locator('textarea[name="sectorRotation"]').fill('本地冒烟：板块轮动已记录。');
+  await fillStructuredNote(page, 'sectorRotation', '黄金', '利率影响', '本地冒烟：板块轮动已记录。');
   await page.getByRole('button', { name: '下一步' }).click();
   if (await page.locator('#emptyActionPlanStateUs').isVisible()) {
     await page.locator('#addActionPlanUsBtn').click();
@@ -77,6 +88,28 @@ test('review can be completed, reopened, edited, and saved again', async ({ page
   await expect(page.locator('#reviewDrawer')).toBeHidden();
   const bootstrap = await request.get(`${BASE_URL}/api/reviews/${REVIEW_DATE}/bootstrap`);
   const bootstrapJson = await bootstrap.json();
+  expect(bootstrapJson.structuredNotes.marketSentiment.blocks).toEqual(
+    expect.arrayContaining([
+      expect.objectContaining({
+        title: '标普500',
+        children: expect.arrayContaining([
+          expect.objectContaining({ title: '流动性', body: '本地冒烟：大盘变量已记录。' }),
+        ]),
+      }),
+    ]),
+  );
+  expect(bootstrapJson.structuredNotes.sectorRotation.blocks).toEqual(
+    expect.arrayContaining([
+      expect.objectContaining({
+        title: '黄金',
+        children: expect.arrayContaining([
+          expect.objectContaining({ title: '利率影响', body: '本地冒烟：板块轮动已记录。' }),
+        ]),
+      }),
+    ]),
+  );
+  expect(bootstrapJson.draft.market_sentiment).toContain('# 标普500');
+  expect(bootstrapJson.draft.sector_rotation).toContain('## 利率影响');
   expect(bootstrapJson.actionPlans).toEqual(
     expect.arrayContaining([
       expect.objectContaining({
@@ -108,6 +141,48 @@ test('review can be completed, reopened, edited, and saved again', async ({ page
   await expect(page.locator('#initializeBtn')).toHaveText('编辑');
   await expect(page.locator('textarea[name="reviewerNewsNotes"]')).toHaveJSProperty('readOnly', true);
   await expect(page.locator('textarea[name="reviewerNewsNotes"]')).toHaveValue('本地冒烟：已复盘后再次编辑并保存。');
+});
+
+test('market and rotation structured note blocks can be added, reordered, deleted, saved, and reopened', async ({ page, request }) => {
+  await request.post(`${BASE_URL}/api/reviews/${NOTE_BLOCK_REVIEW_DATE}/initialize`);
+
+  await page.goto(BASE_URL, { waitUntil: 'networkidle' });
+  const row = page.locator('#reviewsList tr', { hasText: NOTE_BLOCK_REVIEW_DATE }).first();
+  await expect(row).toBeVisible();
+  await row.getByRole('button', { name: /开始复盘|继续复盘|进入复盘|查看/ }).click();
+
+  await page.locator('textarea[name="reviewerNewsNotes"]').fill('结构化块冒烟：新闻总结。');
+  await page.getByRole('button', { name: '下一步' }).click();
+
+  await fillStructuredNote(page, 'marketSentiment', '黄金', '战争影响', '避险需求升温。');
+  await page.locator('[data-note-add-section="marketSentiment"]').click();
+  const marketEditor = page.locator('#marketSentimentBlockEditor');
+  await marketEditor.locator('.structured-note-section').nth(1).locator('.structured-note-section-head input').fill('标普500');
+  await marketEditor.locator('.structured-note-section').nth(1).locator('.structured-note-subsection-head input').fill('流动性');
+  await marketEditor.locator('.structured-note-section').nth(1).locator('textarea').fill('流动性边际改善。');
+  await marketEditor.locator('.structured-note-section').nth(1).locator('.structured-note-section-head .structured-note-tools button').filter({ hasText: '↑' }).click();
+  await marketEditor.locator('.structured-note-section').nth(1).getByRole('button', { name: '+ 二级' }).click();
+  await marketEditor.locator('.structured-note-section').nth(1).locator('.structured-note-subsection').nth(1).locator('.structured-note-subsection-head input').fill('待删除维度');
+  page.once('dialog', async (dialog) => dialog.accept());
+  await marketEditor.locator('.structured-note-section').nth(1).locator('.structured-note-subsection').nth(1).locator('.structured-note-subsection-head .structured-note-tools button').filter({ hasText: '删除' }).click();
+
+  await page.getByRole('button', { name: '下一步' }).click();
+  await fillStructuredNote(page, 'sectorRotation', '半导体', '风险', '估值压力仍在。');
+  await page.locator('#saveDraftBtn').click();
+
+  const bootstrap = await (await request.get(`${BASE_URL}/api/reviews/${NOTE_BLOCK_REVIEW_DATE}/bootstrap`)).json();
+  expect(bootstrap.structuredNotes.marketSentiment.blocks[0].title).toBe('标普500');
+  expect(bootstrap.structuredNotes.marketSentiment.blocks[1].title).toBe('黄金');
+  expect(bootstrap.structuredNotes.marketSentiment.blocks[1].children).toHaveLength(1);
+  expect(bootstrap.structuredNotes.sectorRotation.blocks[0].children[0]).toEqual(
+    expect.objectContaining({ title: '风险', body: '估值压力仍在。' }),
+  );
+
+  await page.reload({ waitUntil: 'networkidle' });
+  const reopenedRow = page.locator('#reviewsList tr', { hasText: NOTE_BLOCK_REVIEW_DATE }).first();
+  await reopenedRow.getByRole('button', { name: /开始复盘|继续复盘|进入复盘|查看/ }).click();
+  await page.getByText('2. 大盘盘点', { exact: true }).click();
+  await expect(page.locator('#marketSentimentBlockEditor .structured-note-section').first().locator('.structured-note-section-head input')).toHaveValue('标普500');
 });
 
 test('action plans can be auto sorted by current position descending', async ({ page, request }) => {

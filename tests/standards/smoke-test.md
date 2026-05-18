@@ -65,6 +65,7 @@
 | SM-018  | 结构化操作计划保存 | 验证复盘抽屉操作计划步骤使用结构化表格保存并可回填 | 测试库已执行 `daily_review_action_plans` 迁移，存在可打开的复盘日 | 1. 打开复盘抽屉 2. 进入“操作计划”步骤 3. 添加 `MU` 计划，填写动作、仓位、开仓/止盈/止损、支撑位、压力位和思考 4. 保存并重新请求 bootstrap | `bootstrap.actionPlans` 返回 `MU` 计划，包含 `supportLevels` 与 `resistanceLevels`；`daily_review_archive.asset_plan` 同步生成 Markdown 摘要；其他日期同标的计划不受影响 | P0 | 是 |
 | SM-019  | 账户管理基础链路 | 验证账户管理页可读取和维护股票/基金账户资金字段 | 测试库已执行 `investment_accounts` 迁移并包含默认账户 | 1. 打开“账户管理”页 2. 确认 `老虎-美股`、`东方财富-国内`、`天天基金-国内` 可见 3. 编辑一个账户的总资产和可用资金并保存 4. 重新刷新账户列表 | 账户列表展示账户名称、币种、总资产、可用资金和启用状态；编辑后的资金字段可回查；不需要任何券商第三方接口 | P0 | 是 |
 | SM-020  | 操作计划按账户分组 | 验证复盘抽屉操作计划按账户而不是市场分组 | 测试库已执行账户化操作计划迁移，存在可打开的复盘日 | 1. 打开复盘抽屉 2. 进入“操作计划”步骤 3. 在 `老虎-美股` 下添加 `MU` 计划 4. 在另一个账户下添加同一标的或另一个标的 5. 保存并请求 bootstrap | 页面显示账户分组标题和资金摘要；`bootstrap.investmentAccounts` 非空；`bootstrap.actionPlans` 每条包含 `accountId`；同一 symbol 可在不同账户下独立存在 | P0 | 是 |
+| SM-021  | 大盘与板块自由块保存 | 验证复盘抽屉大盘盘点/板块轮动使用三层自由块保存并可回填 | 测试库已执行结构化复盘块迁移，存在可打开的复盘日 | 1. 打开复盘抽屉 2. 进入“大盘盘点”步骤 3. 新增一级块和二级块，填写正文 4. 进入“板块轮动”步骤执行同样操作 5. 保存并重新请求 bootstrap | `bootstrap.structuredNotes.marketSentiment.blocks` 与 `sectorRotation.blocks` 返回用户自由标题和正文；旧字段 `market_sentiment` / `sector_rotation` 同步生成 Markdown；重开后顺序保持，不做枚举校验 | P0 | 是 |
 
 ## 文档更新时机
 - 新功能进入主链路

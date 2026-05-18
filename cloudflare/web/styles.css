@@ -1935,6 +1935,111 @@ textarea[name="reviewerNewsNotes"] {
   min-height: 42vh;
 }
 
+.structured-note-field {
+  align-content: start;
+}
+
+.structured-note-compat-textarea.hidden {
+  display: none;
+}
+
+.structured-note-head,
+.structured-note-section-head,
+.structured-note-subsection-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  min-width: 0;
+}
+
+.structured-note-head {
+  margin-bottom: 6px;
+}
+
+.structured-note-editor {
+  display: grid;
+  gap: 12px;
+}
+
+.structured-note-section {
+  display: grid;
+  gap: 10px;
+  padding: 14px;
+  border: 1px solid rgba(15, 23, 42, 0.09);
+  border-radius: 8px;
+  background: #ffffff;
+  box-shadow: 0 12px 28px rgba(15, 23, 42, 0.05);
+}
+
+.structured-note-section-head input,
+.structured-note-subsection-head input {
+  width: 100%;
+  min-width: 0;
+  border: 0;
+  border-bottom: 1px solid rgba(15, 23, 42, 0.12);
+  border-radius: 0;
+  background: transparent;
+  padding: 5px 0;
+  font-weight: 800;
+}
+
+.structured-note-section-head input {
+  font-size: 1rem;
+}
+
+.structured-note-subsections {
+  display: grid;
+  gap: 10px;
+}
+
+.structured-note-subsection {
+  display: grid;
+  gap: 8px;
+  padding: 12px;
+  border-left: 3px solid #3b82f6;
+  border-radius: 8px;
+  background: #f8fafc;
+}
+
+.structured-note-subsection textarea,
+.review-field.wide .structured-note-subsection textarea {
+  min-height: 132px;
+  line-height: 1.65;
+  resize: vertical;
+}
+
+.structured-note-tools {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+}
+
+.structured-note-tools .compact-button,
+.structured-note-add-sub {
+  min-height: 30px;
+  padding: 5px 9px;
+  font-size: 0.78rem;
+}
+
+.structured-note-empty {
+  min-height: 140px;
+  display: grid;
+  place-items: center;
+}
+
+.review-modal.review-readonly .structured-note-section,
+.structured-note-editor.is-readonly .structured-note-section {
+  box-shadow: none;
+}
+
+.review-modal.review-readonly .structured-note-head > button,
+.structured-note-editor.is-readonly .structured-note-tools,
+.structured-note-editor.is-readonly .structured-note-add-sub {
+  display: none;
+}
+
 .action-plan-field {
   align-content: start;
   min-width: 0;

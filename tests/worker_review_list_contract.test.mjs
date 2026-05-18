@@ -6,7 +6,10 @@ import {
   buildAccountImpactSummaryFromPlans,
   bucketEstimatedImpactPercent,
   deriveReviewDailyThesis,
+  normalizeReviewNoteBlocks,
+  parseLegacyReviewNoteMarkdown,
   parsePositionWeight,
+  renderReviewNoteBlocksMarkdown,
 } from "../cloudflare/worker/src/index.js";
 
 test("deriveReviewDailyThesis prefers trading summary, then review notes, then AI analysis", () => {
@@ -101,4 +104,44 @@ test("buildAccountSnapshotFromAccounts preserves one review-day structured snaps
       notes: "",
     },
   ]);
+});
+
+test("review note blocks preserve arbitrary titles and render compatibility markdown", () => {
+  const blocks = normalizeReviewNoteBlocks([
+    {
+      title: "黄金",
+      children: [
+        { title: "战争影响", body: "避险需求升温。" },
+        { title: "利率影响", body: "实际利率回落支撑金价。\n保留 Markdown **重点**。" },
+      ],
+    },
+  ]);
+
+  assert.equal(blocks[0].title, "黄金");
+  assert.equal(blocks[0].children[0].title, "战争影响");
+  assert.equal(blocks[0].children[1].body.includes("**重点**"), true);
+  assert.equal(
+    renderReviewNoteBlocksMarkdown(blocks),
+    "# 黄金\n\n## 战争影响\n\n避险需求升温。\n\n## 利率影响\n\n实际利率回落支撑金价。\n保留 Markdown **重点**。",
+  );
+});
+
+test("legacy review note markdown parses # and ## into editable free blocks", () => {
+  const parsed = parseLegacyReviewNoteMarkdown(`# 标普500
+开盘前的核心判断。
+
+## CTA 流动性
+流动性边际改善。
+
+# XLK
+## 风险
+估值压力仍在。`);
+
+  assert.equal(parsed.length, 2);
+  assert.equal(parsed[0].title, "标普500");
+  assert.equal(parsed[0].children[0].title, "核心判断");
+  assert.equal(parsed[0].children[0].body, "开盘前的核心判断。");
+  assert.equal(parsed[0].children[1].title, "CTA 流动性");
+  assert.equal(parsed[1].title, "XLK");
+  assert.equal(parsed[1].children[0].title, "风险");
 });

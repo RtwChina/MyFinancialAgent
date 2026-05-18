@@ -946,6 +946,134 @@ function parseJsonArray(value) {
   }
 }
 
+function createReviewNoteId(prefix, index, childIndex = null) {
+  return childIndex == null ? `${prefix}-${index + 1}` : `${prefix}-${index + 1}-${childIndex + 1}`;
+}
+
+function normalizeReviewNoteBlocks(value, prefix = "note") {
+  const source = parseJsonArray(value);
+  return source
+    .map((section, sectionIndex) => {
+      if (!section || typeof section !== "object") return null;
+      const title = String(section.title || "").trim();
+      const childrenSource = Array.isArray(section.children)
+        ? section.children
+        : Array.isArray(section.subsections)
+          ? section.subsections
+          : [];
+      const children = childrenSource
+        .map((child, childIndex) => {
+          if (!child || typeof child !== "object") return null;
+          const childTitle = String(child.title || "").trim();
+          const body = String(child.body || child.content || "").trim();
+          if (!childTitle && !body) return null;
+          return {
+            id: String(child.id || createReviewNoteId(`${prefix}-sub`, sectionIndex, childIndex)),
+            title: childTitle || "未命名维度",
+            body,
+          };
+        })
+        .filter(Boolean);
+      if (!title && !children.length) return null;
+      return {
+        id: String(section.id || createReviewNoteId(prefix, sectionIndex)),
+        title: title || "未命名主题",
+        children,
+      };
+    })
+    .filter(Boolean);
+}
+
+function renderReviewNoteBlocksMarkdown(blocks) {
+  return normalizeReviewNoteBlocks(blocks)
+    .map((section) => {
+      const lines = [`# ${section.title}`];
+      for (const child of section.children || []) {
+        lines.push("", `## ${child.title}`);
+        if (child.body) lines.push("", child.body);
+      }
+      return lines.join("\n").trim();
+    })
+    .filter(Boolean)
+    .join("\n\n");
+}
+
+function parseLegacyReviewNoteMarkdown(text, prefix = "legacy") {
+  const raw = String(text || "").trim();
+  if (!raw) return [];
+  const sections = [];
+  let currentSection = null;
+  let currentChild = null;
+
+  const ensureSection = (title = "未分类") => {
+    if (!currentSection) {
+      currentSection = {
+        id: createReviewNoteId(prefix, sections.length),
+        title,
+        children: [],
+      };
+      sections.push(currentSection);
+    }
+    return currentSection;
+  };
+  const ensureChild = (title = "核心判断") => {
+    const section = ensureSection();
+    if (!currentChild) {
+      currentChild = {
+        id: createReviewNoteId(`${prefix}-sub`, sections.length - 1, section.children.length),
+        title,
+        body: "",
+      };
+      section.children.push(currentChild);
+    }
+    return currentChild;
+  };
+
+  for (const line of raw.split(/\r?\n/)) {
+    const h2 = line.match(/^##\s+(.+)$/);
+    const h1 = line.match(/^#\s+(.+)$/);
+    if (h1) {
+      currentSection = {
+        id: createReviewNoteId(prefix, sections.length),
+        title: h1[1].trim() || "未命名主题",
+        children: [],
+      };
+      sections.push(currentSection);
+      currentChild = null;
+      continue;
+    }
+    if (h2) {
+      const section = ensureSection();
+      currentChild = {
+        id: createReviewNoteId(`${prefix}-sub`, sections.length - 1, section.children.length),
+        title: h2[1].trim() || "未命名维度",
+        body: "",
+      };
+      section.children.push(currentChild);
+      continue;
+    }
+    const child = ensureChild();
+    child.body = child.body ? `${child.body}\n${line}` : line;
+  }
+
+  return normalizeReviewNoteBlocks(sections, prefix);
+}
+
+function resolveReviewNoteBlocks(record, jsonKey, textKey, prefix) {
+  const saved = normalizeReviewNoteBlocks(record?.[jsonKey], prefix);
+  if (saved.length) {
+    return { blocks: saved, source: "saved" };
+  }
+  const parsed = parseLegacyReviewNoteMarkdown(record?.[textKey], prefix);
+  return { blocks: parsed, source: parsed.length ? "legacy_parsed" : "empty" };
+}
+
+function pickSubmittedReviewNoteBlocks(body, camelKey, snakeKey) {
+  if (Array.isArray(body?.[camelKey])) return body[camelKey];
+  if (Array.isArray(body?.[snakeKey])) return body[snakeKey];
+  return null;
+}
+
 function parsePositionWeight(value) {
   const text = String(value || "").trim();
   if (!text) return null;
@@ -1146,7 +1274,22 @@ async function getReviewByDate(env, archiveDate) {
 
   return {
     archiveDate,
-    review: archive ? { ...archive, review_status: normalizeReviewStatus(archive.review_status) } : null,
+    review: archive ? {
+      ...archive,
+      review_status: normalizeReviewStatus(archive.review_status),
+      market_sentiment_blocks: resolveReviewNoteBlocks(
+        archive,
+        "market_sentiment_blocks_json",
+        "market_sentiment",
+        "market",
+      ).blocks,
+      sector_rotation_blocks: resolveReviewNoteBlocks(
+        archive,
+        "sector_rotation_blocks_json",
+        "sector_rotation",
+        "rotation",
+      ).blocks,
+    } : null,
   };
 }
 
@@ -1271,6 +1414,18 @@ async function getReviewBootstrap(env, archiveDate) {
   const accountImpactSummary = reviewStatus === "reviewed"
     ? await buildAccountImpactSummaryForReview(env, archiveDate)
     : await buildEstimatedAccountImpactSummaryForPlans(env, archiveDate, actionPlans);
+  const marketNoteBlocks = resolveReviewNoteBlocks(
+    existingDraft || previousCompletedReview,
+    "market_sentiment_blocks_json",
+    "market_sentiment",
+    "market",
+  );
+  const sectorNoteBlocks = resolveReviewNoteBlocks(
+    existingDraft || previousCompletedReview,
+    "sector_rotation_blocks_json",
+    "sector_rotation",
+    "rotation",
+  );
 
   // news 按类型分组
   const newsByType = { index: [], sector: [], stock: [] };
@@ -1295,7 +1450,18 @@ async function getReviewBootstrap(env, archiveDate) {
     accountImpactSummary,
     account_impact_summary: accountImpactSummary,
     carryForward: previousCompletedReview,
-    draft: existingDraft ? { ...existingDraft, review_status: reviewStatus } : null,
+    structuredNotes: {
+      marketSentiment: marketNoteBlocks,
+      sectorRotation: sectorNoteBlocks,
+    },
+    draft: existingDraft ? {
+      ...existingDraft,
+      review_status: reviewStatus,
+      market_sentiment_blocks: marketNoteBlocks.blocks,
+      market_sentiment_blocks_source: marketNoteBlocks.source,
+      sector_rotation_blocks: sectorNoteBlocks.blocks,
+      sector_rotation_blocks_source: sectorNoteBlocks.source,
+    } : null,
   };
 }
 
@@ -2124,17 +2290,49 @@ async function saveReviewDraft(env, archiveDate, body) {
   if (hasStructuredActionPlans) {
     await assertActionPlanSymbolsManaged(env, resolvedActionPlans);
   }
+  const submittedMarketBlocks = pickSubmittedReviewNoteBlocks(
+    body,
+    "marketSentimentBlocks",
+    "market_sentiment_blocks",
+  );
+  const submittedSectorBlocks = pickSubmittedReviewNoteBlocks(
+    body,
+    "sectorRotationBlocks",
+    "sector_rotation_blocks",
+  );
+  const marketBlocks = submittedMarketBlocks
+    ? normalizeReviewNoteBlocks(submittedMarketBlocks, "market")
+    : null;
+  const sectorBlocks = submittedSectorBlocks
+    ? normalizeReviewNoteBlocks(submittedSectorBlocks, "rotation")
+    : null;
+  const marketSentiment = marketBlocks
+    ? renderReviewNoteBlocksMarkdown(marketBlocks)
+    : body.marketSentiment || "";
+  const sectorRotation = sectorBlocks
+    ? renderReviewNoteBlocksMarkdown(sectorBlocks)
+    : body.sectorRotation || "";
+  const marketBlocksJson = marketBlocks ? JSON.stringify(marketBlocks) : null;
+  const sectorBlocksJson = sectorBlocks ? JSON.stringify(sectorBlocks) : null;
 
   await env.DB.prepare(
     `INSERT INTO daily_review_archive (
-      archive_date, review_status, reviewer_news_notes, market_sentiment,
-      sector_rotation, trading_summary, updated_at
-    ) VALUES (?, ?, ?, ?, ?, ?, ?)
+      archive_date, review_status, reviewer_news_notes, market_sentiment, market_sentiment_blocks_json,
+      sector_rotation, sector_rotation_blocks_json, trading_summary, updated_at
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
     ON CONFLICT(archive_date) DO UPDATE SET
       review_status = excluded.review_status,
       reviewer_news_notes = excluded.reviewer_news_notes,
       market_sentiment = excluded.market_sentiment,
+      market_sentiment_blocks_json = CASE
+        WHEN ? THEN excluded.market_sentiment_blocks_json
+        ELSE daily_review_archive.market_sentiment_blocks_json
+      END,
       sector_rotation = excluded.sector_rotation,
+      sector_rotation_blocks_json = CASE
+        WHEN ? THEN excluded.sector_rotation_blocks_json
+        ELSE daily_review_archive.sector_rotation_blocks_json
+      END,
       trading_summary = excluded.trading_summary,
       updated_at = excluded.updated_at`,
   )
@@ -2142,10 +2340,14 @@ async function saveReviewDraft(env, archiveDate, body) {
       archiveDate,
       reviewStatus,
       body.reviewerNewsNotes || body.newsBrief || "",
-      body.marketSentiment || "",
-      body.sectorRotation || "",
+      marketSentiment,
+      marketBlocksJson,
+      sectorRotation,
+      sectorBlocksJson,
       body.tradingSummary || "",
       isoNow(),
+      submittedMarketBlocks ? 1 : 0,
+      submittedSectorBlocks ? 1 : 0,
     )
     .run();
 
@@ -2158,6 +2360,8 @@ async function saveReviewDraft(env, archiveDate, body) {
     archiveDate,
     reviewStatus,
     actionPlanCount: resolvedActionPlans.length,
+    marketSentimentBlocks: marketBlocks || [],
+    sectorRotationBlocks: sectorBlocks || [],
   };
 }
 
@@ -2320,9 +2524,10 @@ async function initializeReview(env, archiveDate) {
     await env.DB.prepare(
       `INSERT INTO daily_review_archive (
         archive_date, review_status, reviewer_news_notes, market_sentiment,
-        sector_rotation, trading_summary, reviewed_at, updated_at
+        market_sentiment_blocks_json, sector_rotation, sector_rotation_blocks_json,
+        trading_summary, reviewed_at, updated_at
       )
-       VALUES (?, 'initialized', '', '', '', '', NULL, ?)`,
+       VALUES (?, 'initialized', '', '', NULL, '', NULL, '', NULL, ?)`,
     )
       .bind(archiveDate, now)
       .run();
@@ -2334,7 +2539,9 @@ async function initializeReview(env, archiveDate) {
        SET review_status = 'initialized',
            reviewer_news_notes = '',
            market_sentiment = '',
+           market_sentiment_blocks_json = NULL,
            sector_rotation = '',
+           sector_rotation_blocks_json = NULL,
            trading_summary = '',
            reviewed_at = NULL,
            updated_at = ?
@@ -2902,5 +3109,8 @@ export {
   buildAccountSnapshotFromAccounts,
   bucketEstimatedImpactPercent,
   deriveReviewDailyThesis,
+  normalizeReviewNoteBlocks,
+  parseLegacyReviewNoteMarkdown,
   parsePositionWeight,
+  renderReviewNoteBlocksMarkdown,
 };
