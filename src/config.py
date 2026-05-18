@@ -10,7 +10,7 @@ load_dotenv()
 # LLM API 配置
 LLM_API_KEY = os.getenv("LLM_API_KEY", "")
 LLM_BASE_URL = os.getenv("LLM_BASE_URL", "https://dashscope.aliyuncs.com/compatible-mode/v1")
-LLM_MODEL_ID = os.getenv("LLM_MODEL_ID", "qwen3.5-plus")
+LLM_MODEL_ID = os.getenv("LLM_MODEL_ID", "qwen3.5-flash")
 LLM_RULES_MODEL_ID = os.getenv("LLM_RULES_MODEL_ID", LLM_MODEL_ID)
 # 批量结构化任务使用轻量模型以降低成本；兼容旧环境变量名 LLM_STRUCTURED_MODEL_ID
 LLM_BATCH_MODEL_ID = os.getenv("LLM_BATCH_MODEL_ID", os.getenv("LLM_STRUCTURED_MODEL_ID", "qwen3.5-flash"))

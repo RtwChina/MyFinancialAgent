@@ -47,7 +47,7 @@ Cloudflare Worker non-secret vars:
 | --- | --- | --- |
 | `APP_ENV` | `prod` | Safe to keep in `wrangler.toml`. |
 | `LLM_BASE_URL` | `https://dashscope.aliyuncs.com/compatible-mode/v1` | Only needed for Worker LLM symbol resolution. |
-| `LLM_MODEL_ID` | `qwen3.5-plus` | Only needed for Worker LLM symbol resolution. |
+| `LLM_MODEL_ID` | `qwen3.5-flash` | Only needed for Worker LLM symbol resolution. |
 
 Local development files:
 

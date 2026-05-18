@@ -2616,7 +2616,7 @@ async function resolveSymbol(env, body) {
   // 调用 LLM 识别
   const llmApiKey = env.LLM_API_KEY;
   const llmBaseUrl = env.LLM_BASE_URL || "https://dashscope.aliyuncs.com/compatible-mode/v1";
-  const llmModel = env.LLM_MODEL_ID || "qwen-plus";
+  const llmModel = env.LLM_MODEL_ID || "qwen3.5-flash";
 
   let resolved = null;
   if (llmApiKey) {

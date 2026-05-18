@@ -309,9 +309,9 @@ GitHub Actions (cron 0 * * * *)
 
 | 任务 | 模型 | 说明 |
 |------|------|------|
-| 规则初筛 | `LLM_RULES_MODEL_ID` (默认 qwen3.5-plus) | 判断新闻类型与相关性 |
+| 规则初筛 | `LLM_RULES_MODEL_ID` (默认 qwen3.5-flash) | 判断新闻类型与相关性 |
 | 批量精选 | `LLM_BATCH_MODEL_ID` (默认 qwen3.5-flash) | 结构化摘要/影响分析 |
-| 日报汇总 | `LLM_SUMMARY_MODEL_ID` (默认 qwen3.5-plus) | 生成日期级综合分析 |
+| 日报汇总 | `LLM_SUMMARY_MODEL_ID` (默认 qwen3.5-flash) | 生成日期级综合分析 |
 
 ### 8.3 Python 核心依赖
 

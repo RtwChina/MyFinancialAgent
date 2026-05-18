@@ -6,3 +6,4 @@ APP_API_TOKEN=replace_with_optional_ui_write_token
 
 # Optional: only needed if Worker-side symbol resolution uses the LLM.
 LLM_API_KEY=your_llm_api_key_here
+LLM_MODEL_ID=qwen3.5-flash

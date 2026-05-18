@@ -30,11 +30,11 @@ jobs:
           APP_ENV: "prod"
           LLM_API_KEY: ${{ secrets.LLM_API_KEY }}
           LLM_BASE_URL: ${{ secrets.LLM_BASE_URL }}
-          LLM_MODEL_ID: "qwen3.5-plus"
-          LLM_RULES_MODEL_ID: "qwen3.5-plus"
+          LLM_MODEL_ID: "qwen3.5-flash"
+          LLM_RULES_MODEL_ID: "qwen3.5-flash"
           LLM_BATCH_MODEL_ID: "qwen3.5-flash"
           LLM_SUMMARY_MODEL_ID: "qwen3.5-flash"
-          LLM_DAILY_SUMMARY_MODEL_ID: "qwen3.5-plus"
+          LLM_DAILY_SUMMARY_MODEL_ID: "qwen3.5-flash"
           LLM_TIMEOUT: "60"
           LLM_RULES_TIMEOUT: "120"
           LLM_BATCH_TIMEOUT: "120"
