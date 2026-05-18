@@ -48,6 +48,8 @@ const state = {
   activeDate: null,
   activeBootstrap: null,
   accountSnapshot: null,
+  accountImpactSummary: [],
+  accountImpactPreviewTimer: null,
   newsFilters: null,
   reviewStep: "news",
   reviewStatus: "initialized",
@@ -237,7 +239,6 @@ const prevStepBtn = document.querySelector("#prevStepBtn");
 const nextStepBtn = document.querySelector("#nextStepBtn");
 const reviewModalFooter = document.querySelector(".review-modal-footer");
 const actionPlanAccountGroups = document.querySelector("#actionPlanAccountGroups");
-const accountSnapshotBox = document.querySelector("#accountSnapshotBox");
 const actionPlanDetailModal = document.querySelector("#actionPlanDetailModal");
 const actionPlanDetailBackdrop = document.querySelector("#actionPlanDetailBackdrop");
 const actionPlanDetailTitle = document.querySelector("#actionPlanDetailTitle");
@@ -725,6 +726,7 @@ async function openReviewDrawer(archiveDate, options = {}) {
   renderNewsPicker(data.news);
   state.actionPlans = normalizeActionPlans(data.actionPlans || []);
   state.selectedActionPlanIndex = state.actionPlans.length ? 0 : -1;
+  state.accountImpactSummary = normalizeAccountImpactSummary(data.accountImpactSummary || data.account_impact_summary || []);
 
   applyFormValues({
     reviewerNewsNotes: data.draft?.reviewer_news_notes || data.draft?.news_brief || buildDefaultNewsBrief(data.analysis, data.news),
@@ -733,7 +735,7 @@ async function openReviewDrawer(archiveDate, options = {}) {
     tradingSummary: data.draft?.trading_summary || "",
   });
   renderActionPlans();
-  renderAccountSnapshotEditor();
+  if (state.editMode) scheduleAccountImpactPreview(0);
 
   initMdTabs();
   setReviewMode(reviewStatus);
@@ -775,6 +777,7 @@ async function saveReview() {
   state.actionPlans = payload.actionPlans;
   state.selectedActionPlanIndex = state.actionPlans.length ? Math.max(0, state.selectedActionPlanIndex) : -1;
   renderActionPlans();
+  scheduleAccountImpactPreview(0);
   if (state.reviewStatus === "reviewed" && state.editMode) {
     state.editMode = false;
     setReviewMode("reviewed");
@@ -1272,9 +1275,38 @@ function bindHorizontalWheelScroll(element) {
   }, { passive: false });
 }
 
-function renderActionPlans() {
+function renderImpactMeterHtml(summary) {
+  const MAX_PERCENT = 4;
+  const raw = Number(summary?.valuePercent);
+  const hasValue = Number.isFinite(raw) && summary?.rangeLabel !== "暂无数据" && summary?.rangeLabel !== "已记录";
+  if (!hasValue) {
+    return `<span class="impact-empty-inline">${escapeHtml(summary?.rangeLabel || "暂无数据")}</span>`;
+  }
+  const abs = Math.min(Math.abs(raw), MAX_PERCENT);
+  const cols = abs < 0.05 ? 1 : Math.min(Math.ceil(abs), 4);
+  const direction = raw > 0.05 ? "gain" : raw < -0.05 ? "loss" : "gain";
+  const dotPosInCols = abs < 0.05 ? 0.12 : (abs / MAX_PERCENT) / (cols / 4);
+  const dotPercent = Math.max(6, Math.min(dotPosInCols * 100, 97));
+  const segments = Array.from({ length: cols }, () => `<div class="impact-seg"></div>`).join("");
+  return `<div class="impact-meter-cut cols-${cols} ${direction}" title="${escapeAttribute(summary?.rangeLabel || "账户影响")}">${segments}<div class="impact-dot" style="left: ${dotPercent}%"></div></div>`;
+}
+
+function renderActionPlanAccountImpact(account, summary) {
+  return `
+    <div class="action-plan-account-impact" aria-label="${escapeAttribute(`${account.name || "账户"}账户影响`)}">
+      <span class="action-plan-account-impact-label">账户影响</span>
+      ${renderImpactMeterHtml(summary)}
+    </div>
+  `;
+}
+
+function renderActionPlans(options = {}) {
   syncLegacyAssetPlanField();
   const readOnly = state.reviewStatus === "reviewed" && !state.editMode;
+  const snapshot = normalizeAccountSnapshot(state.accountSnapshot, state.investmentAccounts);
+  state.accountSnapshot = snapshot;
+  const impactByAccountId = new Map(accountImpactItemsForDisplay(snapshot, readOnly)
+    .map((item) => [Number(item.accountId), item]));
   const selectedPlan = state.actionPlans[state.selectedActionPlanIndex] || null;
   const groupItems = selectedPlan
     ? state.actionPlans.filter((p) => Number(p.accountId || 0) === Number(selectedPlan.accountId || 0))
@@ -1291,6 +1323,7 @@ function renderActionPlans() {
               ${escapeHtml(account.currency)} · 总资产 ${escapeHtml(formatAccountMoney(account.totalAssets, account.currency))} · 可用 ${escapeHtml(formatAccountMoney(account.availableCash, account.currency))}
             </span>
           </div>
+          ${renderActionPlanAccountImpact(account, impactByAccountId.get(Number(account.id)))}
           <div class="action-row">
             <button ${legacyActionPlanControlIds(account).add ? `id="${legacyActionPlanControlIds(account).add}"` : ""} type="button" class="ghost compact-button" data-action="add-plan" data-account-id="${escapeAttribute(String(account.id))}">添加标的</button>
             <button ${legacyActionPlanControlIds(account).sort ? `id="${legacyActionPlanControlIds(account).sort}"` : ""} type="button" class="ghost compact-button" data-action="sort-plan" data-account-id="${escapeAttribute(String(account.id))}">自动排序</button>
@@ -1345,6 +1378,7 @@ function renderActionPlans() {
   });
   if (!hasPlans) closeActionPlanDetail();
   applyActionPlanReadOnly(readOnly);
+  if (!readOnly && options.refreshImpact !== false) scheduleAccountImpactPreview();
 }
 
 function renderActionPlanSymbolOptions(selectedSymbol = "") {
@@ -2080,7 +2114,7 @@ async function handleNextStep() {
     await fetchJson(`/api/reviews/${state.activeDate}/complete`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ accountSnapshot: collectAccountSnapshotFromForm() }),
+      body: JSON.stringify({ accountSnapshot: collectAccountSnapshotPayload() }),
     });
     setReviewStatus("reviewed");
     setReviewMode("reviewed");
@@ -2183,7 +2217,6 @@ function setReviewMode(status) {
   });
   applyActionPlanReadOnly(readOnly);
   renderActionPlans();
-  renderAccountSnapshotEditor();
   saveDraftBtn.disabled = readOnly;
   if (status === "reviewed") {
     initializeBtn.textContent = state.editMode ? "退出编辑" : "编辑";
@@ -2667,6 +2700,41 @@ function normalizeSnapshotNumber(value) {
   return Number.isFinite(number) ? String(number) : "";
 }
 
+function normalizeAccountImpact(item = null) {
+  if (!item || typeof item !== "object") return null;
+  const valuePercent = item.valuePercent ?? item.value_percent;
+  const contributors = Number(item.contributors ?? 0);
+  const skippedReasons = Array.isArray(item.skippedReasons)
+    ? item.skippedReasons
+    : Array.isArray(item.skipped_reasons)
+      ? item.skipped_reasons
+      : [];
+  return {
+    source: item.source || "estimate",
+    label: item.label || "账户估算影响",
+    valuePercent: valuePercent == null || valuePercent === "" ? null : Number(valuePercent),
+    rangeLabel: item.rangeLabel || item.range_label || "暂无数据",
+    direction: item.direction || "flat",
+    contributors: Number.isFinite(contributors) ? contributors : 0,
+    skippedReasons: skippedReasons.map((reason) => String(reason || "").trim()).filter(Boolean),
+  };
+}
+
+function normalizeAccountImpactSummary(items = []) {
+  return (Array.isArray(items) ? items : [])
+    .map((item) => {
+      const impact = normalizeAccountImpact(item);
+      if (!impact) return null;
+      return {
+        accountId: Number(item.accountId ?? item.account_id ?? 0) || null,
+        accountName: item.accountName || item.account_name || "",
+        currency: item.currency || "CNY",
+        ...impact,
+      };
+    })
+    .filter(Boolean);
+}
+
 function normalizeAccountSnapshot(snapshot, accounts = []) {
   const source = Array.isArray(snapshot?.accounts) ? snapshot.accounts : [];
   const snapshotById = new Map(source.map((item) => [Number(item.accountId ?? item.account_id), item]));
@@ -2683,6 +2751,7 @@ function normalizeAccountSnapshot(snapshot, accounts = []) {
         netCashFlow: normalizeSnapshotNumber(existing.netCashFlow ?? existing.net_cash_flow),
         dailyPnl: normalizeSnapshotNumber(existing.dailyPnl ?? existing.daily_pnl),
         dailyPnlPercent: normalizeSnapshotNumber(existing.dailyPnlPercent ?? existing.daily_pnl_percent),
+        impact: normalizeAccountImpact(existing.impact),
         notes: existing.notes || "",
       };
     });
@@ -2693,62 +2762,52 @@ function normalizeAccountSnapshot(snapshot, accounts = []) {
   };
 }
 
-function renderAccountSnapshotEditor() {
-  if (!accountSnapshotBox) return;
-  const readOnly = state.reviewStatus === "reviewed" && !state.editMode;
-  const snapshot = normalizeAccountSnapshot(state.accountSnapshot, state.investmentAccounts);
-  state.accountSnapshot = snapshot;
-  if (!snapshot.accounts.length) {
-    accountSnapshotBox.innerHTML = `<div class="empty-state">暂无账户，请先在账户管理页创建账户。</div>`;
-    return;
+function accountImpactItemsForDisplay(snapshot, readOnly) {
+  if (readOnly) {
+    const saved = (snapshot.accounts || [])
+      .map((account) => account.impact ? ({
+        accountId: account.accountId,
+        accountName: account.accountName,
+        currency: account.currency,
+        ...account.impact,
+        source: account.impact.source || "estimated_action_plan",
+        label: "已保存账户影响",
+      }) : null)
+      .filter(Boolean);
+    if (saved.length) return saved;
   }
-  accountSnapshotBox.innerHTML = snapshot.accounts.map((account, index) => `
-    <section class="account-snapshot-row" data-account-id="${escapeAttribute(String(account.accountId))}">
-      <div class="account-snapshot-title">
-        <strong>${escapeHtml(account.accountName)}</strong>
-        <small>${escapeHtml(account.currency)}</small>
-      </div>
-      <label>
-        总资产
-        <input type="number" step="0.01" data-snapshot-field="totalAssets" data-snapshot-index="${index}" value="${escapeAttribute(account.totalAssets)}" ${readOnly ? "disabled" : ""} />
-      </label>
-      <label>
-        可用资金
-        <input type="number" step="0.01" data-snapshot-field="availableCash" data-snapshot-index="${index}" value="${escapeAttribute(account.availableCash)}" ${readOnly ? "disabled" : ""} />
-      </label>
-      <label>
-        净入金/出金
-        <input type="number" step="0.01" data-snapshot-field="netCashFlow" data-snapshot-index="${index}" value="${escapeAttribute(account.netCashFlow)}" ${readOnly ? "disabled" : ""} />
-      </label>
-      <label>
-        当日盈亏
-        <input type="number" step="0.01" data-snapshot-field="dailyPnl" data-snapshot-index="${index}" value="${escapeAttribute(account.dailyPnl)}" ${readOnly ? "disabled" : ""} />
-      </label>
-      <label>
-        当日收益率 %
-        <input type="number" step="0.01" data-snapshot-field="dailyPnlPercent" data-snapshot-index="${index}" value="${escapeAttribute(account.dailyPnlPercent)}" ${readOnly ? "disabled" : ""} />
-      </label>
-      <label class="snapshot-notes">
-        备注
-        <input type="text" data-snapshot-field="notes" data-snapshot-index="${index}" value="${escapeAttribute(account.notes)}" ${readOnly ? "disabled" : ""} />
-      </label>
-    </section>
-  `).join("");
+  return normalizeAccountImpactSummary(state.accountImpactSummary).map((item) => ({
+    ...item,
+    label: readOnly ? "当前估算" : "当前账户影响",
+  }));
 }
 
-function collectAccountSnapshotFromForm() {
-  const snapshot = normalizeAccountSnapshot(state.accountSnapshot, state.investmentAccounts);
-  const accounts = snapshot.accounts.map((account) => ({ ...account }));
-  accountSnapshotBox?.querySelectorAll("[data-snapshot-field]").forEach((input) => {
-    const index = Number(input.dataset.snapshotIndex);
-    const field = input.dataset.snapshotField;
-    if (!accounts[index] || !field) return;
-    accounts[index][field] = input.value;
-  });
+function scheduleAccountImpactPreview(delay = 300) {
+  if (!state.activeDate || state.reviewStatus === "reviewed" && !state.editMode) return;
+  window.clearTimeout(state.accountImpactPreviewTimer);
+  state.accountImpactPreviewTimer = window.setTimeout(refreshAccountImpactPreview, delay);
+}
+
+async function refreshAccountImpactPreview() {
+  if (!state.activeDate || state.reviewStatus === "reviewed" && !state.editMode) return;
+  try {
+    const result = await fetchJson(`/api/reviews/${state.activeDate}/account-impact/preview`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ actionPlans: normalizeActionPlans(state.actionPlans) }),
+    });
+    state.accountImpactSummary = normalizeAccountImpactSummary(result.accounts || []);
+    renderActionPlans({ refreshImpact: false });
+  } catch (error) {
+    console.warn("Failed to refresh account impact preview", error);
+  }
+}
+
+function collectAccountSnapshotPayload() {
   return {
     archiveDate: state.activeDate,
-    accounts,
-    notes: snapshot.notes || "",
+    accounts: [],
+    notes: "",
   };
 }
 

@@ -221,6 +221,12 @@ async function handleApi(request, env, url, appEnv) {
       return json(await getActionPlanSymbolCatalog(env, actionPlanSymbolsMatch[1]), 200, request);
     }
 
+    const accountImpactPreviewMatch = url.pathname.match(/^\/api\/reviews\/(\d{4}-\d{2}-\d{2})\/account-impact\/preview$/);
+    if (accountImpactPreviewMatch && request.method === "POST") {
+      const body = await request.json().catch(() => ({}));
+      return json(await previewReviewAccountImpact(env, accountImpactPreviewMatch[1], body), 200, request);
+    }
+
     const reviewMatch = url.pathname.match(/^\/api\/reviews\/(\d{4}-\d{2}-\d{2})(?:\/(bootstrap|complete|initialize|delete|snapshot))?$/);
     if (reviewMatch) {
       const [, archiveDate, action] = reviewMatch;
@@ -978,19 +984,17 @@ function impactDirection(value) {
 async function buildAccountImpactSummaryForReview(env, archiveDate) {
   const snapshot = await getReviewAccountSnapshot(env, archiveDate);
   if (snapshot?.accounts?.length) {
-    const withPnl = snapshot.accounts
-      .filter((account) => account.dailyPnlPercent != null)
+    const withImpact = snapshot.accounts
+      .filter((account) => account.impact)
       .map((account) => ({
         accountId: account.accountId,
         accountName: account.accountName,
         currency: account.currency,
-        source: "snapshot",
-        label: "账户盈亏",
-        rangeLabel: bucketEstimatedImpactPercent(account.dailyPnlPercent),
-        direction: impactDirection(account.dailyPnlPercent),
-        valuePercent: Number(account.dailyPnlPercent),
+        ...account.impact,
+        source: account.impact.source || "estimated_action_plan",
+        label: "账户影响",
       }));
-    if (withPnl.length) return withPnl;
+    if (withImpact.length) return withImpact;
     return snapshot.accounts.map((account) => ({
       accountId: account.accountId,
       accountName: account.accountName,
@@ -1007,12 +1011,30 @@ async function buildAccountImpactSummaryForReview(env, archiveDate) {
 
 async function buildEstimatedAccountImpactSummary(env, archiveDate) {
   const actionPlans = await listReviewActionPlans(env, archiveDate);
+  return buildEstimatedAccountImpactSummaryForPlans(env, archiveDate, actionPlans);
+}
+
+async function buildEstimatedAccountImpactSummaryForPlans(env, archiveDate, actionPlans = []) {
   if (!actionPlans.length) return [];
   const accounts = await listInvestmentAccounts(env, { includeDisabled: true });
-  const accountMap = new Map(accounts.map((account) => [Number(account.id), account]));
   const symbols = [...new Set(actionPlans.map((plan) => plan.symbol).filter(Boolean))];
   const priceMap = await getLatestPricePointMap(env, symbols, archiveDate);
   const previousSymbolsByAccount = await getPreviousActionPlanSymbolKeys(env, archiveDate);
+  return buildAccountImpactSummaryFromPlans({
+    actionPlans,
+    accounts,
+    priceMap,
+    previousSymbolsByAccount,
+  });
+}
+
+function buildAccountImpactSummaryFromPlans({
+  actionPlans = [],
+  accounts = [],
+  priceMap = new Map(),
+  previousSymbolsByAccount = new Set(),
+} = {}) {
+  const accountMap = new Map(accounts.map((account) => [Number(account.id), account]));
   const totalsByAccount = new Map();
 
   for (const plan of actionPlans) {
@@ -1043,9 +1065,10 @@ async function buildEstimatedAccountImpactSummary(env, archiveDate) {
         accountName: item.accountName,
         currency: item.currency,
         source: "estimate",
-        label: "估算影响",
+        label: "账户估算影响",
         rangeLabel: "暂无数据",
         direction: "flat",
+        contributors: 0,
         skippedReasons: item.skippedReasons,
       };
     }
@@ -1054,10 +1077,11 @@ async function buildEstimatedAccountImpactSummary(env, archiveDate) {
       accountName: item.accountName,
       currency: item.currency,
       source: "estimate",
-      label: "估算影响",
+      label: "账户估算影响",
       rangeLabel: bucketEstimatedImpactPercent(item.valuePercent),
       direction: impactDirection(item.valuePercent),
       valuePercent: item.valuePercent,
+      contributors: item.contributors,
       skippedReasons: item.skippedReasons,
     };
   });
@@ -1079,6 +1103,24 @@ function addImpactSkip(map, account, reason) {
   const current = map.get(accountId) || createImpactAccumulator(account);
   if (reason && !current.skippedReasons.includes(reason)) current.skippedReasons.push(reason);
   map.set(accountId, current);
+}
+
+async function previewReviewAccountImpact(env, archiveDate, body = {}) {
+  const inputPlans = Array.isArray(body.actionPlans) ? body.actionPlans : [];
+  const normalizedPlans = await resolveActionPlanAccountsForSave(env, normalizeActionPlansForSave(inputPlans));
+  const accounts = await buildEstimatedAccountImpactSummaryForPlans(env, archiveDate, normalizedPlans);
+  return { accounts };
+}
+
+function impactSummaryToSnapshotImpact(item = {}) {
+  return normalizeAccountImpactEntry({
+    source: "estimated_action_plan",
+    valuePercent: item.valuePercent,
+    rangeLabel: item.rangeLabel || "暂无数据",
+    direction: item.direction || "flat",
+    contributors: item.contributors || 0,
+    skippedReasons: item.skippedReasons || [],
+  });
 }
 
 async function getPreviousActionPlanSymbolKeys(env, archiveDate) {
@@ -1122,6 +1164,9 @@ async function getReviewBootstrap(env, archiveDate) {
   const currentPricesRaw = await env.DB.prepare(
     `SELECT p.symbol, p.stock_name, p.current_price, p.change_percent, p.volume, p.k_date
      FROM stock_raw p
+     JOIN tracked_symbols managed
+       ON managed.symbol = p.symbol
+      AND managed.is_active = 1
      JOIN (
        SELECT symbol, MAX(k_date) AS latest_k_date
        FROM stock_raw
@@ -1222,6 +1267,10 @@ async function getReviewBootstrap(env, archiveDate) {
     ? await listReviewActionPlans(env, previousCompletedReview.archive_date)
     : [];
   const actionPlans = currentActionPlans.length ? currentActionPlans : carryForwardActionPlans;
+  const reviewStatus = normalizeReviewStatus(existingDraft?.review_status);
+  const accountImpactSummary = reviewStatus === "reviewed"
+    ? await buildAccountImpactSummaryForReview(env, archiveDate)
+    : await buildEstimatedAccountImpactSummaryForPlans(env, archiveDate, actionPlans);
 
   // news 按类型分组
   const newsByType = { index: [], sector: [], stock: [] };
@@ -1243,8 +1292,10 @@ async function getReviewBootstrap(env, archiveDate) {
     analysis: normalizeReviewAnalysis(analysis, newsItems),
     actionPlans,
     accountSnapshot,
+    accountImpactSummary,
+    account_impact_summary: accountImpactSummary,
     carryForward: previousCompletedReview,
-    draft: existingDraft ? { ...existingDraft, review_status: normalizeReviewStatus(existingDraft.review_status) } : null,
+    draft: existingDraft ? { ...existingDraft, review_status: reviewStatus } : null,
   };
 }
 
@@ -1523,8 +1574,27 @@ function normalizeSnapshotNumber(value) {
   return Number.isFinite(number) ? number : null;
 }
 
-function normalizeAccountSnapshotEntry(item = {}, fallback = {}) {
+function normalizeAccountImpactEntry(value = null) {
+  if (!value || typeof value !== "object") return null;
+  const valuePercent = normalizeSnapshotNumber(value.valuePercent ?? value.value_percent);
+  const contributors = Number(value.contributors ?? 0);
+  const skippedReasons = Array.isArray(value.skippedReasons)
+    ? value.skippedReasons
+    : Array.isArray(value.skipped_reasons)
+      ? value.skipped_reasons
+      : [];
   return {
+    source: String(value.source || "estimated_action_plan").trim() || "estimated_action_plan",
+    valuePercent,
+    rangeLabel: String(value.rangeLabel || value.range_label || (valuePercent == null ? "暂无数据" : bucketEstimatedImpactPercent(valuePercent))).trim(),
+    direction: String(value.direction || impactDirection(valuePercent)).trim() || "flat",
+    contributors: Number.isFinite(contributors) ? contributors : 0,
+    skippedReasons: skippedReasons.map((item) => String(item || "").trim()).filter(Boolean),
+  };
+}
+
+function normalizeAccountSnapshotEntry(item = {}, fallback = {}) {
+  const normalized = {
     accountId: Number(item.accountId ?? item.account_id ?? fallback.id ?? 0) || null,
     accountName: String(item.accountName || item.account_name || fallback.name || "").trim(),
     currency: String(item.currency || fallback.currency || "CNY").trim().toUpperCase() || "CNY",
@@ -1535,6 +1605,9 @@ function normalizeAccountSnapshotEntry(item = {}, fallback = {}) {
     dailyPnlPercent: normalizeSnapshotNumber(item.dailyPnlPercent ?? item.daily_pnl_percent),
     notes: String(item.notes || "").trim(),
   };
+  const impact = normalizeAccountImpactEntry(item.impact);
+  if (impact) normalized.impact = impact;
+  return normalized;
 }
 
 function buildAccountSnapshotFromAccounts(accounts = []) {
@@ -1579,7 +1652,13 @@ async function upsertReviewAccountSnapshot(env, archiveDate, snapshotInput = {},
   const snapshotAccounts = inputAccounts.length
     ? inputAccounts.map((item) => normalizeAccountSnapshotEntry(item, accountMap.get(Number(item.accountId ?? item.account_id))))
     : buildAccountSnapshotFromAccounts(accounts);
-  const normalizedAccounts = snapshotAccounts.filter((item) => item.accountId || item.accountName);
+  const impactByAccountId = new Map((options.accountImpactSummary || []).map((item) => [Number(item.accountId), item]));
+  const normalizedAccounts = snapshotAccounts
+    .filter((item) => item.accountId || item.accountName)
+    .map((item) => {
+      const impact = impactByAccountId.get(Number(item.accountId));
+      return impact ? { ...item, impact: impactSummaryToSnapshotImpact(impact) } : item;
+    });
   const now = isoNow();
   await env.DB.prepare(
     `INSERT INTO review_account_snapshots (
@@ -2218,12 +2297,14 @@ async function completeReview(env, archiveDate, body = {}) {
   }
 
   const snapshotInput = body.accountSnapshot || body.account_snapshot || {};
+  const accountImpactSummary = await buildEstimatedAccountImpactSummary(env, archiveDate);
   const accountSnapshot = await upsertReviewAccountSnapshot(env, archiveDate, snapshotInput, {
     snapshotSource: "manual_review",
+    accountImpactSummary,
   });
   await syncInvestmentAccountsFromSnapshot(env, accountSnapshot);
 
-  return { ok: true, archiveDate, reviewStatus: "reviewed", accountSnapshot };
+  return { ok: true, archiveDate, reviewStatus: "reviewed", accountSnapshot, accountImpactSummary };
 }
 
 async function initializeReview(env, archiveDate) {
@@ -2817,6 +2898,7 @@ async function deleteScreeningKeyword(env, id) {
 }
 
 export {
+  buildAccountImpactSummaryFromPlans,
   buildAccountSnapshotFromAccounts,
   bucketEstimatedImpactPercent,
   deriveReviewDailyThesis,

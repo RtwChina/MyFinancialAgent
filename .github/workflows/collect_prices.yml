@@ -40,13 +40,14 @@ jobs:
           LLM_BATCH_TIMEOUT: "120"
           LLM_SUMMARY_TIMEOUT: "60"
           LLM_DAILY_SUMMARY_TIMEOUT: "120"
-          DAILY_SUMMARY_TOTAL_CAP: "30"
+          DAILY_SUMMARY_TOTAL_CAP: "15"
+          LLM_INPUT_CAP: "10"
           LLM_BATCH_SIZE: "6"
-          LLM_MAX_WORKERS: "30"
+          LLM_MAX_WORKERS: "10"
           SKIP_LLM: "false"
           RULE_ACTIVE_STRATEGY: "C"
-          EMBEDDING_SIMILARITY_THRESHOLD: "0.50"
-          RULE_SCORE_WEIGHT: "0.02"
+          EMBEDDING_SIMILARITY_THRESHOLD: "0.65"
+          RULE_SCORE_WEIGHT: "0.06"
           FINNHUB_API_KEY: ${{ secrets.FINNHUB_API_KEY }}
           ENABLE_REMOTE_WRITE: "true"
           INGEST_API_BASE_URL: ${{ secrets.INGEST_API_BASE_URL }}

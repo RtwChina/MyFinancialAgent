@@ -454,6 +454,30 @@ test('action plan detail modal shows price metrics and missing fallbacks', async
   ]));
 });
 
+test('review price snapshot only includes active managed symbols', async ({ request }) => {
+  const snapshotDate = '2026-02-18';
+  seedTrackedSymbol({ symbol: 'SNAPOK', displayName: '显示快照', symbolType: 'index', active: 1, sortOrder: 9200 });
+  seedTrackedSymbol({ symbol: 'SNAPHIDE', displayName: '隐藏快照', symbolType: 'index', active: 0, sortOrder: 9201 });
+  d1(`DELETE FROM stock_raw WHERE symbol IN ('SNAPOK','SNAPHIDE','SNAPORPHAN');
+      DELETE FROM daily_review_archive WHERE archive_date='${snapshotDate}';
+      INSERT INTO stock_raw (k_date, stock_name, symbol, yahoo_symbol, current_price, change_percent, volume, captured_at)
+        VALUES ('${snapshotDate}', '显示快照', 'SNAPOK', 'SNAPOK', 10, 1.2, 100, datetime('now'));
+      INSERT INTO stock_raw (k_date, stock_name, symbol, yahoo_symbol, current_price, change_percent, volume, captured_at)
+        VALUES ('${snapshotDate}', '隐藏快照', 'SNAPHIDE', 'SNAPHIDE', 20, 2.3, 100, datetime('now'));
+      INSERT INTO stock_raw (k_date, stock_name, symbol, yahoo_symbol, current_price, change_percent, volume, captured_at)
+        VALUES ('${snapshotDate}', '孤儿快照', 'SNAPORPHAN', 'SNAPORPHAN', 30, 3.4, 100, datetime('now'));`);
+
+  const bootstrap = await request.get(`${BASE_URL}/api/reviews/${snapshotDate}/bootstrap`);
+  const bootstrapJson = await bootstrap.json();
+  const allSymbols = Object.values(bootstrapJson.prices)
+    .flat()
+    .map((item) => item.symbol);
+
+  expect(allSymbols).toContain('SNAPOK');
+  expect(allSymbols).not.toContain('SNAPHIDE');
+  expect(allSymbols).not.toContain('SNAPORPHAN');
+});
+
 test('long action plan table text shows a full hover tooltip', async ({ page, request }) => {
   const tooltipDate = '2026-05-10';
   const longRecord = '5 月 10 日：这是一段很长的每日记录，用来验证鼠标悬停时可以显示完整内容，而不会把表格撑高。';

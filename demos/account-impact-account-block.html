@@ -1,0 +1,377 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>账户影响嵌入账户块 Demo</title>
+  <style>
+    :root {
+      --ink: #182230;
+      --muted: #667085;
+      --line: rgba(15, 23, 42, 0.08);
+      --panel: #f7f9fc;
+      --paper: #ffffff;
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      margin: 0;
+      min-height: 100vh;
+      background: #eef2f7;
+      color: var(--ink);
+      font-family: ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
+
+    main {
+      width: min(1120px, calc(100vw - 32px));
+      margin: 36px auto;
+    }
+
+    .workspace {
+      padding: 18px;
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      background: var(--paper);
+      box-shadow: 0 18px 50px rgba(15, 23, 42, 0.08);
+    }
+
+    .section-head {
+      display: flex;
+      justify-content: space-between;
+      gap: 16px;
+      align-items: flex-start;
+      padding: 4px 2px 16px;
+      border-bottom: 1px solid var(--line);
+    }
+
+    h1 {
+      margin: 0;
+      font-size: 18px;
+      line-height: 1.25;
+      letter-spacing: 0;
+    }
+
+    .hint {
+      margin: 5px 0 0;
+      color: var(--muted);
+      font-size: 13px;
+    }
+
+    .groups {
+      display: grid;
+      gap: 14px;
+      margin-top: 16px;
+    }
+
+    .account-block {
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: var(--panel);
+      overflow: hidden;
+    }
+
+    .account-head {
+      display: grid;
+      grid-template-columns: minmax(230px, 1fr) minmax(190px, 260px) auto;
+      gap: 14px;
+      align-items: center;
+      padding: 12px 14px;
+      border-bottom: 1px solid var(--line);
+      background: rgba(255, 255, 255, 0.72);
+    }
+
+    .account-title {
+      min-width: 0;
+    }
+
+    .account-title strong {
+      display: block;
+      font-size: 17px;
+      font-weight: 900;
+      line-height: 1.2;
+    }
+
+    .account-title small {
+      display: block;
+      margin-top: 5px;
+      color: var(--muted);
+      font-size: 12px;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .account-impact {
+      display: grid;
+      grid-template-columns: auto minmax(92px, 118px);
+      gap: 8px;
+      align-items: center;
+      justify-content: end;
+      min-width: 0;
+    }
+
+    .account-impact-label {
+      color: var(--muted);
+      font-size: 12px;
+      white-space: nowrap;
+    }
+
+    .impact-meter-cut {
+      position: relative;
+      display: inline-grid;
+      gap: 2px;
+      height: 10px;
+      overflow: visible;
+    }
+
+    .impact-meter-cut.cols-1 { grid-template-columns: 1fr; width: 32px; }
+    .impact-meter-cut.cols-2 { grid-template-columns: 1fr 1fr; width: 58px; }
+    .impact-meter-cut.cols-3 { grid-template-columns: 1fr 1fr 1fr; width: 84px; }
+    .impact-meter-cut.cols-4 { grid-template-columns: 1fr 1fr 1fr 1fr; width: 110px; }
+
+    .impact-seg {
+      border-radius: 3px;
+    }
+
+    .impact-meter-cut.gain .impact-seg:nth-child(1) { background: #a3e635; }
+    .impact-meter-cut.gain .impact-seg:nth-child(2) { background: #22c55e; }
+    .impact-meter-cut.gain .impact-seg:nth-child(3) { background: #0d9488; }
+    .impact-meter-cut.gain .impact-seg:nth-child(4) { background: #1e4d3a; }
+
+    .impact-meter-cut.loss .impact-seg:nth-child(1) { background: #fb923c; }
+    .impact-meter-cut.loss .impact-seg:nth-child(2) { background: #f87171; }
+    .impact-meter-cut.loss .impact-seg:nth-child(3) { background: #dc2626; }
+    .impact-meter-cut.loss .impact-seg:nth-child(4) { background: #7f1d1d; }
+
+    .impact-dot {
+      position: absolute;
+      top: 50%;
+      width: 12px;
+      height: 12px;
+      border-radius: 50%;
+      border: 2.5px solid white;
+      background: #1f2937;
+      box-shadow: 0 2px 5px rgba(0, 0, 0, 0.25);
+      transform: translate(-50%, -50%);
+      z-index: 4;
+    }
+
+    .impact-empty-inline {
+      color: #94a3b8;
+      font-size: 12px;
+      text-align: right;
+    }
+
+    .account-actions {
+      display: flex;
+      gap: 8px;
+      justify-content: flex-end;
+    }
+
+    button {
+      min-height: 30px;
+      padding: 0 11px;
+      border: 1px solid var(--line);
+      border-radius: 7px;
+      background: #fff;
+      color: var(--ink);
+      font-weight: 700;
+    }
+
+    button.primary {
+      border-color: #2563eb;
+      background: #2563eb;
+      color: #fff;
+    }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      background: #fff;
+    }
+
+    th,
+    td {
+      padding: 11px 14px;
+      border-bottom: 1px solid rgba(15, 23, 42, 0.06);
+      text-align: left;
+      font-size: 13px;
+    }
+
+    th {
+      color: var(--muted);
+      font-size: 12px;
+      font-weight: 800;
+    }
+
+    .position {
+      display: inline-block;
+      min-width: 58px;
+      text-align: center;
+      padding: 4px 8px;
+      border-radius: 999px;
+      background: #eef6ff;
+      color: #155eef;
+      font-weight: 800;
+      font-size: 12px;
+    }
+
+    @media (max-width: 760px) {
+      main {
+        width: min(100vw - 20px, 1120px);
+        margin: 18px auto;
+      }
+
+      .account-head {
+        grid-template-columns: 1fr;
+        align-items: start;
+      }
+
+      .account-impact,
+      .account-actions {
+        justify-content: start;
+      }
+    }
+  </style>
+</head>
+<body>
+  <main>
+    <section class="workspace">
+      <div class="section-head">
+        <div>
+          <h1>个股与资产操作计划</h1>
+          <p class="hint">账户影响收进每个账户头部，和资金信息在同一个账户块里；影响只用列表页同款线条表达，不显示百分比数字。</p>
+        </div>
+      </div>
+
+      <div class="groups">
+        <article class="account-block">
+          <header class="account-head">
+            <div class="account-title">
+              <strong>老虎-美股</strong>
+              <small>USD · 总资产 $3.2万 · 可用 $0万</small>
+            </div>
+            <div class="account-impact" aria-label="账户影响">
+              <span class="account-impact-label">账户影响</span>
+              <div class="impact-meter-cut cols-1 gain" title="轻微正向影响">
+                <div class="impact-seg"></div>
+                <div class="impact-dot" style="left: 70%"></div>
+              </div>
+            </div>
+            <div class="account-actions">
+              <button>添加标的</button>
+              <button>自动排序</button>
+            </div>
+          </header>
+          <table>
+            <thead>
+              <tr>
+                <th>标的</th>
+                <th>仓位</th>
+                <th>每日记录</th>
+                <th>止盈计划</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td>MSFT</td>
+                <td><span class="position">15%-20%</span></td>
+                <td>继续观察 AI 软件链路。</td>
+                <td>强势突破后分批减仓。</td>
+              </tr>
+              <tr>
+                <td>MU</td>
+                <td><span class="position">10%-15%</span></td>
+                <td>存储方向保持跟踪。</td>
+                <td>接近前高减仓。</td>
+              </tr>
+            </tbody>
+          </table>
+        </article>
+
+        <article class="account-block">
+          <header class="account-head">
+            <div class="account-title">
+              <strong>天天基金-国内</strong>
+              <small>CNY · 总资产 ¥17万 · 可用 ¥3万</small>
+            </div>
+            <div class="account-impact" aria-label="账户影响">
+              <span class="account-impact-label">账户影响</span>
+              <div class="impact-meter-cut cols-1 loss" title="轻微负向影响">
+                <div class="impact-seg"></div>
+                <div class="impact-dot" style="left: 42%"></div>
+              </div>
+            </div>
+            <div class="account-actions">
+              <button>添加标的</button>
+              <button>自动排序</button>
+            </div>
+          </header>
+          <table>
+            <thead>
+              <tr>
+                <th>标的</th>
+                <th>仓位</th>
+                <th>每日记录</th>
+                <th>止损计划</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td>黄金</td>
+                <td><span class="position">20%-25%</span></td>
+                <td>避险逻辑仍在。</td>
+                <td>跌破趋势线减仓。</td>
+              </tr>
+              <tr>
+                <td>通信 ETF</td>
+                <td><span class="position">15%-20%</span></td>
+                <td>新增标的首日不计入。</td>
+                <td>缺口回补后再评估。</td>
+              </tr>
+            </tbody>
+          </table>
+        </article>
+
+        <article class="account-block">
+          <header class="account-head">
+            <div class="account-title">
+              <strong>东方财富-国内</strong>
+              <small>CNY · 总资产 暂无 · 可用 暂无</small>
+            </div>
+            <div class="account-impact" aria-label="账户影响">
+              <span class="account-impact-label">账户影响</span>
+              <span class="impact-empty-inline">暂无数据</span>
+            </div>
+            <div class="account-actions">
+              <button>添加标的</button>
+              <button>自动排序</button>
+            </div>
+          </header>
+          <table>
+            <thead>
+              <tr>
+                <th>标的</th>
+                <th>仓位</th>
+                <th>每日记录</th>
+                <th>风险线</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td>半导体设备</td>
+                <td><span class="position">0%</span></td>
+                <td>只观察，不纳入计算。</td>
+                <td>等待放量确认。</td>
+              </tr>
+            </tbody>
+          </table>
+        </article>
+      </div>
+    </section>
+  </main>
+</body>
+</html>

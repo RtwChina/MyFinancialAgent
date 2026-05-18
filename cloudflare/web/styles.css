@@ -1318,8 +1318,13 @@ textarea {
 }
 
 .review-date-head {
-  cursor: help;
-  border-bottom: 1px dotted rgba(100, 116, 139, 0.5);
+  vertical-align: middle;
+}
+
+.review-date-tip {
+  margin-left: 4px;
+  text-transform: none;
+  letter-spacing: 0;
 }
 
 .review-date-cell strong {
@@ -1409,56 +1414,6 @@ textarea {
 
 .review-thesis-cell {
   color: #475569;
-}
-
-.account-snapshot-box {
-  display: grid;
-  gap: 12px;
-}
-
-.account-snapshot-row {
-  display: grid;
-  grid-template-columns: minmax(150px, 1.1fr) repeat(5, minmax(116px, 1fr)) minmax(160px, 1.2fr);
-  gap: 10px;
-  align-items: end;
-  padding: 14px;
-  border: 1px solid rgba(15, 23, 42, 0.08);
-  border-radius: 14px;
-  background: rgba(248, 250, 252, 0.74);
-}
-
-.account-snapshot-title strong,
-.account-snapshot-title small,
-.account-snapshot-row label {
-  display: block;
-}
-
-.account-snapshot-title strong {
-  color: var(--ink);
-}
-
-.account-snapshot-title small,
-.account-snapshot-row label {
-  color: var(--muted);
-  font-size: 0.75rem;
-}
-
-.account-snapshot-row input {
-  width: 100%;
-  margin-top: 5px;
-  min-height: 34px;
-  border-radius: 10px;
-}
-
-@media (max-width: 980px) {
-  .account-snapshot-row {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-  }
-
-  .account-snapshot-title,
-  .account-snapshot-row .snapshot-notes {
-    grid-column: 1 / -1;
-  }
 }
 
 .table-empty {
@@ -2052,21 +2007,37 @@ textarea[name="reviewerNewsNotes"] {
 }
 
 .action-plan-group-label {
-  font-size: 0.82rem;
-  font-weight: 800;
+  display: block;
+  font-size: 1rem;
+  font-weight: 900;
   letter-spacing: 0;
-  padding: 3px 10px;
-  border-radius: 8px;
-  margin-right: 4px;
+  padding: 0;
+  margin: 0;
   color: #0f172a;
-  background: rgba(15, 23, 42, 0.07);
+  background: transparent;
 }
 
 .action-plan-account-funds {
   display: block;
-  margin-top: 3px;
+  margin-top: 5px;
   font-size: 0.74rem;
   color: #64748b;
+}
+
+.action-plan-account-impact {
+  display: grid;
+  grid-template-columns: auto minmax(92px, 118px);
+  gap: 8px;
+  align-items: center;
+  justify-content: end;
+  margin-left: auto;
+  min-width: 170px;
+}
+
+.action-plan-account-impact-label {
+  color: #64748b;
+  font-size: 0.74rem;
+  white-space: nowrap;
 }
 
 .action-plan-group-head .compact-button {

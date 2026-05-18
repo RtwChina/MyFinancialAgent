@@ -184,7 +184,14 @@
                   <thead>
                     <tr>
                       <th>
-                        <span class="review-date-head" title="复盘日按美股交易日归档；北京时间通常覆盖当日 21:30 到次日 04:00。">复盘日</span>
+                        <span class="review-date-head">复盘日</span>
+                        <span class="tip-trigger tip-panel review-date-tip">
+                          <svg viewBox="0 0 16 16"><circle cx="8" cy="8" r="7"></circle><line x1="8" y1="7" x2="8" y2="11.5" stroke-linecap="round"></line><circle cx="8" cy="4.8" r="0.1" stroke-width="2" stroke-linecap="round"></circle></svg>
+                          <span class="bubble">
+                            <strong>复盘日</strong>：按美股交易日归档。北京时间通常覆盖当日 21:30 到次日 04:00。<br><br>
+                            例如 `2026-05-15` 表示美股 2026-05-15 交易日，对应北京时间通常为 2026-05-15 晚间到 2026-05-16 凌晨。
+                          </span>
+                        </span>
                       </th>
                       <th>账户估算影响</th>
                       <th>当日主线</th>
@@ -514,15 +521,6 @@
                 <span class="review-section-title">深度思考与交易总结（可选）</span>
                 <textarea name="tradingSummary" rows="12" placeholder="今天真正重要的判断是什么？自己最可能犯的错是什么？下一次怎么做得更好？"></textarea>
               </label>
-              <div class="review-field wide">
-                <div class="snapshot-head">
-                  <div>
-                    <strong class="review-section-title">账户每日快照</strong>
-                    <small class="muted">完成复盘时保存本复盘日的一条账户快照，可调整资金和当天盈亏。</small>
-                  </div>
-                </div>
-                <div id="accountSnapshotBox" class="account-snapshot-box"></div>
-              </div>
             </section>
           </form>
 

@@ -64,6 +64,7 @@ LLM_DAILY_SUMMARY_TIMEOUT = int(os.getenv("LLM_DAILY_SUMMARY_TIMEOUT", "120"))
 LLM_DAILY_SUMMARY_STOCK_TIMEOUT = int(os.getenv("LLM_DAILY_SUMMARY_STOCK_TIMEOUT", "180"))
 LLM_MAX_WORKERS = int(os.getenv("LLM_MAX_WORKERS", "5"))  # 并发数（Session 连接池复用，支持高并发）
 LLM_BATCH_SIZE = max(1, int(os.getenv("LLM_BATCH_SIZE", "8")))
+LLM_INPUT_CAP = max(0, int(os.getenv("LLM_INPUT_CAP", "10")))  # Stage 3 LLM 最多处理的新闻数；0 表示不限制
 LLM_RULES_SAMPLE_SIZE = max(8, int(os.getenv("LLM_RULES_SAMPLE_SIZE", "12")))
 RULE_ACTIVE_STRATEGY = os.getenv("RULE_ACTIVE_STRATEGY", "A").upper()  # A/B/C 评分策略
 SKIP_LLM = os.getenv("SKIP_LLM", "false").lower() == "true"  # 跳过 LLM 分析开关
@@ -218,6 +219,28 @@ SOURCE_ORDER = [
     "Finnhub大盘",
     "Finnhub个股",
 ]
+
+
+def _llm_input_rank_key(news: Dict[str, Any]) -> Tuple[float, float, float, str]:
+    embedding = news.get("_embedding") or {}
+    scoring = news.get("_scoring") or {}
+    combined = embedding.get("combined_score")
+    similarity = embedding.get("similarity")
+    rule_score = scoring.get("rule_score", 0)
+    return (
+        float(combined if combined is not None else -1),
+        float(similarity if similarity is not None else -1),
+        float(rule_score or 0),
+        str(news.get("pub_date") or news.get("time") or ""),
+    )
+
+
+def _split_llm_input_by_cap(news_list: List[Dict[str, Any]], cap: int) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]]]:
+    """按相关性排序后限制进入 Stage 3 LLM 的新闻数量。cap <= 0 表示不限制。"""
+    if cap <= 0 or len(news_list) <= cap:
+        return news_list, []
+    ranked = sorted(news_list, key=_llm_input_rank_key, reverse=True)
+    return ranked[:cap], ranked[cap:]
 
 
 def _source_label(news: Dict[str, Any]) -> str:
@@ -2338,7 +2361,20 @@ def collect_all_news(context: ExecutionContext | None = None) -> Dict[str, Any]:
 
         # --- Stage 3: LLM 深度分析 ---
         t0 = time.time()
-        llm_input = embedding_passed
+        llm_input, llm_cap_filtered = _split_llm_input_by_cap(embedding_passed, LLM_INPUT_CAP)
+        for news in llm_cap_filtered:
+            news["processing_status"] = "llm_cap_filtered"
+            news["rule_passed"] = 0
+            log_entry = log_by_hash.get(news.get("news_hash"))
+            if log_entry:
+                log_entry["final_decision"] = "llm_cap_filtered"
+        if llm_cap_filtered:
+            rejected_news.extend(llm_cap_filtered)
+            _persist_news(llm_cap_filtered, "llm-cap-filtered")
+            logger.info(
+                "[Stage 3] LLM 输入限制: 保留前 %s/%s 条进入 LLM，截掉 %s 条",
+                len(llm_input), len(embedding_passed), len(llm_cap_filtered),
+            )
         trace["llm_input"] = len(llm_input)
         processed_news, final_news, batch_analysis_records = enhance_news_with_llm(
             llm_input, analysis_date, on_batch_done=_on_batch_done,
@@ -2346,6 +2382,7 @@ def collect_all_news(context: ExecutionContext | None = None) -> Dict[str, Any]:
         trace["llm_duration"] = round(time.time() - t0, 2)
         trace["llm_kept"] = len(final_news)
         trace["llm_discarded"] = len(processed_news) - len(final_news)
+        trace["llm_cap_filtered"] = len(llm_cap_filtered)
         trace["final_count"] = len(final_news)
 
         # 检查是否触发了打星兜底
@@ -2384,6 +2421,7 @@ def collect_all_news(context: ExecutionContext | None = None) -> Dict[str, Any]:
         # 配置快照
         trace["config_snapshot"] = json.dumps({
             "LLM_BATCH_SIZE": LLM_BATCH_SIZE,
+            "LLM_INPUT_CAP": LLM_INPUT_CAP,
             "LLM_MAX_WORKERS": LLM_MAX_WORKERS,
             "LLM_BATCH_MODEL_ID": LLM_BATCH_MODEL_ID,
             "LLM_RULES_MODEL_ID": LLM_RULES_MODEL_ID,
@@ -2411,6 +2449,7 @@ def collect_all_news(context: ExecutionContext | None = None) -> Dict[str, Any]:
             "embedding_filtered_counts": _count_by_source(embedding_filtered),
             "llm_kept_counts": final_source_counts,
             "llm_filtered_counts": _count_by_source([item for item in processed_news if item.get("processing_status") == "llm_discarded"]),
+            "llm_cap_filtered_counts": _count_by_source(llm_cap_filtered),
             "final_source_counts": final_source_counts,
             "star_overall_text": star_overall_text,
             "star_by_source_text": star_by_source_text,
@@ -2418,6 +2457,9 @@ def collect_all_news(context: ExecutionContext | None = None) -> Dict[str, Any]:
             "after_prefilter_count": len(unique_news),
             "embedding_kept_count": len(embedding_passed),
             "embedding_filtered_count": len(embedding_filtered),
+            "llm_input_cap": LLM_INPUT_CAP,
+            "llm_input_count": len(llm_input),
+            "llm_cap_filtered_count": len(llm_cap_filtered),
             "llm_kept_count": len(final_news),
             "llm_filtered_count": len([item for item in processed_news if item.get("processing_status") == "llm_discarded"]),
         }
