@@ -46,6 +46,19 @@ async function fillStructuredNote(page, field, sectionTitle, subsectionTitle, bo
   await editor.locator('.structured-note-subsection').first().locator('textarea').fill(body);
 }
 
+async function dragStructuredNoteSection(page, editor, fromIndex, toIndex) {
+  const sourceHandle = await editor
+    .locator('.structured-note-section')
+    .nth(fromIndex)
+    .locator('.structured-note-section-head .structured-note-drag-handle')
+    .boundingBox();
+  const targetSection = await editor.locator('.structured-note-section').nth(toIndex).boundingBox();
+  await page.mouse.move(sourceHandle.x + sourceHandle.width / 2, sourceHandle.y + sourceHandle.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(targetSection.x + targetSection.width / 2, targetSection.y + 8, { steps: 10 });
+  await page.mouse.up();
+}
+
 test('review can be completed, reopened, edited, and saved again', async ({ page, request }) => {
   await request.post(`${BASE_URL}/api/reviews/${REVIEW_DATE}/initialize`);
 
@@ -160,7 +173,7 @@ test('market and rotation structured note blocks can be added, reordered, delete
   await marketEditor.locator('.structured-note-section').nth(1).locator('.structured-note-section-head input').fill('标普500');
   await marketEditor.locator('.structured-note-section').nth(1).locator('.structured-note-subsection-head input').fill('流动性');
   await marketEditor.locator('.structured-note-section').nth(1).locator('textarea').fill('流动性边际改善。');
-  await marketEditor.locator('.structured-note-section').nth(1).locator('.structured-note-section-head .structured-note-tools button').filter({ hasText: '↑' }).click();
+  await dragStructuredNoteSection(page, marketEditor, 1, 0);
   await marketEditor.locator('.structured-note-section').nth(1).getByRole('button', { name: '+ 二级' }).click();
   await marketEditor.locator('.structured-note-section').nth(1).locator('.structured-note-subsection').nth(1).locator('.structured-note-subsection-head input').fill('待删除维度');
   page.once('dialog', async (dialog) => dialog.accept());

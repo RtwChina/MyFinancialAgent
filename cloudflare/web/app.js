@@ -1122,11 +1122,18 @@ function renderStructuredNoteEditor(field, container) {
     titleInput.readOnly = readOnly;
     titleInput.addEventListener("input", () => updateReviewNoteSectionTitle(field, sectionIndex, titleInput.value));
     head.appendChild(titleInput);
-    head.appendChild(buildReviewNoteTools([
-      ["↑", () => moveReviewNoteSection(field, sectionIndex, -1), sectionIndex <= 0],
-      ["↓", () => moveReviewNoteSection(field, sectionIndex, 1), sectionIndex >= blocks.length - 1],
+    const sectionTools = buildReviewNoteTools([
       ["删除", () => deleteReviewNoteSection(field, sectionIndex), false],
-    ], readOnly));
+    ], readOnly);
+    if (!readOnly) {
+      sectionTools.prepend(buildReviewNoteDragHandle({
+        label: "拖动一级排序",
+        type: "section",
+        field,
+        sectionIndex,
+      }));
+    }
+    head.appendChild(sectionTools);
     sectionEl.appendChild(head);
 
     const childList = document.createElement("div");
@@ -1160,11 +1167,19 @@ function buildReviewNoteSubsection(field, sectionIndex, childIndex, child, readO
   input.addEventListener("input", () => updateReviewNoteSubsection(field, sectionIndex, childIndex, { title: input.value }));
   head.appendChild(input);
   const siblings = state.reviewNoteBlocks[field]?.[sectionIndex]?.children || [];
-  head.appendChild(buildReviewNoteTools([
-    ["↑", () => moveReviewNoteSubsection(field, sectionIndex, childIndex, -1), childIndex <= 0],
-    ["↓", () => moveReviewNoteSubsection(field, sectionIndex, childIndex, 1), childIndex >= siblings.length - 1],
+  const subsectionTools = buildReviewNoteTools([
     ["删除", () => deleteReviewNoteSubsection(field, sectionIndex, childIndex), false],
-  ], readOnly));
+  ], readOnly);
+  if (!readOnly && siblings.length > 1) {
+    subsectionTools.prepend(buildReviewNoteDragHandle({
+      label: "拖动二级排序",
+      type: "subsection",
+      field,
+      sectionIndex,
+      childIndex,
+    }));
+  }
+  head.appendChild(subsectionTools);
   const textarea = document.createElement("textarea");
   textarea.rows = 2;
   textarea.placeholder = "正文";
@@ -1195,6 +1210,71 @@ function buildReviewNoteTools(items, readOnly) {
   return tools;
 }
 
+let reviewNoteDragState = null;
+
+function buildReviewNoteDragHandle({ label, type, field, sectionIndex, childIndex = null }) {
+  const button = document.createElement("button");
+  button.type = "button";
+  button.className = "ghost compact-button structured-note-drag-handle";
+  button.title = label;
+  button.setAttribute("aria-label", label);
+  button.innerHTML = `<span aria-hidden="true"><i></i><i></i><i></i><i></i><i></i><i></i></span>`;
+  button.addEventListener("mousedown", (event) => {
+    const itemEl = button.closest(type === "section" ? ".structured-note-section" : ".structured-note-subsection");
+    if (!itemEl) return;
+    reviewNoteDragState = {
+      type,
+      field,
+      sectionIndex,
+      childIndex,
+      itemEl,
+      containerEl: type === "section"
+        ? itemEl.parentElement
+        : itemEl.closest(".structured-note-subsections"),
+      selector: type === "section" ? ".structured-note-section" : ".structured-note-subsection",
+      dropTarget: null,
+      dropAfter: false,
+    };
+    itemEl.classList.add("is-dragging");
+    event.preventDefault();
+  });
+  return button;
+}
+
+function clearReviewNoteDropMarkers() {
+  document.querySelectorAll(".structured-note-drop-before, .structured-note-drop-after").forEach((node) => {
+    node.classList.remove("structured-note-drop-before", "structured-note-drop-after");
+  });
+}
+
+document.addEventListener("mousemove", (event) => {
+  if (!reviewNoteDragState?.itemEl || !reviewNoteDragState.containerEl) return;
+  const target = document.elementFromPoint(event.clientX, event.clientY)?.closest(reviewNoteDragState.selector);
+  if (!target || target === reviewNoteDragState.itemEl || target.parentElement !== reviewNoteDragState.containerEl) return;
+  const rect = target.getBoundingClientRect();
+  reviewNoteDragState.dropTarget = target;
+  reviewNoteDragState.dropAfter = event.clientY > rect.top + rect.height / 2;
+  clearReviewNoteDropMarkers();
+  target.classList.add(reviewNoteDragState.dropAfter ? "structured-note-drop-after" : "structured-note-drop-before");
+});
+
+document.addEventListener("mouseup", () => {
+  const dragState = reviewNoteDragState;
+  if (!dragState) return;
+  if (dragState.dropTarget) {
+    const targetIndex = Array.from(dragState.containerEl.querySelectorAll(dragState.selector)).indexOf(dragState.dropTarget);
+    const nextIndex = dragState.dropAfter ? targetIndex + 1 : targetIndex;
+    if (dragState.type === "section") {
+      moveReviewNoteSectionTo(dragState.field, dragState.sectionIndex, nextIndex);
+    } else {
+      moveReviewNoteSubsectionTo(dragState.field, dragState.sectionIndex, dragState.childIndex, nextIndex);
+    }
+  }
+  dragState.itemEl.classList.remove("is-dragging");
+  reviewNoteDragState = null;
+  clearReviewNoteDropMarkers();
+});
+
 function addReviewNoteSection(field) {
   if (!field || (state.reviewStatus === "reviewed" && !state.editMode)) return;
   const blocks = normalizeReviewNoteBlocks(state.reviewNoteBlocks[field] || []);
@@ -1223,6 +1303,18 @@ function moveReviewNoteSection(field, sectionIndex, delta) {
   if (targetIndex < 0 || targetIndex >= blocks.length) return;
   const [item] = blocks.splice(sectionIndex, 1);
   blocks.splice(targetIndex, 0, item);
+  state.reviewNoteBlocks[field] = blocks;
+  renderStructuredNoteEditors();
+}
+
+function moveReviewNoteSectionTo(field, sectionIndex, targetIndex) {
+  const blocks = normalizeReviewNoteBlocks(state.reviewNoteBlocks[field] || []);
+  if (sectionIndex < 0 || sectionIndex >= blocks.length) return;
+  let insertIndex = Math.max(0, Math.min(targetIndex, blocks.length));
+  if (insertIndex > sectionIndex) insertIndex -= 1;
+  if (insertIndex === sectionIndex) return;
+  const [item] = blocks.splice(sectionIndex, 1);
+  blocks.splice(insertIndex, 0, item);
   state.reviewNoteBlocks[field] = blocks;
   renderStructuredNoteEditors();
 }
@@ -1259,6 +1351,19 @@ function moveReviewNoteSubsection(field, sectionIndex, childIndex, delta) {
   if (targetIndex < 0 || targetIndex >= children.length) return;
   const [item] = children.splice(childIndex, 1);
   children.splice(targetIndex, 0, item);
+  state.reviewNoteBlocks[field] = blocks;
+  renderStructuredNoteEditors();
+}
+
+function moveReviewNoteSubsectionTo(field, sectionIndex, childIndex, targetIndex) {
+  const blocks = normalizeReviewNoteBlocks(state.reviewNoteBlocks[field] || []);
+  const children = blocks[sectionIndex]?.children || [];
+  if (childIndex < 0 || childIndex >= children.length) return;
+  let insertIndex = Math.max(0, Math.min(targetIndex, children.length));
+  if (insertIndex > childIndex) insertIndex -= 1;
+  if (insertIndex === childIndex) return;
+  const [item] = children.splice(childIndex, 1);
+  children.splice(insertIndex, 0, item);
   state.reviewNoteBlocks[field] = blocks;
   renderStructuredNoteEditors();
 }
