@@ -754,6 +754,7 @@ async function openReviewDrawer(archiveDate, options = {}) {
   setReviewMode(reviewStatus);
   setReviewStep(editPlan ? "plan" : initialStep);
   reviewDrawer.classList.remove("hidden");
+  scheduleStructuredNoteTextareaResize();
 }
 
 function closeDrawer() {
@@ -1545,6 +1546,16 @@ function positionColorClass(position) {
 function autoResizeTextarea(el) {
   el.style.height = "auto";
   el.style.height = `${el.scrollHeight}px`;
+}
+
+function resizeStructuredNoteTextareas() {
+  reviewForm.querySelectorAll(".structured-note-subsection textarea").forEach(autoResizeTextarea);
+}
+
+function scheduleStructuredNoteTextareaResize() {
+  window.requestAnimationFrame(() => {
+    window.requestAnimationFrame(resizeStructuredNoteTextareas);
+  });
 }
 
 function resizeActionPlanTextareas() {
@@ -2585,6 +2596,7 @@ function setReviewStep(stepKey = null) {
     panel.classList.toggle("hidden", !shouldShow);
     panel.classList.toggle("review-step-panel-active", panel.dataset.step === state.reviewStep);
   });
+  scheduleStructuredNoteTextareaResize();
 
   const index = REVIEW_STEPS.findIndex((step) => step.key === state.reviewStep);
   reviewStepHint.textContent = reviewedMode
