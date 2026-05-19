@@ -1114,12 +1114,12 @@ function renderStructuredNoteEditor(field, container) {
   blocks.forEach((section, sectionIndex) => {
     const sectionEl = document.createElement("article");
     sectionEl.className = "structured-note-section";
-    const indexEl = document.createElement("div");
-    indexEl.className = "structured-note-section-index";
-    indexEl.textContent = String(sectionIndex + 1);
-    sectionEl.appendChild(indexEl);
     const head = document.createElement("div");
     head.className = "structured-note-section-head";
+    const indexEl = document.createElement("span");
+    indexEl.className = "structured-note-section-index";
+    indexEl.textContent = String(sectionIndex + 1);
+    head.appendChild(indexEl);
     const titleInput = document.createElement("input");
     titleInput.value = section.title;
     titleInput.placeholder = "一级标题";

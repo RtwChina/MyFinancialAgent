@@ -1963,10 +1963,10 @@ textarea[name="reviewerNewsNotes"] {
 }
 
 .structured-note-section {
+  position: relative;
   display: grid;
-  grid-template-columns: 40px minmax(0, 1fr);
-  gap: 0;
-  padding: 0;
+  gap: 10px;
+  padding: 10px 10px 10px 16px;
   border: 1px solid rgba(15, 23, 42, 0.09);
   border-radius: 8px;
   background: #ffffff;
@@ -1975,20 +1975,33 @@ textarea[name="reviewerNewsNotes"] {
   overflow: hidden;
 }
 
+.structured-note-section::before,
+.action-plan-group::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: 5px;
+  background: linear-gradient(180deg, #7dd3fc, #22d3ee);
+}
+
 .structured-note-section-index {
-  grid-row: 1 / span 4;
-  display: grid;
-  place-items: start center;
-  padding-top: 13px;
-  background: #172033;
-  color: #ffffff;
-  font-size: 0.92rem;
+  width: 24px;
+  height: 24px;
+  display: inline-grid;
+  place-items: center;
+  flex-shrink: 0;
+  border-radius: 999px;
+  background: #dff4ff;
+  color: #075985;
+  font-size: 0.75rem;
   font-weight: 900;
   letter-spacing: 0;
 }
 
 .structured-note-section-head {
-  padding: 9px 10px;
+  padding: 3px 0 8px;
   border-bottom: 1px solid var(--line);
   background: #ffffff;
 }
@@ -2014,16 +2027,15 @@ textarea[name="reviewerNewsNotes"] {
 .structured-note-subsections {
   display: grid;
   gap: 10px;
-  padding: 10px 10px 0;
 }
 
 .structured-note-subsection {
   display: grid;
   gap: 8px;
   padding: 12px;
-  border-left: 3px solid #3b82f6;
+  border: 1px solid rgba(14, 116, 144, 0.08);
   border-radius: 8px;
-  background: #f8fafc;
+  background: #eff8ff;
   transition: box-shadow 0.16s ease, opacity 0.16s ease, transform 0.16s ease;
 }
 
@@ -2068,7 +2080,6 @@ textarea[name="reviewerNewsNotes"] {
 }
 
 .structured-note-add-sub {
-  margin: 10px;
   width: fit-content;
 }
 
@@ -2156,16 +2167,19 @@ textarea[name="reviewerNewsNotes"] {
 }
 
 .action-plan-group {
+  position: relative;
   display: flex;
   flex-direction: column;
   gap: 10px;
   min-width: 0;
   max-width: 100%;
   margin-top: 10px;
-  padding: 12px;
+  padding: 12px 12px 12px 17px;
   border: 1px solid rgba(15, 23, 42, 0.08);
-  border-radius: 16px;
-  background: rgba(248, 250, 252, 0.72);
+  border-radius: 8px;
+  background: #ffffff;
+  box-shadow: 0 12px 28px rgba(15, 23, 42, 0.05);
+  overflow: hidden;
 }
 
 .action-plan-account-groups {
