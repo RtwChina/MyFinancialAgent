@@ -2035,7 +2035,7 @@ textarea[name="reviewerNewsNotes"] {
   padding: 12px;
   border: 1px solid rgba(14, 116, 144, 0.08);
   border-radius: 8px;
-  background: #eff8ff;
+  background: #ffffff;
   transition: box-shadow 0.16s ease, opacity 0.16s ease, transform 0.16s ease;
 }
 
