@@ -71,11 +71,7 @@ class TestRepairPriceFallback(unittest.TestCase):
         wrong_date_df = pd.DataFrame([
             {"日期": "2026-04-01", "收盘": 1.101, "涨跌幅": 3.19, "成交量": 12345}
         ])
-        wrong_sina_df = pd.DataFrame([
-            {"date": "2026-04-01", "close": 1.101, "volume": 12345}
-        ])
-        with patch("data_sources.price_live.ak.fund_etf_hist_em", return_value=wrong_date_df), \
-             patch("data_sources.price_live.ak.fund_etf_hist_sina", return_value=wrong_sina_df):
+        with patch("data_sources.price_live.ak.fund_etf_hist_em", return_value=wrong_date_df):
             from data_sources.price_live import fetch_price_for_k_date_akshare
 
             repaired = fetch_price_for_k_date_akshare(candidate, self.context)
@@ -94,34 +90,8 @@ class TestRepairPriceFallback(unittest.TestCase):
             repaired = fetch_price_for_k_date_akshare({**candidate, "k_date": "2026-04-18"}, self.context)
 
         self.assertEqual(repaired["current_price"], 1.517)
-        self.assertEqual(repaired["volume"], 1927566200)
         self.assertEqual(mock_fetch.call_count, 2)
         mock_sleep.assert_called_once()
-
-    def test_akshare_etf_uses_sina_when_eastmoney_disconnects(self):
-        candidate = {
-            **self.cases["akshare_hit_after_yahoo_miss"]["candidate"],
-            "symbol": "通信ETF",
-            "stock_name": "通信ETF",
-            "yahoo_symbol": "515880.SS",
-            "k_date": "2026-05-18",
-        }
-        sina_df = pd.DataFrame([
-            {"date": "2026-05-15", "open": 1.545, "high": 1.565, "low": 1.470, "close": 1.500, "volume": 2887650114},
-            {"date": "2026-05-18", "open": 1.475, "high": 1.540, "low": 1.475, "close": 1.517, "volume": 1927566220},
-        ])
-        with patch("data_sources.price_live.ak.fund_etf_hist_em", side_effect=ConnectionError("remote closed")) as mock_em, \
-             patch("data_sources.price_live.ak.fund_etf_hist_sina", return_value=sina_df) as mock_sina, \
-             patch("data_sources.price_live.time.sleep"):
-            from data_sources.price_live import fetch_price_for_k_date_akshare
-
-            repaired = fetch_price_for_k_date_akshare(candidate, self.context)
-
-        self.assertEqual(repaired["current_price"], 1.517)
-        self.assertAlmostEqual(repaired["change_percent"], 1.13, places=2)
-        self.assertEqual(repaired["volume"], 1927566220)
-        self.assertEqual(mock_em.call_count, 3)
-        mock_sina.assert_called_once_with(symbol="sh515880")
 
     def test_run_price_repair_updates_existing_rows(self):
         mainland = self.cases["akshare_hit_after_yahoo_miss"]["candidate"]

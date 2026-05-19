@@ -1937,6 +1937,8 @@ textarea[name="reviewerNewsNotes"] {
 
 .structured-note-field {
   align-content: start;
+  gap: 6px;
+  padding: 12px 14px;
 }
 
 .structured-note-head,
@@ -1950,23 +1952,23 @@ textarea[name="reviewerNewsNotes"] {
 }
 
 .structured-note-head {
-  margin-bottom: 6px;
+  margin-bottom: 2px;
 }
 
 .structured-note-editor {
   display: grid;
-  gap: 12px;
+  gap: 8px;
 }
 
 .structured-note-section {
   position: relative;
   display: grid;
-  gap: 10px;
-  padding: 10px 10px 10px 16px;
+  gap: 8px;
+  padding: 8px 8px 8px 14px;
   border: 1px solid rgba(15, 23, 42, 0.09);
   border-radius: 8px;
   background: #ffffff;
-  box-shadow: 0 12px 28px rgba(15, 23, 42, 0.05);
+  box-shadow: 0 8px 18px rgba(15, 23, 42, 0.04);
   transition: border-color 0.16s ease, box-shadow 0.16s ease, opacity 0.16s ease, transform 0.16s ease;
   overflow: hidden;
 }
@@ -1978,13 +1980,13 @@ textarea[name="reviewerNewsNotes"] {
   left: 0;
   top: 0;
   bottom: 0;
-  width: 5px;
+  width: 4px;
   background: linear-gradient(180deg, #7dd3fc, #22d3ee);
 }
 
 .structured-note-section-index {
-  width: 24px;
-  height: 24px;
+  width: 22px;
+  height: 22px;
   display: inline-grid;
   place-items: center;
   flex-shrink: 0;
@@ -1997,7 +1999,7 @@ textarea[name="reviewerNewsNotes"] {
 }
 
 .structured-note-section-head {
-  padding: 3px 0 8px;
+  padding: 2px 0 6px;
   border-bottom: 1px solid var(--line);
   background: #ffffff;
 }
@@ -2010,25 +2012,25 @@ textarea[name="reviewerNewsNotes"] {
   border-bottom: 1px solid rgba(15, 23, 42, 0.12);
   border-radius: 0;
   background: transparent;
-  padding: 5px 0;
+  padding: 3px 0;
   font-weight: 800;
 }
 
 .structured-note-section-head input {
-  font-size: 1rem;
+  font-size: 0.96rem;
   border-bottom-color: transparent;
   color: #172033;
 }
 
 .structured-note-subsections {
   display: grid;
-  gap: 10px;
+  gap: 8px;
 }
 
 .structured-note-subsection {
   display: grid;
-  gap: 8px;
-  padding: 12px;
+  gap: 5px;
+  padding: 8px 10px;
   border: 1px solid rgba(14, 116, 144, 0.08);
   border-radius: 8px;
   background: #ffffff;
@@ -2054,11 +2056,14 @@ textarea[name="reviewerNewsNotes"] {
 
 .structured-note-subsection textarea,
 .review-field.wide .structured-note-subsection textarea {
-  min-height: 58px;
+  min-height: 42px;
   height: auto;
   overflow: hidden;
-  line-height: 1.65;
+  line-height: 1.5;
   resize: vertical;
+  padding: 8px 10px;
+  border-radius: 14px;
+  font-size: 0.92rem;
 }
 
 .structured-note-tools {
