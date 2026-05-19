@@ -1126,12 +1126,17 @@ function buildReviewNoteSubsection(field, sectionIndex, childIndex, child, readO
   textarea.dataset.noMd = "";
   textarea.value = child.body || "";
   textarea.readOnly = readOnly;
+  const resizeNoteTextarea = () => scheduleTextareaResize(textarea);
   textarea.addEventListener("input", () => {
     updateReviewNoteSubsection(field, sectionIndex, childIndex, { body: textarea.value });
-    autoResizeTextarea(textarea);
+    resizeNoteTextarea();
   });
+  textarea.addEventListener("change", resizeNoteTextarea);
+  textarea.addEventListener("paste", resizeNoteTextarea);
+  textarea.addEventListener("compositionend", resizeNoteTextarea);
+  textarea.addEventListener("focus", resizeNoteTextarea);
   wrapper.append(head, textarea);
-  window.requestAnimationFrame(() => autoResizeTextarea(textarea));
+  scheduleTextareaResize(textarea);
   return wrapper;
 }
 
@@ -1544,8 +1549,14 @@ function positionColorClass(position) {
 }
 
 function autoResizeTextarea(el) {
-  el.style.height = "auto";
-  el.style.height = `${el.scrollHeight}px`;
+  if (!el || !el.isConnected) return;
+  el.style.height = "0px";
+  const nextHeight = Math.max(el.scrollHeight + 2, 42);
+  el.style.height = `${nextHeight}px`;
+}
+
+function scheduleTextareaResize(el) {
+  window.requestAnimationFrame(() => autoResizeTextarea(el));
 }
 
 function resizeStructuredNoteTextareas() {
