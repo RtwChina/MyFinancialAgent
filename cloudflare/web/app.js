@@ -1292,10 +1292,7 @@ function buildActionPlanOutlineItems() {
       return {
         label: account.name || "未分配账户",
         targetId: getActionPlanAccountAnchor(account),
-        children: plans.map(({ plan, index }) => ({
-          label: [actionPlanSymbolLabel(plan.symbol), plan.actionType].filter(Boolean).join(" · "),
-          targetId: getActionPlanRowAnchor(index),
-        })),
+        children: [],
       };
     })
     .filter(Boolean);
