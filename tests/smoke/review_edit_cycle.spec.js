@@ -364,13 +364,17 @@ test('initialized empty review carries forward previous market and sector notes'
   expect(bootstrapJson.structuredNotes.marketSentiment.blocks[0]).toEqual(
     expect.objectContaining({
       title: '标普500',
-      children: [expect.objectContaining({ title: '流动性', body: '上一天大盘判断。' })],
+      children: expect.arrayContaining([
+        expect.objectContaining({ title: '流动性', body: '上一天大盘判断。' }),
+      ]),
     }),
   );
   expect(bootstrapJson.structuredNotes.sectorRotation.blocks[0]).toEqual(
     expect.objectContaining({
       title: '黄金',
-      children: [expect.objectContaining({ title: '利率', body: '上一天板块判断。' })],
+      children: expect.arrayContaining([
+        expect.objectContaining({ title: '利率', body: '上一天板块判断。' }),
+      ]),
     }),
   );
 });

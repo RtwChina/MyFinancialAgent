@@ -10,6 +10,7 @@ import {
   parseLegacyReviewNoteMarkdown,
   parsePositionWeight,
   renderReviewNoteBlocksMarkdown,
+  resolveReviewNoteBlocksWithFallback,
 } from "../cloudflare/worker/src/index.js";
 
 test("deriveReviewDailyThesis prefers trading summary, then review notes, then AI analysis", () => {
@@ -144,4 +145,50 @@ test("legacy review note markdown parses # and ## into editable free blocks", ()
   assert.equal(parsed[0].children[1].title, "CTA 流动性");
   assert.equal(parsed[1].title, "XLK");
   assert.equal(parsed[1].children[0].title, "风险");
+});
+
+test("empty initialized review notes fall back to previous reviewed notes", () => {
+  const resolved = resolveReviewNoteBlocksWithFallback(
+    {
+      review_status: "initialized",
+      market_sentiment: "",
+      market_sentiment_blocks_json: null,
+    },
+    {
+      archive_date: "2026-05-15",
+      market_sentiment: "# 黄金\n\n## 战争影响\n\n避险需求升温。",
+      market_sentiment_blocks_json: null,
+    },
+    "market_sentiment_blocks_json",
+    "market_sentiment",
+    "market",
+  );
+
+  assert.equal(resolved.source, "legacy_parsed");
+  assert.equal(resolved.blocks.length, 1);
+  assert.equal(resolved.blocks[0].title, "黄金");
+});
+
+test("empty initialized review notes prefer previous saved structured notes", () => {
+  const resolved = resolveReviewNoteBlocksWithFallback(
+    {
+      review_status: "initialized",
+      market_sentiment: "",
+      market_sentiment_blocks_json: null,
+    },
+    {
+      archive_date: "2026-05-15",
+      market_sentiment: "# 旧文本",
+      market_sentiment_blocks_json: JSON.stringify([
+        { title: "标普500点位", children: [{ title: "CTA流动性", body: "横盘 sell。" }] },
+      ]),
+    },
+    "market_sentiment_blocks_json",
+    "market_sentiment",
+    "market",
+  );
+
+  assert.equal(resolved.source, "saved");
+  assert.equal(resolved.blocks[0].title, "标普500点位");
+  assert.equal(resolved.blocks[0].children[0].title, "CTA流动性");
 });

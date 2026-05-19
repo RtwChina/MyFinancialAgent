@@ -1068,6 +1068,19 @@ function resolveReviewNoteBlocks(record, jsonKey, textKey, prefix) {
   return { blocks: parsed, source: parsed.length ? "legacy_parsed" : "empty" };
 }
 
+function hasExplicitReviewNoteContent(record, jsonKey, textKey) {
+  if (!record) return false;
+  if (record[jsonKey] != null) return true;
+  return String(record[textKey] || "").trim().length > 0;
+}
+
+function resolveReviewNoteBlocksWithFallback(primary, fallback, jsonKey, textKey, prefix) {
+  if (hasExplicitReviewNoteContent(primary, jsonKey, textKey)) {
+    return resolveReviewNoteBlocks(primary, jsonKey, textKey, prefix);
+  }
+  return resolveReviewNoteBlocks(fallback, jsonKey, textKey, prefix);
+}
+
 function pickSubmittedReviewNoteBlocks(body, camelKey, snakeKey) {
   if (Array.isArray(body?.[camelKey])) return body[camelKey];
   if (Array.isArray(body?.[snakeKey])) return body[snakeKey];
@@ -1395,7 +1408,8 @@ async function getReviewBootstrap(env, archiveDate) {
   }
 
   const previousCompletedReview = await env.DB.prepare(
-    `SELECT archive_date, reviewer_news_notes, market_sentiment, sector_rotation
+    `SELECT archive_date, reviewer_news_notes, market_sentiment, market_sentiment_blocks_json,
+       sector_rotation, sector_rotation_blocks_json
      FROM daily_review_archive
      WHERE archive_date < ? AND review_status = 'reviewed'
      ORDER BY archive_date DESC
@@ -1414,14 +1428,16 @@ async function getReviewBootstrap(env, archiveDate) {
   const accountImpactSummary = reviewStatus === "reviewed"
     ? await buildAccountImpactSummaryForReview(env, archiveDate)
     : await buildEstimatedAccountImpactSummaryForPlans(env, archiveDate, actionPlans);
-  const marketNoteBlocks = resolveReviewNoteBlocks(
-    existingDraft || previousCompletedReview,
+  const marketNoteBlocks = resolveReviewNoteBlocksWithFallback(
+    existingDraft,
+    previousCompletedReview,
     "market_sentiment_blocks_json",
     "market_sentiment",
     "market",
   );
-  const sectorNoteBlocks = resolveReviewNoteBlocks(
-    existingDraft || previousCompletedReview,
+  const sectorNoteBlocks = resolveReviewNoteBlocksWithFallback(
+    existingDraft,
+    previousCompletedReview,
     "sector_rotation_blocks_json",
     "sector_rotation",
     "rotation",
@@ -3113,4 +3129,5 @@ export {
   parseLegacyReviewNoteMarkdown,
   parsePositionWeight,
   renderReviewNoteBlocksMarkdown,
+  resolveReviewNoteBlocksWithFallback,
 };
