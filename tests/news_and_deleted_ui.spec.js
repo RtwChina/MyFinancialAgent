@@ -34,7 +34,8 @@ test('news view defaults to major events and initialized reviews can start clean
 
   await expect(page.locator('#reviewStatusBadge')).toContainText('待开始');
   await expect(page.locator('#initializeBtn')).toBeDisabled();
-  await expect(page.locator('textarea[name="marketSentiment"]')).toHaveJSProperty('readOnly', false);
+  await expect(page.locator('#marketSentimentBlockEditor')).toBeVisible();
+  await expect(page.locator('#marketSentimentBlockEditor')).not.toHaveClass(/is-readonly/);
   await page.locator('.review-modal-panel').screenshot({
     path: '/Users/rtw/Project/PythonProject/MyFinancialAgent/output/review_initialized_check.png',
   });

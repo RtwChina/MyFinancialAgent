@@ -857,8 +857,8 @@ async function getReviews(env, url) {
       a.updated_at,
       a.reviewed_at,
       a.reviewer_news_notes,
-      a.market_sentiment,
-      a.sector_rotation,
+      a.market_sentiment_blocks_json,
+      a.sector_rotation_blocks_json,
       (
         SELECT GROUP_CONCAT(symbol, ' | ')
         FROM daily_review_action_plans p
@@ -925,14 +925,21 @@ function deriveReviewDailyThesis(row = {}) {
   if (tradingSummary) return tradingSummary;
 
   const reviewParts = [
-    firstMeaningfulLine(row.market_sentiment, 42),
-    firstMeaningfulLine(row.sector_rotation, 42),
+    firstReviewNoteBlockLine(row.market_sentiment_blocks_json, 42),
+    firstReviewNoteBlockLine(row.sector_rotation_blocks_json, 42),
   ].filter(Boolean);
   if (reviewParts.length) return reviewParts.join(" / ");
 
   return firstMeaningfulLine(row.daily_major_events)
     || firstMeaningfulLine(row.linkage_logic_chain)
     || "待复盘";
+}
+
+function firstReviewNoteBlockLine(value, maxLength = 42) {
+  const blocks = normalizeReviewNoteBlocks(value);
+  const title = blocks.map((block) => block.title).find(Boolean);
+  if (!title) return "";
+  return title.length > maxLength ? `${title.slice(0, maxLength)}...` : title;
 }
 
 function parseJsonArray(value) {
@@ -984,101 +991,25 @@ function normalizeReviewNoteBlocks(value, prefix = "note") {
     .filter(Boolean);
 }
 
-function renderReviewNoteBlocksMarkdown(blocks) {
-  return normalizeReviewNoteBlocks(blocks)
-    .map((section) => {
-      const lines = [`# ${section.title}`];
-      for (const child of section.children || []) {
-        lines.push("", `## ${child.title}`);
-        if (child.body) lines.push("", child.body);
-      }
-      return lines.join("\n").trim();
-    })
-    .filter(Boolean)
-    .join("\n\n");
-}
-
-function parseLegacyReviewNoteMarkdown(text, prefix = "legacy") {
-  const raw = String(text || "").trim();
-  if (!raw) return [];
-  const sections = [];
-  let currentSection = null;
-  let currentChild = null;
-
-  const ensureSection = (title = "未分类") => {
-    if (!currentSection) {
-      currentSection = {
-        id: createReviewNoteId(prefix, sections.length),
-        title,
-        children: [],
-      };
-      sections.push(currentSection);
-    }
-    return currentSection;
-  };
-  const ensureChild = (title = "核心判断") => {
-    const section = ensureSection();
-    if (!currentChild) {
-      currentChild = {
-        id: createReviewNoteId(`${prefix}-sub`, sections.length - 1, section.children.length),
-        title,
-        body: "",
-      };
-      section.children.push(currentChild);
-    }
-    return currentChild;
-  };
-
-  for (const line of raw.split(/\r?\n/)) {
-    const h2 = line.match(/^##\s+(.+)$/);
-    const h1 = line.match(/^#\s+(.+)$/);
-    if (h1) {
-      currentSection = {
-        id: createReviewNoteId(prefix, sections.length),
-        title: h1[1].trim() || "未命名主题",
-        children: [],
-      };
-      sections.push(currentSection);
-      currentChild = null;
-      continue;
-    }
-    if (h2) {
-      const section = ensureSection();
-      currentChild = {
-        id: createReviewNoteId(`${prefix}-sub`, sections.length - 1, section.children.length),
-        title: h2[1].trim() || "未命名维度",
-        body: "",
-      };
-      section.children.push(currentChild);
-      continue;
-    }
-    const child = ensureChild();
-    child.body = child.body ? `${child.body}\n${line}` : line;
-  }
-
-  return normalizeReviewNoteBlocks(sections, prefix);
-}
-
-function resolveReviewNoteBlocks(record, jsonKey, textKey, prefix) {
+function resolveReviewNoteBlocks(record, jsonKey, prefix) {
   const saved = normalizeReviewNoteBlocks(record?.[jsonKey], prefix);
   if (saved.length) {
     return { blocks: saved, source: "saved" };
   }
-  const parsed = parseLegacyReviewNoteMarkdown(record?.[textKey], prefix);
-  return { blocks: parsed, source: parsed.length ? "legacy_parsed" : "empty" };
+  return { blocks: [], source: "empty" };
 }
 
-function hasExplicitReviewNoteContent(record, jsonKey, textKey) {
+function hasExplicitReviewNoteContent(record, jsonKey) {
   if (!record) return false;
   if (record[jsonKey] != null) return true;
-  return String(record[textKey] || "").trim().length > 0;
+  return false;
 }
 
-function resolveReviewNoteBlocksWithFallback(primary, fallback, jsonKey, textKey, prefix) {
-  if (hasExplicitReviewNoteContent(primary, jsonKey, textKey)) {
-    return resolveReviewNoteBlocks(primary, jsonKey, textKey, prefix);
+function resolveReviewNoteBlocksWithFallback(primary, fallback, jsonKey, prefix) {
+  if (hasExplicitReviewNoteContent(primary, jsonKey)) {
+    return resolveReviewNoteBlocks(primary, jsonKey, prefix);
   }
-  return resolveReviewNoteBlocks(fallback, jsonKey, textKey, prefix);
+  return resolveReviewNoteBlocks(fallback, jsonKey, prefix);
 }
 
 function pickSubmittedReviewNoteBlocks(body, camelKey, snakeKey) {
@@ -1293,13 +1224,11 @@ async function getReviewByDate(env, archiveDate) {
       market_sentiment_blocks: resolveReviewNoteBlocks(
         archive,
         "market_sentiment_blocks_json",
-        "market_sentiment",
         "market",
       ).blocks,
       sector_rotation_blocks: resolveReviewNoteBlocks(
         archive,
         "sector_rotation_blocks_json",
-        "sector_rotation",
         "rotation",
       ).blocks,
     } : null,
@@ -1408,8 +1337,7 @@ async function getReviewBootstrap(env, archiveDate) {
   }
 
   const previousCompletedReview = await env.DB.prepare(
-    `SELECT archive_date, reviewer_news_notes, market_sentiment, market_sentiment_blocks_json,
-       sector_rotation, sector_rotation_blocks_json
+    `SELECT archive_date, reviewer_news_notes, market_sentiment_blocks_json, sector_rotation_blocks_json
      FROM daily_review_archive
      WHERE archive_date < ? AND review_status = 'reviewed'
      ORDER BY archive_date DESC
@@ -1432,14 +1360,12 @@ async function getReviewBootstrap(env, archiveDate) {
     existingDraft,
     previousCompletedReview,
     "market_sentiment_blocks_json",
-    "market_sentiment",
     "market",
   );
   const sectorNoteBlocks = resolveReviewNoteBlocksWithFallback(
     existingDraft,
     previousCompletedReview,
     "sector_rotation_blocks_json",
-    "sector_rotation",
     "rotation",
   );
 
@@ -2322,29 +2248,21 @@ async function saveReviewDraft(env, archiveDate, body) {
   const sectorBlocks = submittedSectorBlocks
     ? normalizeReviewNoteBlocks(submittedSectorBlocks, "rotation")
     : null;
-  const marketSentiment = marketBlocks
-    ? renderReviewNoteBlocksMarkdown(marketBlocks)
-    : body.marketSentiment || "";
-  const sectorRotation = sectorBlocks
-    ? renderReviewNoteBlocksMarkdown(sectorBlocks)
-    : body.sectorRotation || "";
   const marketBlocksJson = marketBlocks ? JSON.stringify(marketBlocks) : null;
   const sectorBlocksJson = sectorBlocks ? JSON.stringify(sectorBlocks) : null;
 
   await env.DB.prepare(
     `INSERT INTO daily_review_archive (
-      archive_date, review_status, reviewer_news_notes, market_sentiment, market_sentiment_blocks_json,
-      sector_rotation, sector_rotation_blocks_json, trading_summary, updated_at
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+      archive_date, review_status, reviewer_news_notes, market_sentiment_blocks_json,
+      sector_rotation_blocks_json, trading_summary, updated_at
+    ) VALUES (?, ?, ?, ?, ?, ?, ?)
     ON CONFLICT(archive_date) DO UPDATE SET
       review_status = excluded.review_status,
       reviewer_news_notes = excluded.reviewer_news_notes,
-      market_sentiment = excluded.market_sentiment,
       market_sentiment_blocks_json = CASE
         WHEN ? THEN excluded.market_sentiment_blocks_json
         ELSE daily_review_archive.market_sentiment_blocks_json
       END,
-      sector_rotation = excluded.sector_rotation,
       sector_rotation_blocks_json = CASE
         WHEN ? THEN excluded.sector_rotation_blocks_json
         ELSE daily_review_archive.sector_rotation_blocks_json
@@ -2356,9 +2274,7 @@ async function saveReviewDraft(env, archiveDate, body) {
       archiveDate,
       reviewStatus,
       body.reviewerNewsNotes || body.newsBrief || "",
-      marketSentiment,
       marketBlocksJson,
-      sectorRotation,
       sectorBlocksJson,
       body.tradingSummary || "",
       isoNow(),
@@ -2539,11 +2455,11 @@ async function initializeReview(env, archiveDate) {
   if (!existing) {
     await env.DB.prepare(
       `INSERT INTO daily_review_archive (
-        archive_date, review_status, reviewer_news_notes, market_sentiment,
-        market_sentiment_blocks_json, sector_rotation, sector_rotation_blocks_json,
+        archive_date, review_status, reviewer_news_notes,
+        market_sentiment_blocks_json, sector_rotation_blocks_json,
         trading_summary, reviewed_at, updated_at
       )
-       VALUES (?, 'initialized', '', '', NULL, '', NULL, '', NULL, ?)`,
+       VALUES (?, 'initialized', '', NULL, NULL, '', NULL, ?)`,
     )
       .bind(archiveDate, now)
       .run();
@@ -2554,9 +2470,7 @@ async function initializeReview(env, archiveDate) {
       `UPDATE daily_review_archive
        SET review_status = 'initialized',
            reviewer_news_notes = '',
-           market_sentiment = '',
            market_sentiment_blocks_json = NULL,
-           sector_rotation = '',
            sector_rotation_blocks_json = NULL,
            trading_summary = '',
            reviewed_at = NULL,
@@ -2615,7 +2529,7 @@ async function createReviewSnapshots(env, archiveDate, body = {}) {
     await env.DB.prepare(
       `INSERT INTO daily_review_snapshots (
         archive_date, version_no, snapshot_reason, review_status, reviewer_news_notes,
-        market_sentiment, sector_rotation, trading_summary,
+        market_sentiment_blocks_json, sector_rotation_blocks_json, trading_summary,
         reviewed_at, source_updated_at, snapshot_created_at
       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     )
@@ -2625,8 +2539,8 @@ async function createReviewSnapshots(env, archiveDate, body = {}) {
         snapshotReason,
         reviewRecord.review_status || "initialized",
         reviewRecord.reviewer_news_notes || "",
-        reviewRecord.market_sentiment || "",
-        reviewRecord.sector_rotation || "",
+        reviewRecord.market_sentiment_blocks_json || null,
+        reviewRecord.sector_rotation_blocks_json || null,
         reviewRecord.trading_summary || "",
         reviewRecord.reviewed_at || null,
         reviewRecord.updated_at || null,
@@ -3126,8 +3040,6 @@ export {
   bucketEstimatedImpactPercent,
   deriveReviewDailyThesis,
   normalizeReviewNoteBlocks,
-  parseLegacyReviewNoteMarkdown,
   parsePositionWeight,
-  renderReviewNoteBlocksMarkdown,
   resolveReviewNoteBlocksWithFallback,
 };

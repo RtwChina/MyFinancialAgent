@@ -736,14 +736,12 @@ async function openReviewDrawer(archiveDate, options = {}) {
   state.selectedActionPlanIndex = state.actionPlans.length ? 0 : -1;
   state.accountImpactSummary = normalizeAccountImpactSummary(data.accountImpactSummary || data.account_impact_summary || []);
   state.reviewNoteBlocks = {
-    marketSentiment: resolveBootstrapNoteBlocks(data, "marketSentiment", "market_sentiment", "market"),
-    sectorRotation: resolveBootstrapNoteBlocks(data, "sectorRotation", "sector_rotation", "rotation"),
+    marketSentiment: resolveBootstrapNoteBlocks(data, "marketSentiment"),
+    sectorRotation: resolveBootstrapNoteBlocks(data, "sectorRotation"),
   };
 
   applyFormValues({
     reviewerNewsNotes: data.draft?.reviewer_news_notes || data.draft?.news_brief || buildDefaultNewsBrief(data.analysis, data.news),
-    marketSentiment: renderReviewNoteBlocksMarkdown(state.reviewNoteBlocks.marketSentiment),
-    sectorRotation: renderReviewNoteBlocksMarkdown(state.reviewNoteBlocks.sectorRotation),
     tradingSummary: data.draft?.trading_summary || "",
   });
   renderStructuredNoteEditors();
@@ -765,14 +763,11 @@ async function saveReview() {
   if (!actionPlanDetailModal?.classList.contains("hidden")) {
     if (syncSelectedActionPlanFromEditor() === false) return;
   }
-  syncAllReviewNoteCompatibilityFields();
   const payload = Object.fromEntries(new FormData(reviewForm).entries());
   payload.reviewStatus = state.activeBootstrap?.draft?.review_status || "initialized";
   payload.actionPlans = normalizeActionPlans(state.actionPlans);
   payload.marketSentimentBlocks = normalizeReviewNoteBlocks(state.reviewNoteBlocks.marketSentiment);
   payload.sectorRotationBlocks = normalizeReviewNoteBlocks(state.reviewNoteBlocks.sectorRotation);
-  payload.marketSentiment = renderReviewNoteBlocksMarkdown(payload.marketSentimentBlocks);
-  payload.sectorRotation = renderReviewNoteBlocksMarkdown(payload.sectorRotationBlocks);
 
   await fetchJson(`/api/reviews/${state.activeDate}`, {
     method: "POST",
@@ -786,9 +781,7 @@ async function saveReview() {
       ...(state.activeBootstrap?.draft || {}),
       review_status: payload.reviewStatus,
       reviewer_news_notes: payload.reviewerNewsNotes,
-      market_sentiment: payload.marketSentiment,
       market_sentiment_blocks: payload.marketSentimentBlocks,
-      sector_rotation: payload.sectorRotation,
       sector_rotation_blocks: payload.sectorRotationBlocks,
       trading_summary: payload.tradingSummary,
     },
@@ -1016,85 +1009,22 @@ function normalizeReviewNoteBlocks(value = []) {
     .filter(Boolean);
 }
 
-function parseLegacyReviewNoteMarkdown(text, prefix = "legacy") {
-  const raw = String(text || "").trim();
-  if (!raw) return [];
-  const sections = [];
-  let currentSection = null;
-  let currentChild = null;
-  const ensureSection = () => {
-    if (!currentSection) {
-      currentSection = { id: makeReviewNoteId(prefix), title: "未分类", children: [] };
-      sections.push(currentSection);
-    }
-    return currentSection;
-  };
-  const ensureChild = () => {
-    const section = ensureSection();
-    if (!currentChild) {
-      currentChild = { id: makeReviewNoteId(`${prefix}-sub`), title: "核心判断", body: "" };
-      section.children.push(currentChild);
-    }
-    return currentChild;
-  };
-  raw.split(/\r?\n/).forEach((line) => {
-    const h2 = line.match(/^##\s+(.+)$/);
-    const h1 = line.match(/^#\s+(.+)$/);
-    if (h1) {
-      currentSection = { id: makeReviewNoteId(prefix), title: h1[1].trim() || "未命名主题", children: [] };
-      sections.push(currentSection);
-      currentChild = null;
-      return;
-    }
-    if (h2) {
-      const section = ensureSection();
-      currentChild = { id: makeReviewNoteId(`${prefix}-sub`), title: h2[1].trim() || "未命名维度", body: "" };
-      section.children.push(currentChild);
-      return;
-    }
-    const child = ensureChild();
-    child.body = child.body ? `${child.body}\n${line}` : line;
-  });
-  return normalizeReviewNoteBlocks(sections);
+function reviewNoteBlocksHaveContent(blocks = []) {
+  return normalizeReviewNoteBlocks(blocks).some((section) => (
+    String(section.title || "").trim()
+    || (section.children || []).some((child) => String(child.title || child.body || "").trim())
+  ));
 }
 
-function renderReviewNoteBlocksMarkdown(blocks = []) {
-  return normalizeReviewNoteBlocks(blocks)
-    .map((section) => {
-      const lines = [`# ${section.title}`];
-      (section.children || []).forEach((child) => {
-        lines.push("", `## ${child.title}`);
-        if (child.body) lines.push("", child.body);
-      });
-      return lines.join("\n").trim();
-    })
-    .filter(Boolean)
-    .join("\n\n");
-}
-
-function resolveBootstrapNoteBlocks(data, camelKey, snakeTextKey, prefix) {
+function resolveBootstrapNoteBlocks(data, camelKey) {
   const structured = data.structuredNotes?.[camelKey]?.blocks;
   if (Array.isArray(structured)) return normalizeReviewNoteBlocks(structured);
-  const snakeBlocksKey = `${snakeTextKey}_blocks`;
-  if (Array.isArray(data.draft?.[snakeBlocksKey])) return normalizeReviewNoteBlocks(data.draft[snakeBlocksKey]);
-  const text = data.draft?.[snakeTextKey] || data.carryForward?.[snakeTextKey] || "";
-  return parseLegacyReviewNoteMarkdown(text, prefix);
-}
-
-function syncReviewNoteCompatibilityField(field) {
-  const textarea = reviewForm.elements.namedItem(field);
-  if (textarea) textarea.value = renderReviewNoteBlocksMarkdown(state.reviewNoteBlocks[field] || []);
-}
-
-function syncAllReviewNoteCompatibilityFields() {
-  syncReviewNoteCompatibilityField("marketSentiment");
-  syncReviewNoteCompatibilityField("sectorRotation");
+  return [];
 }
 
 function renderStructuredNoteEditors() {
   renderStructuredNoteEditor("marketSentiment", document.querySelector("#marketSentimentBlockEditor"));
   renderStructuredNoteEditor("sectorRotation", document.querySelector("#sectorRotationBlockEditor"));
-  syncAllReviewNoteCompatibilityFields();
 }
 
 function renderStructuredNoteEditor(field, container) {
@@ -2555,10 +2485,10 @@ function getStepValue(step) {
     return state.actionPlans.length ? formatActionPlansMarkdown(state.actionPlans) : "";
   }
   if (step.key === "market") {
-    return renderReviewNoteBlocksMarkdown(state.reviewNoteBlocks.marketSentiment);
+    return reviewNoteBlocksHaveContent(state.reviewNoteBlocks.marketSentiment) ? "structured" : "";
   }
   if (step.key === "rotation") {
-    return renderReviewNoteBlocksMarkdown(state.reviewNoteBlocks.sectorRotation);
+    return reviewNoteBlocksHaveContent(state.reviewNoteBlocks.sectorRotation) ? "structured" : "";
   }
   return String(reviewForm.elements.namedItem(step.field)?.value || "").trim();
 }
@@ -2609,7 +2539,7 @@ function validateStep(step, showAlert = true) {
   }
   if (step.key === "market" || step.key === "rotation") {
     const field = step.key === "market" ? "marketSentiment" : "sectorRotation";
-    if (!renderReviewNoteBlocksMarkdown(state.reviewNoteBlocks[field]).trim()) {
+    if (!reviewNoteBlocksHaveContent(state.reviewNoteBlocks[field])) {
       if (showAlert) window.alert(`请先完成“${step.label}”这一步。`);
       return false;
     }

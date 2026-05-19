@@ -7,9 +7,7 @@ import {
   bucketEstimatedImpactPercent,
   deriveReviewDailyThesis,
   normalizeReviewNoteBlocks,
-  parseLegacyReviewNoteMarkdown,
   parsePositionWeight,
-  renderReviewNoteBlocksMarkdown,
   resolveReviewNoteBlocksWithFallback,
 } from "../cloudflare/worker/src/index.js";
 
@@ -17,8 +15,8 @@ test("deriveReviewDailyThesis prefers trading summary, then review notes, then A
   assert.equal(
     deriveReviewDailyThesis({
       trading_summary: "交易总结第一优先",
-      market_sentiment: "大盘",
-      sector_rotation: "板块",
+      market_sentiment_blocks_json: JSON.stringify([{ title: "大盘" }]),
+      sector_rotation_blocks_json: JSON.stringify([{ title: "板块" }]),
       daily_major_events: "AI 事件",
       linkage_logic_chain: "AI 链路",
     }),
@@ -27,8 +25,8 @@ test("deriveReviewDailyThesis prefers trading summary, then review notes, then A
 
   assert.equal(
     deriveReviewDailyThesis({
-      market_sentiment: "大盘变量",
-      sector_rotation: "板块轮动",
+      market_sentiment_blocks_json: JSON.stringify([{ title: "大盘变量" }]),
+      sector_rotation_blocks_json: JSON.stringify([{ title: "板块轮动" }]),
       daily_major_events: "AI 事件",
     }),
     "大盘变量 / 板块轮动",
@@ -107,7 +105,7 @@ test("buildAccountSnapshotFromAccounts preserves one review-day structured snaps
   ]);
 });
 
-test("review note blocks preserve arbitrary titles and render compatibility markdown", () => {
+test("review note blocks preserve arbitrary titles", () => {
   const blocks = normalizeReviewNoteBlocks([
     {
       title: "黄金",
@@ -121,50 +119,25 @@ test("review note blocks preserve arbitrary titles and render compatibility mark
   assert.equal(blocks[0].title, "黄金");
   assert.equal(blocks[0].children[0].title, "战争影响");
   assert.equal(blocks[0].children[1].body.includes("**重点**"), true);
-  assert.equal(
-    renderReviewNoteBlocksMarkdown(blocks),
-    "# 黄金\n\n## 战争影响\n\n避险需求升温。\n\n## 利率影响\n\n实际利率回落支撑金价。\n保留 Markdown **重点**。",
-  );
-});
-
-test("legacy review note markdown parses # and ## into editable free blocks", () => {
-  const parsed = parseLegacyReviewNoteMarkdown(`# 标普500
-开盘前的核心判断。
-
-## CTA 流动性
-流动性边际改善。
-
-# XLK
-## 风险
-估值压力仍在。`);
-
-  assert.equal(parsed.length, 2);
-  assert.equal(parsed[0].title, "标普500");
-  assert.equal(parsed[0].children[0].title, "核心判断");
-  assert.equal(parsed[0].children[0].body, "开盘前的核心判断。");
-  assert.equal(parsed[0].children[1].title, "CTA 流动性");
-  assert.equal(parsed[1].title, "XLK");
-  assert.equal(parsed[1].children[0].title, "风险");
 });
 
 test("empty initialized review notes fall back to previous reviewed notes", () => {
   const resolved = resolveReviewNoteBlocksWithFallback(
     {
       review_status: "initialized",
-      market_sentiment: "",
       market_sentiment_blocks_json: null,
     },
     {
       archive_date: "2026-05-15",
-      market_sentiment: "# 黄金\n\n## 战争影响\n\n避险需求升温。",
-      market_sentiment_blocks_json: null,
+      market_sentiment_blocks_json: JSON.stringify([
+        { title: "黄金", children: [{ title: "战争影响", body: "避险需求升温。" }] },
+      ]),
     },
     "market_sentiment_blocks_json",
-    "market_sentiment",
     "market",
   );
 
-  assert.equal(resolved.source, "legacy_parsed");
+  assert.equal(resolved.source, "saved");
   assert.equal(resolved.blocks.length, 1);
   assert.equal(resolved.blocks[0].title, "黄金");
 });
@@ -173,18 +146,15 @@ test("empty initialized review notes prefer previous saved structured notes", ()
   const resolved = resolveReviewNoteBlocksWithFallback(
     {
       review_status: "initialized",
-      market_sentiment: "",
       market_sentiment_blocks_json: null,
     },
     {
       archive_date: "2026-05-15",
-      market_sentiment: "# 旧文本",
       market_sentiment_blocks_json: JSON.stringify([
         { title: "标普500点位", children: [{ title: "CTA流动性", body: "横盘 sell。" }] },
       ]),
     },
     "market_sentiment_blocks_json",
-    "market_sentiment",
     "market",
   );
 

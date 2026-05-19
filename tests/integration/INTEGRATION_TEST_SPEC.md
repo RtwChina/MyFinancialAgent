@@ -144,7 +144,7 @@
   - `POST /api/reviews/{date}/complete`
 - 预期结果：
   - 状态正确流转
-  - `reviewer_news_notes`、`market_sentiment`、`sector_rotation`、`asset_plan`、`trading_summary` 可回查
+  - `reviewer_news_notes`、结构化复盘笔记块、结构化操作计划、`trading_summary` 可回查
   - `GET /api/reviews/{date}/bootstrap` 返回 `actionPlans`
   - `daily_review_action_plans` 仅写入当前复盘日的子记录
   - `asset_plan` 保存为结构化计划生成的兼容 Markdown 摘要

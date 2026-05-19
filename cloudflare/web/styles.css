@@ -1939,10 +1939,6 @@ textarea[name="reviewerNewsNotes"] {
   align-content: start;
 }
 
-.structured-note-compat-textarea.hidden {
-  display: none;
-}
-
 .structured-note-head,
 .structured-note-section-head,
 .structured-note-subsection-head {

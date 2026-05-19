@@ -16,6 +16,7 @@ into a temporary SQLite schema, then rewrites them into the current schema:
 - `stock_raw.symbol` uses system symbols such as `GSPC`, `VIX`, `DXY`
 - `news_raw_data.type` uses `index/sector/stock`
 - `daily_review_archive` uses `reviewer_news_notes`
+- legacy review note text is converted into structured note block JSON
 - `daily_news_ai_analysis` uses the current three analysis fields plus
   `source_news_ids`
 """
@@ -308,6 +309,17 @@ def render_analysis_rows(conn: sqlite3.Connection) -> list[str]:
     return statements
 
 
+def legacy_note_blocks(text: str, title: str) -> str:
+    body = (text or "").strip()
+    if not body:
+        return "[]"
+    return json.dumps(
+        [{"title": title, "children": [{"title": "历史记录", "body": body}]}],
+        ensure_ascii=False,
+        separators=(",", ":"),
+    )
+
+
 def render_archive_rows(conn: sqlite3.Connection) -> list[str]:
     rows = conn.execute(
         """
@@ -322,10 +334,11 @@ def render_archive_rows(conn: sqlite3.Connection) -> list[str]:
     for row in rows:
         statements.append(
             "INSERT OR IGNORE INTO daily_review_archive "
-            "(archive_date, review_status, reviewer_news_notes, market_sentiment, sector_rotation, "
+            "(archive_date, review_status, reviewer_news_notes, market_sentiment_blocks_json, sector_rotation_blocks_json, "
             "trading_summary, reviewed_at, updated_at) "
             f"VALUES ({sql_value(row['archive_date'])}, {sql_value(row['review_status'])}, {sql_value(row['news_brief'])}, "
-            f"{sql_value(row['market_sentiment'])}, {sql_value(row['sector_rotation'])}, "
+            f"{sql_value(legacy_note_blocks(row['market_sentiment'], '大盘盘点'))}, "
+            f"{sql_value(legacy_note_blocks(row['sector_rotation'], '板块轮动'))}, "
             f"{sql_value(row['trading_summary'])}, {sql_value(row['reviewed_at'])}, {sql_value(row['updated_at'])});"
         )
     return statements

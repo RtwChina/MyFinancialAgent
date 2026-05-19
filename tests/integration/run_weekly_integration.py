@@ -254,9 +254,12 @@ def validate_review_lifecycle(worker_base: str, archive_date: str, db_name: str)
         f"{worker_base}/api/reviews/{archive_date}",
         {
             "reviewerNewsNotes": "集成测试：新闻总结草稿。",
-            "marketSentiment": "集成测试：大盘盘点。",
-            "sectorRotation": "集成测试：板块轮动。",
-            "assetPlan": "集成测试：个股计划。",
+            "marketSentimentBlocks": [
+                {"title": "集成测试", "children": [{"title": "大盘盘点", "body": "集成测试：大盘盘点。"}]},
+            ],
+            "sectorRotationBlocks": [
+                {"title": "集成测试", "children": [{"title": "板块轮动", "body": "集成测试：板块轮动。"}]},
+            ],
             "tradingSummary": "集成测试：深度总结。",
         },
     )
@@ -266,9 +269,12 @@ def validate_review_lifecycle(worker_base: str, archive_date: str, db_name: str)
         f"{worker_base}/api/reviews/{archive_date}",
         {
             "reviewerNewsNotes": "集成测试：已复盘后二次保存。",
-            "marketSentiment": "集成测试：大盘盘点（二次保存）。",
-            "sectorRotation": "集成测试：板块轮动（二次保存）。",
-            "assetPlan": "集成测试：个股计划（二次保存）。",
+            "marketSentimentBlocks": [
+                {"title": "集成测试", "children": [{"title": "大盘盘点", "body": "集成测试：大盘盘点（二次保存）。"}]},
+            ],
+            "sectorRotationBlocks": [
+                {"title": "集成测试", "children": [{"title": "板块轮动", "body": "集成测试：板块轮动（二次保存）。"}]},
+            ],
             "tradingSummary": "集成测试：深度总结（二次保存）。",
         },
     )

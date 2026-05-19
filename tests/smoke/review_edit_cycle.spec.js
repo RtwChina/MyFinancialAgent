@@ -123,8 +123,8 @@ test('review can be completed, reopened, edited, and saved again', async ({ page
       }),
     ]),
   );
-  expect(bootstrapJson.draft.market_sentiment).toContain('# 标普500');
-  expect(bootstrapJson.draft.sector_rotation).toContain('## 利率影响');
+  expect(bootstrapJson.draft).not.toHaveProperty('market_sentiment');
+  expect(bootstrapJson.draft).not.toHaveProperty('sector_rotation');
   expect(bootstrapJson.actionPlans).toEqual(
     expect.arrayContaining([
       expect.objectContaining({
@@ -334,7 +334,6 @@ test('initialized empty review carries forward previous market and sector notes'
     data: {
       reviewStatus: 'reviewed',
       reviewerNewsNotes: '结构化笔记沿用冒烟：新闻总结。',
-      marketSentiment: '# 标普500\n## 流动性\n上一天大盘判断。',
       marketSentimentBlocks: [
         {
           id: 'market-0',
@@ -342,7 +341,6 @@ test('initialized empty review carries forward previous market and sector notes'
           children: [{ id: 'market-sub-0-0', title: '流动性', body: '上一天大盘判断。' }],
         },
       ],
-      sectorRotation: '# 黄金\n## 利率\n上一天板块判断。',
       sectorRotationBlocks: [
         {
           id: 'rotation-0',
@@ -359,8 +357,8 @@ test('initialized empty review carries forward previous market and sector notes'
   const bootstrap = await request.get(`${BASE_URL}/api/reviews/${CARRY_NOTES_TARGET_DATE}/bootstrap`);
   const bootstrapJson = await bootstrap.json();
   expect(bootstrapJson.draft.review_status).toBe('initialized');
-  expect(bootstrapJson.draft.market_sentiment).toBe('');
-  expect(bootstrapJson.draft.sector_rotation).toBe('');
+  expect(bootstrapJson.draft).not.toHaveProperty('market_sentiment');
+  expect(bootstrapJson.draft).not.toHaveProperty('sector_rotation');
   expect(bootstrapJson.structuredNotes.marketSentiment.blocks[0]).toEqual(
     expect.objectContaining({
       title: '标普500',
