@@ -1240,17 +1240,17 @@ function renderReviewOutline() {
 
 function buildReviewOutlineGroups() {
   const groups = [];
-  const hasAnalysis = Boolean(analysisBox?.children?.length);
-  const hasNews = Boolean(newsPicker?.children?.length);
+  groups.push({
+    step: null,
+    label: "复盘日价格",
+    targetId: "reviewPriceSnapshot",
+    items: [],
+  });
   groups.push({
     step: "news",
     label: "新闻总结",
     targetId: "analysisBox",
-    items: [
-      ...(hasAnalysis ? [{ label: "AI 日总结", targetId: "analysisBox" }] : []),
-      ...(hasNews ? [{ label: "重点新闻", targetId: "newsPicker" }] : []),
-      { label: "我的点评", targetId: "reviewerNewsNotesInput" },
-    ],
+    items: [],
   });
 
   REVIEW_OUTLINE_GROUPS.forEach((group) => {
@@ -1281,7 +1281,7 @@ function buildReviewOutlineGroups() {
       : [{ label: "暂无操作计划", targetId: "actionPlanAccountGroups", children: [] }],
   });
 
-  return groups.filter((group) => group.items?.length);
+  return groups.filter((group) => group.targetId || group.items?.length);
 }
 
 function buildActionPlanOutlineItems() {
@@ -1311,7 +1311,7 @@ function buildReviewOutlineButton({ label, level, step, targetId }) {
   button.textContent = label;
   button.title = label;
   button.addEventListener("click", () => {
-    setReviewStep(step);
+    if (step) setReviewStep(step);
     window.requestAnimationFrame(() => {
       const target = targetId ? document.getElementById(targetId) : document.querySelector(`.review-step-panel[data-step="${step}"]`);
       target?.scrollIntoView({ behavior: "smooth", block: "start" });

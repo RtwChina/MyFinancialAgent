@@ -1520,7 +1520,7 @@ textarea {
 .review-outline {
   position: fixed;
   top: 24px;
-  left: calc((100vw - 1240px) / 2 - 216px);
+  left: max(14px, calc((100vw - 1240px) / 2 - 216px));
   z-index: 3;
   width: 200px;
   max-height: calc(100vh - 48px);
@@ -3463,12 +3463,6 @@ textarea[name="reviewerNewsNotes"] {
 
   .price-grid {
     grid-template-columns: repeat(3, minmax(0, 1fr));
-  }
-}
-
-@media (max-width: 1680px) {
-  .review-outline {
-    display: none;
   }
 }
 
