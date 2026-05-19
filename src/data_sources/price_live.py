@@ -424,18 +424,41 @@ def fetch_price_for_k_date_akshare(price_record: dict, context: ExecutionContext
     start_date = (target_date - timedelta(days=5)).strftime("%Y%m%d")
     end_date = (target_date + timedelta(days=2)).strftime("%Y%m%d")
 
+    source_kind = "index" if _is_mainland_index(price_record) else "etf" if _is_mainland_etf(price_record) else "stock"
+    last_error = None
+    for attempt in range(1, PRICE_FETCH_RETRIES + 1):
+        try:
+            logger.info(
+                "修复重查 %s (%s) %s 的 AKShare 价格... kind=%s window=%s~%s",
+                display_name, yahoo_code, target_k_date, source_kind, start_date, end_date,
+            )
+            if _is_mainland_index(price_record):
+                df = ak.index_zh_a_hist(symbol=code, period="daily", start_date=start_date, end_date=end_date)
+            elif _is_mainland_etf(price_record):
+                df = ak.fund_etf_hist_em(symbol=code, period="daily", start_date=start_date, end_date=end_date, adjust="")
+            else:
+                df = ak.stock_zh_a_hist(symbol=code, period="daily", start_date=start_date, end_date=end_date, adjust="")
+            break
+        except Exception as exc:
+            last_error = exc
+            if attempt < PRICE_FETCH_RETRIES:
+                logger.warning(
+                    "修复重查 %s (%s) %s 的 AKShare 价格失败，第 %s/%s 次重试: %s",
+                    display_name, yahoo_code, target_k_date, attempt, PRICE_FETCH_RETRIES, exc,
+                )
+                time.sleep(PRICE_FETCH_RETRY_DELAY * attempt)
+            else:
+                logger.error("修复重查 %s (%s) %s 的 AKShare 价格失败: %s", display_name, yahoo_code, target_k_date, exc)
+    else:
+        if last_error:
+            logger.error("修复重查最终失败 %s (%s) %s 的 AKShare 价格: %s", display_name, yahoo_code, target_k_date, last_error)
+        return None
+
     try:
-        source_kind = "index" if _is_mainland_index(price_record) else "etf" if _is_mainland_etf(price_record) else "stock"
         logger.info(
-            "修复重查 %s (%s) %s 的 AKShare 价格... kind=%s window=%s~%s",
-            display_name, yahoo_code, target_k_date, source_kind, start_date, end_date,
+            "AKShare 修复数据返回: symbol=%s yahoo=%s k_date=%s kind=%s rows=%s",
+            system_symbol, yahoo_code, target_k_date, source_kind, 0 if df is None else len(df),
         )
-        if _is_mainland_index(price_record):
-            df = ak.index_zh_a_hist(symbol=code, period="daily", start_date=start_date, end_date=end_date)
-        elif _is_mainland_etf(price_record):
-            df = ak.fund_etf_hist_em(symbol=code, period="daily", start_date=start_date, end_date=end_date, adjust="")
-        else:
-            df = ak.stock_zh_a_hist(symbol=code, period="daily", start_date=start_date, end_date=end_date, adjust="")
         if df is None or df.empty:
             logger.warning("修复跳过 %s (%s): AKShare 返回空数据", display_name, yahoo_code)
             return None

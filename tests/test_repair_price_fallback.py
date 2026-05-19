@@ -78,6 +78,21 @@ class TestRepairPriceFallback(unittest.TestCase):
 
         self.assertIsNone(repaired)
 
+    def test_akshare_retry_recovers_from_transient_disconnect(self):
+        candidate = self.cases["akshare_hit_after_yahoo_miss"]["candidate"]
+        target_df = pd.DataFrame([
+            {"日期": "2026-04-18", "收盘": 1.517, "涨跌幅": 1.13, "成交量": 19275662}
+        ])
+        with patch("data_sources.price_live.ak.fund_etf_hist_em", side_effect=[ConnectionError("remote closed"), target_df]) as mock_fetch, \
+             patch("data_sources.price_live.time.sleep") as mock_sleep:
+            from data_sources.price_live import fetch_price_for_k_date_akshare
+
+            repaired = fetch_price_for_k_date_akshare({**candidate, "k_date": "2026-04-18"}, self.context)
+
+        self.assertEqual(repaired["current_price"], 1.517)
+        self.assertEqual(mock_fetch.call_count, 2)
+        mock_sleep.assert_called_once()
+
     def test_run_price_repair_updates_existing_rows(self):
         mainland = self.cases["akshare_hit_after_yahoo_miss"]["candidate"]
         international = self.cases["international_logs_after_yahoo_miss"]["candidate"]
