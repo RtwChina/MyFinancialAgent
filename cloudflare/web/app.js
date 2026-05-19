@@ -1196,12 +1196,7 @@ const REVIEW_OUTLINE_GROUPS = [
 function renderReviewOutline() {
   if (!reviewOutline) return;
   reviewOutline.innerHTML = "";
-  const groups = REVIEW_OUTLINE_GROUPS
-    .map((group) => ({
-      ...group,
-      blocks: normalizeReviewNoteBlocks(state.reviewNoteBlocks[group.field] || []),
-    }))
-    .filter((group) => group.blocks.length);
+  const groups = buildReviewOutlineGroups();
 
   reviewModalPanel?.classList.toggle("has-outline", groups.length > 0);
   reviewOutline.classList.toggle("hidden", groups.length === 0);
@@ -1219,28 +1214,94 @@ function renderReviewOutline() {
       label: group.label,
       level: "group",
       step: group.step,
-      targetId: null,
+      targetId: group.targetId || null,
     });
     groupEl.appendChild(groupButton);
 
-    group.blocks.forEach((section, sectionIndex) => {
+    (group.items || []).forEach((section) => {
       groupEl.appendChild(buildReviewOutlineButton({
-        label: `${sectionIndex + 1}. ${section.title || "未命名主题"}`,
+        label: section.label,
         level: "section",
         step: group.step,
-        targetId: getReviewNoteSectionAnchor(group.field, sectionIndex),
+        targetId: section.targetId,
       }));
-      (section.children || []).forEach((child, childIndex) => {
+      (section.children || []).forEach((child) => {
         groupEl.appendChild(buildReviewOutlineButton({
-          label: child.title || "未命名维度",
+          label: child.label,
           level: "child",
           step: group.step,
-          targetId: getReviewNoteSubsectionAnchor(group.field, sectionIndex, childIndex),
+          targetId: child.targetId,
         }));
       });
     });
     reviewOutline.appendChild(groupEl);
   });
+}
+
+function buildReviewOutlineGroups() {
+  const groups = [];
+  const hasAnalysis = Boolean(analysisBox?.children?.length);
+  const hasNews = Boolean(newsPicker?.children?.length);
+  groups.push({
+    step: "news",
+    label: "新闻总结",
+    targetId: "analysisBox",
+    items: [
+      ...(hasAnalysis ? [{ label: "AI 日总结", targetId: "analysisBox" }] : []),
+      ...(hasNews ? [{ label: "重点新闻", targetId: "newsPicker" }] : []),
+      { label: "我的点评", targetId: "reviewerNewsNotesInput" },
+    ],
+  });
+
+  REVIEW_OUTLINE_GROUPS.forEach((group) => {
+    const blocks = normalizeReviewNoteBlocks(state.reviewNoteBlocks[group.field] || []);
+    if (!blocks.length) return;
+    groups.push({
+      step: group.step,
+      label: group.label,
+      targetId: null,
+      items: blocks.map((section, sectionIndex) => ({
+        label: `${sectionIndex + 1}. ${section.title || "未命名主题"}`,
+        targetId: getReviewNoteSectionAnchor(group.field, sectionIndex),
+        children: (section.children || []).map((child, childIndex) => ({
+          label: child.title || "未命名维度",
+          targetId: getReviewNoteSubsectionAnchor(group.field, sectionIndex, childIndex),
+        })),
+      })),
+    });
+  });
+
+  const actionPlanItems = buildActionPlanOutlineItems();
+  groups.push({
+    step: "plan",
+    label: "个股操作",
+    targetId: "actionPlanAccountGroups",
+    items: actionPlanItems.length
+      ? actionPlanItems
+      : [{ label: "暂无操作计划", targetId: "actionPlanAccountGroups", children: [] }],
+  });
+
+  return groups.filter((group) => group.items?.length);
+}
+
+function buildActionPlanOutlineItems() {
+  const accounts = getActionPlanVisibleAccounts();
+  return accounts
+    .map((account) => {
+      const plans = state.actionPlans
+        .map((plan, index) => ({ plan, index }))
+        .filter(({ plan }) => Number(plan.accountId || 0) === Number(account.id));
+      if (!plans.length) return null;
+      return {
+        label: account.name || "未分配账户",
+        targetId: getActionPlanAccountAnchor(account),
+        children: plans.map(({ plan, index }) => ({
+          label: [actionPlanSymbolLabel(plan.symbol), plan.actionType].filter(Boolean).join(" · "),
+          targetId: getActionPlanRowAnchor(index),
+        })),
+      };
+    })
+    .filter(Boolean);
 }
 
 function buildReviewOutlineButton({ label, level, step, targetId }) {
@@ -1648,6 +1709,14 @@ function actionPlanTbodyId(account) {
   return `actionPlanRowsAccount${account.id}`;
 }
 
+function getActionPlanAccountAnchor(account) {
+  return `review-action-account-${Number(account?.id || 0)}`;
+}
+
+function getActionPlanRowAnchor(index) {
+  return `review-action-plan-${index}`;
+}
+
 function legacyActionPlanControlIds(account) {
   if (account?.name === "老虎-美股") {
     return { add: "addActionPlanUsBtn", sort: "sortActionPlansUsBtn", empty: "emptyActionPlanStateUs" };
@@ -1665,7 +1734,7 @@ function renderActionPlanGroup(tbody, account) {
     .map((plan, index) => ({ plan, index }))
     .filter(({ plan }) => Number(plan.accountId || 0) === Number(account.id));
   tbody.innerHTML = rows.map(({ plan, index }) => `
-    <tr class="${index === selected ? "selected" : ""}" data-index="${index}">
+    <tr id="${escapeAttribute(getActionPlanRowAnchor(index))}" class="${index === selected ? "selected" : ""}" data-index="${index}">
       <td class="action-plan-target-cell">
         <div class="action-plan-target-stack">
           <strong class="action-plan-symbol">${escapeHtml(actionPlanSymbolLabel(plan.symbol))}</strong>
@@ -1747,7 +1816,7 @@ function renderActionPlans(options = {}) {
   if (actionPlanAccountGroups) {
     const visibleAccounts = getActionPlanVisibleAccounts();
     actionPlanAccountGroups.innerHTML = visibleAccounts.map((account) => `
-      <div class="action-plan-group" data-account-id="${escapeAttribute(String(account.id))}">
+      <div id="${escapeAttribute(getActionPlanAccountAnchor(account))}" class="action-plan-group" data-account-id="${escapeAttribute(String(account.id))}">
         <div class="action-plan-group-head">
           <div>
             <span class="action-plan-group-label">${escapeHtml(account.name)}</span>
@@ -1811,6 +1880,7 @@ function renderActionPlans(options = {}) {
   if (!hasPlans) closeActionPlanDetail();
   applyActionPlanReadOnly(readOnly);
   if (!readOnly && options.refreshImpact !== false) scheduleAccountImpactPreview();
+  renderReviewOutline();
 }
 
 function renderActionPlanSymbolOptions(selectedSymbol = "") {
@@ -2392,6 +2462,7 @@ function renderNewsPicker(news) {
   newsPicker.innerHTML = "";
   if (!(news || []).length) {
     newsPicker.innerHTML = `<div class="empty-state">当前没有可纳入复盘的重点新闻。</div>`;
+    renderReviewOutline();
     return;
   }
 
@@ -2432,6 +2503,7 @@ function renderNewsPicker(news) {
     }
     newsPicker.appendChild(section);
   });
+  renderReviewOutline();
 }
 
 function buildReviewNewsGroup(title, items, expanded = false) {

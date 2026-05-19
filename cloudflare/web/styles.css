@@ -1517,17 +1517,13 @@ textarea {
     var(--panel);
 }
 
-.review-modal-panel.has-outline {
-  padding-left: 246px;
-}
-
 .review-outline {
   position: fixed;
-  top: 142px;
-  left: max(28px, calc((100vw - 1240px) / 2 + 28px));
+  top: 24px;
+  left: calc((100vw - 1240px) / 2 - 216px);
   z-index: 3;
   width: 200px;
-  max-height: calc(100vh - 184px);
+  max-height: calc(100vh - 48px);
   overflow: auto;
   padding: 10px;
   border: 1px solid rgba(15, 23, 42, 0.08);
@@ -1589,14 +1585,15 @@ textarea {
   color: #0f172a;
   font-size: 0.8rem;
   font-weight: 900;
+  margin-top: 2px;
 }
 
 .review-outline-item.section {
-  padding-left: 14px;
+  padding-left: 16px;
 }
 
 .review-outline-item.child {
-  padding-left: 26px;
+  padding-left: 30px;
   color: #64748b;
   font-size: 0.75rem;
   font-weight: 650;
@@ -3460,16 +3457,18 @@ textarea[name="reviewerNewsNotes"] {
     grid-template-columns: 1fr;
   }
 
-  .review-modal-panel.has-outline {
-    padding-left: 22px;
-  }
-
   .review-outline {
     display: none;
   }
 
   .price-grid {
     grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 1680px) {
+  .review-outline {
+    display: none;
   }
 }
 
