@@ -226,6 +226,7 @@ const reviewsTotalInfo = document.querySelector("#reviewsTotalInfo");
 const reviewsPageSizeSelect = document.querySelector("#reviewsPageSizeSelect");
 
 const reviewDrawer = document.querySelector("#reviewDrawer");
+const reviewModalPanel = document.querySelector(".review-modal-panel");
 const reviewForm = document.querySelector("#reviewForm");
 const archiveDateLabel = document.querySelector("#archiveDateLabel");
 const reviewStatusBadge = document.querySelector("#reviewStatusBadge");
@@ -236,6 +237,7 @@ const analysisBox = document.querySelector("#analysisBox");
 const newsPicker = document.querySelector("#newsPicker");
 const reviewStepNav = document.querySelector("#reviewStepNav");
 const reviewStepHint = document.querySelector("#reviewStepHint");
+const reviewOutline = document.querySelector("#reviewOutline");
 const saveDraftBtn = document.querySelector("#saveDraftBtn");
 const initializeBtn = document.querySelector("#initializeBtn");
 const reviewActionGroup = document.querySelector("#reviewActionGroup");
@@ -1025,6 +1027,7 @@ function resolveBootstrapNoteBlocks(data, camelKey) {
 function renderStructuredNoteEditors() {
   renderStructuredNoteEditor("marketSentiment", document.querySelector("#marketSentimentBlockEditor"));
   renderStructuredNoteEditor("sectorRotation", document.querySelector("#sectorRotationBlockEditor"));
+  renderReviewOutline();
 }
 
 function renderStructuredNoteEditor(field, container) {
@@ -1044,6 +1047,7 @@ function renderStructuredNoteEditor(field, container) {
   blocks.forEach((section, sectionIndex) => {
     const sectionEl = document.createElement("article");
     sectionEl.className = "structured-note-section";
+    sectionEl.id = getReviewNoteSectionAnchor(field, sectionIndex);
     const head = document.createElement("div");
     head.className = "structured-note-section-head";
     const indexEl = document.createElement("span");
@@ -1092,6 +1096,7 @@ function renderStructuredNoteEditor(field, container) {
 function buildReviewNoteSubsection(field, sectionIndex, childIndex, child, readOnly) {
   const wrapper = document.createElement("section");
   wrapper.className = "structured-note-subsection";
+  wrapper.id = getReviewNoteSubsectionAnchor(field, sectionIndex, childIndex);
   const head = document.createElement("div");
   head.className = "structured-note-subsection-head";
   const input = document.createElement("input");
@@ -1171,6 +1176,85 @@ function buildReviewNoteDragHandle({ label, type, field, sectionIndex, childInde
     };
     itemEl.classList.add("is-dragging");
     event.preventDefault();
+  });
+  return button;
+}
+
+function getReviewNoteSectionAnchor(field, sectionIndex) {
+  return `review-note-${field}-${sectionIndex}`;
+}
+
+function getReviewNoteSubsectionAnchor(field, sectionIndex, childIndex) {
+  return `review-note-${field}-${sectionIndex}-${childIndex}`;
+}
+
+const REVIEW_OUTLINE_GROUPS = [
+  { step: "market", field: "marketSentiment", label: "大盘盘点" },
+  { step: "rotation", field: "sectorRotation", label: "大宗商品与板块轮动" },
+];
+
+function renderReviewOutline() {
+  if (!reviewOutline) return;
+  reviewOutline.innerHTML = "";
+  const groups = REVIEW_OUTLINE_GROUPS
+    .map((group) => ({
+      ...group,
+      blocks: normalizeReviewNoteBlocks(state.reviewNoteBlocks[group.field] || []),
+    }))
+    .filter((group) => group.blocks.length);
+
+  reviewModalPanel?.classList.toggle("has-outline", groups.length > 0);
+  reviewOutline.classList.toggle("hidden", groups.length === 0);
+  if (!groups.length) return;
+
+  const title = document.createElement("div");
+  title.className = "review-outline-title";
+  title.textContent = "目录";
+  reviewOutline.appendChild(title);
+
+  groups.forEach((group) => {
+    const groupEl = document.createElement("section");
+    groupEl.className = "review-outline-group";
+    const groupButton = buildReviewOutlineButton({
+      label: group.label,
+      level: "group",
+      step: group.step,
+      targetId: null,
+    });
+    groupEl.appendChild(groupButton);
+
+    group.blocks.forEach((section, sectionIndex) => {
+      groupEl.appendChild(buildReviewOutlineButton({
+        label: `${sectionIndex + 1}. ${section.title || "未命名主题"}`,
+        level: "section",
+        step: group.step,
+        targetId: getReviewNoteSectionAnchor(group.field, sectionIndex),
+      }));
+      (section.children || []).forEach((child, childIndex) => {
+        groupEl.appendChild(buildReviewOutlineButton({
+          label: child.title || "未命名维度",
+          level: "child",
+          step: group.step,
+          targetId: getReviewNoteSubsectionAnchor(group.field, sectionIndex, childIndex),
+        }));
+      });
+    });
+    reviewOutline.appendChild(groupEl);
+  });
+}
+
+function buildReviewOutlineButton({ label, level, step, targetId }) {
+  const button = document.createElement("button");
+  button.type = "button";
+  button.className = `review-outline-item ${level}`;
+  button.textContent = label;
+  button.title = label;
+  button.addEventListener("click", () => {
+    setReviewStep(step);
+    window.requestAnimationFrame(() => {
+      const target = targetId ? document.getElementById(targetId) : document.querySelector(`.review-step-panel[data-step="${step}"]`);
+      target?.scrollIntoView({ behavior: "smooth", block: "start" });
+    });
   });
   return button;
 }
@@ -1257,7 +1341,7 @@ function updateReviewNoteSectionTitle(field, sectionIndex, title) {
   const blocks = state.reviewNoteBlocks[field] || [];
   if (!blocks[sectionIndex]) return;
   blocks[sectionIndex].title = title;
-  syncReviewNoteCompatibilityField(field);
+  renderReviewOutline();
 }
 
 function addReviewNoteSubsection(field, sectionIndex) {
@@ -1307,7 +1391,7 @@ function updateReviewNoteSubsection(field, sectionIndex, childIndex, patch) {
   const child = blocks[sectionIndex]?.children?.[childIndex];
   if (!child) return;
   Object.assign(child, patch);
-  syncReviewNoteCompatibilityField(field);
+  if (Object.prototype.hasOwnProperty.call(patch, "title")) renderReviewOutline();
 }
 
 function buildChip(label, variant = "") {
