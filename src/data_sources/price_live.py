@@ -149,6 +149,41 @@ def _is_mainland_etf(price_record: dict) -> bool:
     return base_code.startswith(("15", "16", "50", "51", "56", "58")) or "ETF" in display_name.upper()
 
 
+def _sina_etf_symbol(yahoo_code: str) -> str:
+    code = yahoo_code.split(".", 1)[0]
+    suffix = yahoo_code.upper().split(".", 1)[1] if "." in yahoo_code else ""
+    exchange_prefix = "sz" if suffix == "SZ" else "sh"
+    return f"{exchange_prefix}{code}"
+
+
+def _normalize_sina_etf_history(df: pd.DataFrame) -> pd.DataFrame:
+    if df is None or df.empty:
+        return df
+    normalized = df.rename(columns={
+        "date": "日期",
+        "close": "收盘",
+        "volume": "成交量",
+    }).copy()
+    if "日期" in normalized.columns:
+        normalized["日期"] = normalized["日期"].astype(str)
+        normalized = normalized.sort_values("日期")
+    if "收盘" in normalized.columns:
+        close_values = pd.to_numeric(normalized["收盘"], errors="coerce")
+        previous_close = close_values.shift(1)
+        normalized["涨跌幅"] = ((close_values - previous_close) / previous_close * 100).round(2)
+    return normalized
+
+
+def _normalize_eastmoney_history(df: pd.DataFrame) -> pd.DataFrame:
+    if df is None or df.empty:
+        return df
+    normalized = df.copy()
+    if "成交量" in normalized.columns:
+        volume_values = pd.to_numeric(normalized["成交量"], errors="coerce")
+        normalized["成交量"] = (volume_values * 100).round().astype("Int64")
+    return normalized
+
+
 def _get_finnhub_client() -> finnhub.Client | None:
     if not FINNHUB_API_KEY:
         logger.warning("[Finnhub] FINNHUB_API_KEY 未配置，跳过 repair fallback")
@@ -424,54 +459,92 @@ def fetch_price_for_k_date_akshare(price_record: dict, context: ExecutionContext
     start_date = (target_date - timedelta(days=5)).strftime("%Y%m%d")
     end_date = (target_date + timedelta(days=2)).strftime("%Y%m%d")
 
-    source_kind = "index" if _is_mainland_index(price_record) else "etf" if _is_mainland_etf(price_record) else "stock"
-    last_error = None
-    for attempt in range(1, PRICE_FETCH_RETRIES + 1):
-        try:
-            logger.info(
-                "修复重查 %s (%s) %s 的 AKShare 价格... kind=%s window=%s~%s",
-                display_name, yahoo_code, target_k_date, source_kind, start_date, end_date,
-            )
-            if _is_mainland_index(price_record):
-                df = ak.index_zh_a_hist(symbol=code, period="daily", start_date=start_date, end_date=end_date)
-            elif _is_mainland_etf(price_record):
-                df = ak.fund_etf_hist_em(symbol=code, period="daily", start_date=start_date, end_date=end_date, adjust="")
-            else:
-                df = ak.stock_zh_a_hist(symbol=code, period="daily", start_date=start_date, end_date=end_date, adjust="")
-            break
-        except Exception as exc:
-            last_error = exc
-            if attempt < PRICE_FETCH_RETRIES:
-                logger.warning(
-                    "修复重查 %s (%s) %s 的 AKShare 价格失败，第 %s/%s 次重试: %s",
-                    display_name, yahoo_code, target_k_date, attempt, PRICE_FETCH_RETRIES, exc,
-                )
-                time.sleep(PRICE_FETCH_RETRY_DELAY * attempt)
-            else:
-                logger.error("修复重查 %s (%s) %s 的 AKShare 价格失败: %s", display_name, yahoo_code, target_k_date, exc)
+    is_index = _is_mainland_index(price_record)
+    is_etf = _is_mainland_etf(price_record)
+    source_kind = "index" if is_index else "etf" if is_etf else "stock"
+    if is_index:
+        sources = [(
+            "东方财富指数",
+            lambda: _normalize_eastmoney_history(
+                ak.index_zh_a_hist(symbol=code, period="daily", start_date=start_date, end_date=end_date),
+            ),
+        )]
+    elif is_etf:
+        sources = [
+            (
+                "东方财富ETF",
+                lambda: _normalize_eastmoney_history(
+                    ak.fund_etf_hist_em(symbol=code, period="daily", start_date=start_date, end_date=end_date, adjust=""),
+                ),
+            ),
+            (
+                "新浪ETF",
+                lambda: _normalize_sina_etf_history(ak.fund_etf_hist_sina(symbol=_sina_etf_symbol(yahoo_code))),
+            ),
+        ]
     else:
+        sources = [(
+            "东方财富A股",
+            lambda: _normalize_eastmoney_history(
+                ak.stock_zh_a_hist(symbol=code, period="daily", start_date=start_date, end_date=end_date, adjust=""),
+            ),
+        )]
+
+    df = None
+    source_name = None
+    last_error = None
+    for candidate_source_name, fetcher in sources:
+        for attempt in range(1, PRICE_FETCH_RETRIES + 1):
+            try:
+                logger.info(
+                    "修复重查 %s (%s) %s 的 AKShare 价格... kind=%s source=%s window=%s~%s",
+                    display_name, yahoo_code, target_k_date, source_kind, candidate_source_name, start_date, end_date,
+                )
+                fetched = fetcher()
+                rows = 0 if fetched is None else len(fetched)
+                if fetched is None or fetched.empty:
+                    logger.warning(
+                        "修复跳过 %s (%s): AKShare %s 返回空数据",
+                        display_name, yahoo_code, candidate_source_name,
+                    )
+                    break
+                if "日期" in fetched.columns and fetched["日期"].astype(str).eq(target_k_date).any():
+                    df = fetched
+                    source_name = candidate_source_name
+                    break
+                available_dates = fetched["日期"].astype(str).tail(3).tolist() if "日期" in fetched.columns else []
+                logger.warning(
+                    "修复跳过 %s (%s): AKShare %s 未返回目标 k_date=%s available=%s rows=%s",
+                    display_name, yahoo_code, candidate_source_name, target_k_date, ",".join(available_dates), rows,
+                )
+                break
+            except Exception as exc:
+                last_error = exc
+                if attempt < PRICE_FETCH_RETRIES:
+                    logger.warning(
+                        "修复重查 %s (%s) %s 的 AKShare %s 价格失败，第 %s/%s 次重试: %s",
+                        display_name, yahoo_code, target_k_date, candidate_source_name, attempt, PRICE_FETCH_RETRIES, exc,
+                    )
+                    time.sleep(PRICE_FETCH_RETRY_DELAY * attempt)
+                else:
+                    logger.error(
+                        "修复重查 %s (%s) %s 的 AKShare %s 价格失败: %s",
+                        display_name, yahoo_code, target_k_date, candidate_source_name, exc,
+                    )
+        if df is not None:
+            break
+
+    if df is None:
         if last_error:
             logger.error("修复重查最终失败 %s (%s) %s 的 AKShare 价格: %s", display_name, yahoo_code, target_k_date, last_error)
         return None
 
     try:
         logger.info(
-            "AKShare 修复数据返回: symbol=%s yahoo=%s k_date=%s kind=%s rows=%s",
-            system_symbol, yahoo_code, target_k_date, source_kind, 0 if df is None else len(df),
+            "AKShare 修复数据返回: symbol=%s yahoo=%s k_date=%s kind=%s source=%s rows=%s",
+            system_symbol, yahoo_code, target_k_date, source_kind, source_name, 0 if df is None else len(df),
         )
-        if df is None or df.empty:
-            logger.warning("修复跳过 %s (%s): AKShare 返回空数据", display_name, yahoo_code)
-            return None
-
         target_rows = df[df["日期"].astype(str) == target_k_date]
-        if target_rows.empty:
-            available_dates = df["日期"].astype(str).tail(3).tolist() if "日期" in df.columns else []
-            logger.warning(
-                "修复跳过 %s (%s): AKShare 未返回目标 k_date=%s available=%s",
-                display_name, yahoo_code, target_k_date, ",".join(available_dates),
-            )
-            return None
-
         row = target_rows.iloc[-1]
         close_value = row.get("收盘")
         if pd.isna(close_value):
@@ -491,8 +564,8 @@ def fetch_price_for_k_date_akshare(price_record: dict, context: ExecutionContext
             captured_at=context.clock.now().strftime("%Y-%m-%d %H:%M:%S"),
         )
         logger.info(
-            "修复命中 %s (%s) %s: 来源=AKShare 价格=%s, 涨跌幅=%s%%",
-            display_name, yahoo_code, target_k_date, data["current_price"], data["change_percent"],
+            "修复命中 %s (%s) %s: 来源=AKShare/%s 价格=%s, 涨跌幅=%s%%",
+            display_name, yahoo_code, target_k_date, source_name, data["current_price"], data["change_percent"],
         )
         return data
     except Exception as exc:
