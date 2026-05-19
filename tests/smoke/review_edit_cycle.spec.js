@@ -7,6 +7,8 @@ const SORT_REVIEW_DATE = '2026-03-12';
 const ZERO_REVIEW_DATE = '2026-03-14';
 const CARRY_SOURCE_DATE = '2026-03-09';
 const CARRY_TARGET_DATE = '2026-03-10';
+const CARRY_NOTES_SOURCE_DATE = '2026-03-16';
+const CARRY_NOTES_TARGET_DATE = '2026-03-17';
 const NOTE_BLOCK_REVIEW_DATE = '2026-03-15';
 
 function d1(command) {
@@ -325,6 +327,52 @@ test('new review carries forward previous structured action plans without legacy
   ]);
   expect(bootstrapJson.draft).not.toHaveProperty('asset_plan');
   expect(bootstrapJson.carryForward).not.toHaveProperty('asset_plan');
+});
+
+test('initialized empty review carries forward previous market and sector notes', async ({ request }) => {
+  await request.post(`${BASE_URL}/api/reviews/${CARRY_NOTES_SOURCE_DATE}`, {
+    data: {
+      reviewStatus: 'reviewed',
+      reviewerNewsNotes: '结构化笔记沿用冒烟：新闻总结。',
+      marketSentiment: '# 标普500\n## 流动性\n上一天大盘判断。',
+      marketSentimentBlocks: [
+        {
+          id: 'market-0',
+          title: '标普500',
+          children: [{ id: 'market-sub-0-0', title: '流动性', body: '上一天大盘判断。' }],
+        },
+      ],
+      sectorRotation: '# 黄金\n## 利率\n上一天板块判断。',
+      sectorRotationBlocks: [
+        {
+          id: 'rotation-0',
+          title: '黄金',
+          children: [{ id: 'rotation-sub-0-0', title: '利率', body: '上一天板块判断。' }],
+        },
+      ],
+      tradingSummary: '',
+      actionPlans: [],
+    },
+  });
+  await request.post(`${BASE_URL}/api/reviews/${CARRY_NOTES_TARGET_DATE}/initialize`);
+
+  const bootstrap = await request.get(`${BASE_URL}/api/reviews/${CARRY_NOTES_TARGET_DATE}/bootstrap`);
+  const bootstrapJson = await bootstrap.json();
+  expect(bootstrapJson.draft.review_status).toBe('initialized');
+  expect(bootstrapJson.draft.market_sentiment).toBe('');
+  expect(bootstrapJson.draft.sector_rotation).toBe('');
+  expect(bootstrapJson.structuredNotes.marketSentiment.blocks[0]).toEqual(
+    expect.objectContaining({
+      title: '标普500',
+      children: [expect.objectContaining({ title: '流动性', body: '上一天大盘判断。' })],
+    }),
+  );
+  expect(bootstrapJson.structuredNotes.sectorRotation.blocks[0]).toEqual(
+    expect.objectContaining({
+      title: '黄金',
+      children: [expect.objectContaining({ title: '利率', body: '上一天板块判断。' })],
+    }),
+  );
 });
 
 test('daily record button inserts the review date into the entry plan field', async ({ page, request }) => {

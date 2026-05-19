@@ -1,0 +1,589 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>结构化复盘一级标题方案</title>
+  <style>
+    :root {
+      --bg: #f5f7fb;
+      --panel: #ffffff;
+      --text: #172033;
+      --muted: #667085;
+      --line: #d9e1ec;
+      --blue: #2563eb;
+      --blue-soft: #eef5ff;
+      --green: #15803d;
+      --green-soft: #ecfdf3;
+      --drag: #0f766e;
+      --drag-soft: #ccfbf1;
+      --amber: #b45309;
+      --amber-soft: #fffbeb;
+      --c-accent: #334155;
+      --c-accent-end: #0ea5e9;
+      --c-title: #172033;
+      --c-sub-bg: #f8fafc;
+    }
+
+    * { box-sizing: border-box; }
+
+    body {
+      margin: 0;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      color: var(--text);
+      background: var(--bg);
+    }
+
+    header {
+      padding: 22px 28px 12px;
+    }
+
+    h1 {
+      margin: 0 0 6px;
+      font-size: 24px;
+      letter-spacing: 0;
+    }
+
+    .hint {
+      margin: 0;
+      color: var(--muted);
+      font-size: 13px;
+    }
+
+    main {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 16px;
+      padding: 14px 28px 32px;
+    }
+
+    .option {
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      overflow: hidden;
+      box-shadow: 0 14px 28px rgba(15, 23, 42, 0.05);
+    }
+
+    .option-head {
+      display: flex;
+      justify-content: space-between;
+      gap: 12px;
+      padding: 13px 15px;
+      border-bottom: 1px solid var(--line);
+      background: #fbfcfe;
+    }
+
+    .option-head strong {
+      font-size: 15px;
+    }
+
+    .option-head span {
+      color: var(--muted);
+      font-size: 12px;
+    }
+
+    .palette-strip {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 7px;
+      padding: 10px 14px 0;
+      background: #fff;
+    }
+
+    .palette-btn {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      border: 1px solid var(--line);
+      border-radius: 999px;
+      background: #fff;
+      color: #475569;
+      padding: 5px 9px 5px 6px;
+      font-size: 12px;
+      cursor: pointer;
+      transition: border-color 0.16s ease, box-shadow 0.16s ease, color 0.16s ease;
+    }
+
+    .palette-btn[aria-pressed="true"] {
+      border-color: rgba(51, 65, 85, 0.28);
+      box-shadow: 0 0 0 3px rgba(51, 65, 85, 0.08);
+      color: #172033;
+    }
+
+    .swatch {
+      width: 16px;
+      height: 16px;
+      border-radius: 50%;
+      background: linear-gradient(135deg, var(--start), var(--end));
+      box-shadow: inset 0 0 0 1px rgba(15, 23, 42, 0.12);
+    }
+
+    .canvas {
+      padding: 14px;
+      display: grid;
+      gap: 12px;
+    }
+
+    .section {
+      border: 1px solid rgba(15, 23, 42, 0.09);
+      border-radius: 8px;
+      background: #fff;
+      display: grid;
+      gap: 9px;
+      padding: 10px;
+      transition: border-color 0.16s ease, box-shadow 0.16s ease, transform 0.16s ease, opacity 0.16s ease;
+    }
+
+    .section.dragging,
+    .sub.dragging {
+      opacity: 0.78;
+      border-color: rgba(15, 118, 110, 0.4);
+      box-shadow: 0 18px 35px rgba(15, 118, 110, 0.2);
+      transform: scale(0.995);
+      pointer-events: none;
+    }
+
+    .section.drop-before,
+    .sub.drop-before {
+      box-shadow: 0 -3px 0 var(--drag);
+    }
+
+    .section.drop-after,
+    .sub.drop-after {
+      box-shadow: 0 3px 0 var(--drag);
+    }
+
+    .title {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+      min-width: 0;
+    }
+
+    .title input {
+      width: 100%;
+      min-width: 0;
+      border: 0;
+      background: transparent;
+      font: inherit;
+      font-weight: 800;
+      color: inherit;
+      outline: none;
+    }
+
+    .tools {
+      display: flex;
+      gap: 5px;
+      flex-shrink: 0;
+    }
+
+    .tools button {
+      border: 1px solid var(--line);
+      border-radius: 999px;
+      background: #fff;
+      padding: 4px 8px;
+      font-size: 12px;
+      color: #475569;
+    }
+
+    .drag-handle {
+      width: 28px;
+      height: 26px;
+      padding: 0;
+      display: inline-grid;
+      place-items: center;
+      cursor: grab;
+      transition: border-color 0.16s ease, background 0.16s ease, color 0.16s ease;
+    }
+
+    .tools .drag-handle:hover,
+    .sub .drag-handle:hover {
+      border-color: rgba(15, 118, 110, 0.34);
+      background: var(--drag-soft);
+      color: var(--drag);
+    }
+
+    .drag-handle:active {
+      cursor: grabbing;
+    }
+
+    .drag-dots {
+      width: 12px;
+      height: 16px;
+      display: grid;
+      grid-template-columns: repeat(2, 4px);
+      grid-auto-rows: 4px;
+      gap: 2px;
+    }
+
+    .drag-dots span {
+      width: 4px;
+      height: 4px;
+      border-radius: 50%;
+      background: currentColor;
+      opacity: 0.58;
+    }
+
+    .delete-btn {
+      color: #64748b;
+    }
+
+    .sub {
+      border-left: 3px solid var(--blue);
+      border-radius: 8px;
+      background: #f8fafc;
+      padding: 9px 10px;
+      display: grid;
+      gap: 6px;
+      transition: box-shadow 0.16s ease, transform 0.16s ease, opacity 0.16s ease;
+    }
+
+    .sub-head {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+    }
+
+    .sub strong {
+      font-size: 13px;
+    }
+
+    .sub .drag-handle {
+      width: 24px;
+      height: 22px;
+      border-color: transparent;
+      background: rgba(255, 255, 255, 0.72);
+      color: #64748b;
+    }
+
+    .sub .drag-dots {
+      width: 10px;
+      height: 14px;
+      grid-template-columns: repeat(2, 3px);
+      grid-auto-rows: 3px;
+      gap: 2px;
+    }
+
+    .sub .drag-dots span {
+      width: 3px;
+      height: 3px;
+    }
+
+    .sub p {
+      margin: 0;
+      color: #334155;
+      font-size: 13px;
+      line-height: 1.55;
+    }
+
+    /* A: current framed title bar */
+    .variant-a .title {
+      padding: 9px 11px;
+      border: 1px solid rgba(37, 99, 235, 0.16);
+      border-radius: 8px;
+      background: linear-gradient(180deg, #f8fbff, #eef5ff);
+      color: #1e3a8a;
+    }
+
+    /* B: compact solid label */
+    .variant-b .section {
+      padding-top: 0;
+      overflow: hidden;
+    }
+
+    .variant-b .title {
+      margin: 0 -10px;
+      padding: 10px 12px;
+      background: #172033;
+      color: #fff;
+    }
+
+    .variant-b .tools button {
+      border-color: rgba(255, 255, 255, 0.2);
+      background: rgba(255, 255, 255, 0.12);
+      color: #fff;
+    }
+
+    /* C: left accent rail */
+    .variant-c .section {
+      position: relative;
+      padding-left: 14px;
+    }
+
+    .variant-c .section::before {
+      content: "";
+      position: absolute;
+      left: 0;
+      top: 0;
+      bottom: 0;
+      width: 5px;
+      background: linear-gradient(180deg, var(--c-accent), var(--c-accent-end));
+    }
+
+    .variant-c .title {
+      padding: 7px 0 8px;
+      border-bottom: 1px solid var(--line);
+      color: var(--c-title);
+    }
+
+    .variant-c .sub {
+      border-left-color: var(--c-accent);
+      background: var(--c-sub-bg);
+    }
+
+    /* D: dense table header */
+    .variant-d .section {
+      padding: 0;
+      gap: 0;
+    }
+
+    .variant-d .title {
+      padding: 8px 10px;
+      border-bottom: 1px solid var(--line);
+      background: var(--amber-soft);
+      color: #7c2d12;
+    }
+
+    .variant-d .sub {
+      margin: 0 10px 10px;
+      border-radius: 6px;
+      border-left-color: var(--amber);
+      background: #fff;
+    }
+
+    .variant-d .sub:first-of-type {
+      margin-top: 10px;
+    }
+
+    @media (max-width: 980px) {
+      main {
+        grid-template-columns: 1fr;
+        padding-inline: 16px;
+      }
+
+      header {
+        padding-inline: 16px;
+      }
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>结构化复盘一级标题方案</h1>
+    <p class="hint">同一组内容，比较一级标题的框框样式。重点看层级感、密度、是否适合每天反复填写。</p>
+  </header>
+  <main>
+    <article class="option variant-a">
+      <div class="option-head"><strong>A. 浅蓝标题框</strong><span>当前线上风格的增强版</span></div>
+      <div class="canvas"></div>
+    </article>
+    <article class="option variant-b">
+      <div class="option-head"><strong>B. 深色标题条</strong><span>最醒目，适合扫读</span></div>
+      <div class="canvas"></div>
+    </article>
+    <article class="option variant-c">
+      <div class="option-head"><strong>C. 左侧色条</strong><span>密度高，层级清楚</span></div>
+      <div class="palette-strip" aria-label="一级标题配色">
+        <button class="palette-btn" data-palette="slate" aria-pressed="true">
+          <span class="swatch" style="--start:#334155;--end:#0ea5e9"></span>石墨蓝
+        </button>
+        <button class="palette-btn" data-palette="teal" aria-pressed="false">
+          <span class="swatch" style="--start:#0f766e;--end:#67e8f9"></span>松石青
+        </button>
+        <button class="palette-btn" data-palette="olive" aria-pressed="false">
+          <span class="swatch" style="--start:#3f6212;--end:#84cc16"></span>橄榄绿
+        </button>
+        <button class="palette-btn" data-palette="gold" aria-pressed="false">
+          <span class="swatch" style="--start:#92400e;--end:#f59e0b"></span>琥珀金
+        </button>
+      </div>
+      <div class="canvas"></div>
+    </article>
+    <article class="option variant-d">
+      <div class="option-head"><strong>D. 紧凑表头</strong><span>最省空间，偏工作台</span></div>
+      <div class="canvas"></div>
+    </article>
+  </main>
+
+  <template id="noteTemplate">
+    <section class="section">
+      <div class="title">
+        <input value="标普：标普 7501，压不住，完全压不住！！" />
+        <div class="tools">
+          <button class="drag-handle" aria-label="拖动排序" title="拖动排序">
+            <span class="drag-dots" aria-hidden="true"><span></span><span></span><span></span><span></span><span></span><span></span></span>
+          </button>
+          <button class="delete-btn">删除</button>
+        </div>
+      </div>
+      <div class="sub">
+        <div class="sub-head">
+          <strong>GEX</strong>
+          <button class="drag-handle sub-drag-handle" aria-label="拖动二级排序" title="拖动二级排序">
+            <span class="drag-dots" aria-hidden="true"><span></span><span></span><span></span><span></span><span></span><span></span></span>
+          </button>
+        </div>
+        <p>当前半导体的 GEX 已经达到了 210 亿美元，是 21 年的双倍。一旦泡沫被捅破，可能是比较长的熊市行情。</p>
+      </div>
+      <div class="sub">
+        <div class="sub-head">
+          <strong>战争</strong>
+          <button class="drag-handle sub-drag-handle" aria-label="拖动二级排序" title="拖动二级排序">
+            <span class="drag-dots" aria-hidden="true"><span></span><span></span><span></span><span></span><span></span><span></span></span>
+          </button>
+        </div>
+        <p>布伦特石油只有保持在 90 以下才说明此次危机已经过去；海峡重开时间会影响标普低点预期。</p>
+      </div>
+      <div class="sub">
+        <div class="sub-head">
+          <strong>国债</strong>
+          <button class="drag-handle sub-drag-handle" aria-label="拖动二级排序" title="拖动二级排序">
+            <span class="drag-dots" aria-hidden="true"><span></span><span></span><span></span><span></span><span></span><span></span></span>
+          </button>
+        </div>
+        <p>十年期国债到了 4.48，需要注意；如果继续到 4.55%-4.65%，可能出现高波动行情。</p>
+      </div>
+    </section>
+    <section class="section">
+      <div class="title">
+        <input value="标普500点位" />
+        <div class="tools">
+          <button class="drag-handle" aria-label="拖动排序" title="拖动排序">
+            <span class="drag-dots" aria-hidden="true"><span></span><span></span><span></span><span></span><span></span><span></span></span>
+          </button>
+          <button class="delete-btn">删除</button>
+        </div>
+      </div>
+      <div class="sub">
+        <div class="sub-head">
+          <strong>CTA流动性</strong>
+          <button class="drag-handle sub-drag-handle" aria-label="拖动二级排序" title="拖动二级排序">
+            <span class="drag-dots" aria-hidden="true"><span></span><span></span><span></span><span></span><span></span><span></span></span>
+          </button>
+        </div>
+        <p>Buy：极小；Sell：极小。横盘 sell，上涨突破后转 buy，下跌则观察关键触发位。</p>
+      </div>
+      <div class="sub">
+        <div class="sub-head">
+          <strong>JPM collar（6月30日）</strong>
+          <button class="drag-handle sub-drag-handle" aria-label="拖动二级排序" title="拖动二级排序">
+            <span class="drag-dots" aria-hidden="true"><span></span><span></span><span></span><span></span><span></span><span></span></span>
+          </button>
+        </div>
+        <p>6150 ~ 6865，小概率极端下行 5190。</p>
+      </div>
+      <div class="sub">
+        <div class="sub-head">
+          <strong>支撑</strong>
+          <button class="drag-handle sub-drag-handle" aria-label="拖动二级排序" title="拖动二级排序">
+            <span class="drag-dots" aria-hidden="true"><span></span><span></span><span></span><span></span><span></span><span></span></span>
+          </button>
+        </div>
+        <p>6550-6765（强），6354-6500（中），6210-6303（小）。</p>
+      </div>
+    </section>
+  </template>
+
+  <script>
+    const template = document.querySelector("#noteTemplate");
+    document.querySelectorAll(".canvas").forEach((canvas) => {
+      canvas.appendChild(template.content.cloneNode(true));
+    });
+
+    const palettes = {
+      slate: {
+        accent: "#334155",
+        accentEnd: "#0ea5e9",
+        title: "#172033",
+        subBg: "#f8fafc",
+      },
+      teal: {
+        accent: "#0f766e",
+        accentEnd: "#67e8f9",
+        title: "#115e59",
+        subBg: "#ecfeff",
+      },
+      olive: {
+        accent: "#3f6212",
+        accentEnd: "#84cc16",
+        title: "#365314",
+        subBg: "#f7fee7",
+      },
+      gold: {
+        accent: "#92400e",
+        accentEnd: "#f59e0b",
+        title: "#7c2d12",
+        subBg: "#fffbeb",
+      },
+    };
+
+    document.querySelectorAll(".palette-btn").forEach((button) => {
+      button.addEventListener("click", () => {
+        const palette = palettes[button.dataset.palette];
+        const option = button.closest(".variant-c");
+        option.style.setProperty("--c-accent", palette.accent);
+        option.style.setProperty("--c-accent-end", palette.accentEnd);
+        option.style.setProperty("--c-title", palette.title);
+        option.style.setProperty("--c-sub-bg", palette.subBg);
+        option.querySelectorAll(".palette-btn").forEach((item) => {
+          item.setAttribute("aria-pressed", String(item === button));
+        });
+      });
+    });
+
+    let draggedItem = null;
+    let dragContainer = null;
+    let dragSelector = "";
+    let dropTarget = null;
+    let dropAfter = false;
+
+    function clearDropMarkers() {
+      document.querySelectorAll(".drop-before, .drop-after").forEach((node) => {
+        node.classList.remove("drop-before", "drop-after");
+      });
+    }
+
+    document.querySelectorAll(".drag-handle").forEach((handle) => {
+      handle.addEventListener("mousedown", (event) => {
+        const isSubHandle = event.currentTarget.classList.contains("sub-drag-handle");
+        draggedItem = isSubHandle ? event.currentTarget.closest(".sub") : event.currentTarget.closest(".section");
+        dragContainer = isSubHandle ? draggedItem.closest(".section") : draggedItem.parentElement;
+        dragSelector = isSubHandle ? ".sub" : ".section";
+        dropTarget = null;
+        dropAfter = false;
+        draggedItem.classList.add("dragging");
+        event.preventDefault();
+      });
+    });
+
+    document.addEventListener("mousemove", (event) => {
+      if (!draggedItem || !dragContainer) return;
+      const target = document.elementFromPoint(event.clientX, event.clientY)?.closest(dragSelector);
+      const sameContainer = dragSelector === ".sub" ? target?.closest(".section") === dragContainer : target?.parentElement === dragContainer;
+      if (!target || target === draggedItem || !sameContainer) return;
+
+      const rect = target.getBoundingClientRect();
+      dropTarget = target;
+      dropAfter = event.clientY > rect.top + rect.height / 2;
+      clearDropMarkers();
+      target.classList.add(dropAfter ? "drop-after" : "drop-before");
+    });
+
+    document.addEventListener("mouseup", () => {
+      if (draggedItem && dropTarget) {
+        dropTarget.insertAdjacentElement(dropAfter ? "afterend" : "beforebegin", draggedItem);
+      }
+      if (draggedItem) draggedItem.classList.remove("dragging");
+      draggedItem = null;
+      dragContainer = null;
+      dragSelector = "";
+      dropTarget = null;
+      dropAfter = false;
+      clearDropMarkers();
+    });
+  </script>
+</body>
+</html>

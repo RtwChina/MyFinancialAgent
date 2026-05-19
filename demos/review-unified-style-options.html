@@ -1,0 +1,438 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>复盘三块统一样式方案</title>
+  <style>
+    :root {
+      --bg: #f4f7fb;
+      --panel: #ffffff;
+      --ink: #172033;
+      --muted: #667085;
+      --line: #d9e4ef;
+      --blue: #38bdf8;
+      --blue-strong: #0284c7;
+      --blue-dark: #075985;
+      --blue-soft: #eff8ff;
+      --blue-softer: #f7fbff;
+      --teal: #0f766e;
+      --shadow: 0 16px 32px rgba(15, 23, 42, 0.06);
+    }
+
+    * { box-sizing: border-box; }
+
+    body {
+      margin: 0;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      background: var(--bg);
+      color: var(--ink);
+    }
+
+    header {
+      padding: 22px 28px 10px;
+    }
+
+    h1 {
+      margin: 0 0 6px;
+      font-size: 24px;
+      letter-spacing: 0;
+    }
+
+    .hint {
+      margin: 0;
+      color: var(--muted);
+      font-size: 13px;
+      line-height: 1.6;
+    }
+
+    main {
+      display: grid;
+      gap: 18px;
+      padding: 14px 28px 34px;
+    }
+
+    .option {
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      background: var(--panel);
+      box-shadow: var(--shadow);
+      overflow: hidden;
+    }
+
+    .option-head {
+      display: flex;
+      justify-content: space-between;
+      gap: 12px;
+      padding: 13px 16px;
+      border-bottom: 1px solid var(--line);
+      background: #fbfdff;
+    }
+
+    .option-head strong { font-size: 15px; }
+    .option-head span { color: var(--muted); font-size: 12px; }
+
+    .workspace {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 14px;
+      padding: 14px;
+    }
+
+    .module {
+      min-width: 0;
+      border: 1px solid rgba(15, 23, 42, 0.08);
+      border-radius: 10px;
+      background: #fff;
+      overflow: hidden;
+    }
+
+    .module-head {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+      padding: 11px 12px;
+      border-bottom: 1px solid var(--line);
+    }
+
+    .module-head strong { font-size: 14px; }
+    .module-head span { color: var(--muted); font-size: 12px; }
+
+    .module-body {
+      display: grid;
+      gap: 10px;
+      padding: 12px;
+    }
+
+    .block {
+      position: relative;
+      display: grid;
+      gap: 8px;
+      border: 1px solid rgba(15, 23, 42, 0.08);
+      border-radius: 8px;
+      background: #fff;
+      overflow: hidden;
+    }
+
+    .block-title {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+      min-width: 0;
+      color: var(--blue-dark);
+      font-weight: 800;
+      font-size: 14px;
+    }
+
+    .block-title > span:first-of-type {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      min-width: 0;
+    }
+
+    .num {
+      width: 24px;
+      height: 24px;
+      display: inline-grid;
+      place-items: center;
+      flex-shrink: 0;
+      border-radius: 999px;
+      background: #dff4ff;
+      color: var(--blue-dark);
+      font-size: 12px;
+      font-weight: 900;
+    }
+
+    .tools {
+      display: flex;
+      gap: 5px;
+      flex-shrink: 0;
+    }
+
+    .tool {
+      border: 1px solid var(--line);
+      border-radius: 999px;
+      min-width: 26px;
+      height: 26px;
+      display: grid;
+      place-items: center;
+      background: #fff;
+      color: #64748b;
+      font-size: 12px;
+    }
+
+    .dots {
+      width: 10px;
+      height: 14px;
+      display: grid;
+      grid-template-columns: repeat(2, 3px);
+      grid-auto-rows: 3px;
+      gap: 2px;
+    }
+
+    .dots i {
+      width: 3px;
+      height: 3px;
+      border-radius: 50%;
+      background: currentColor;
+      opacity: 0.65;
+    }
+
+    .sub {
+      display: grid;
+      gap: 5px;
+      padding: 8px 9px;
+      border: 1px solid rgba(14, 116, 144, 0.08);
+      border-radius: 7px;
+      background: #ffffff;
+    }
+
+    .sub strong {
+      color: #263244;
+      font-size: 12.5px;
+    }
+
+    .sub p {
+      margin: 0;
+      color: #44546a;
+      font-size: 12.5px;
+      line-height: 1.55;
+    }
+
+    .plan-list {
+      display: grid;
+      gap: 8px;
+    }
+
+    .plan-row {
+      display: grid;
+      grid-template-columns: minmax(74px, 1.1fr) 58px minmax(0, 1.5fr);
+      gap: 8px;
+      align-items: start;
+      padding: 9px;
+      border-radius: 8px;
+      background: var(--blue-soft);
+      border: 1px solid rgba(14, 116, 144, 0.08);
+      font-size: 12.5px;
+    }
+
+    .symbol {
+      display: grid;
+      gap: 4px;
+      font-weight: 800;
+      color: #263244;
+    }
+
+    .badge {
+      width: fit-content;
+      border-radius: 999px;
+      background: #dbeafe;
+      color: #1e40af;
+      padding: 2px 7px;
+      font-size: 11px;
+      font-weight: 800;
+    }
+
+    .position {
+      width: fit-content;
+      border-radius: 999px;
+      background: #bae6fd;
+      color: #075985;
+      padding: 4px 8px;
+      font-weight: 900;
+    }
+
+    .memo {
+      margin: 0;
+      color: #44546a;
+      line-height: 1.5;
+    }
+
+    .account-line {
+      display: flex;
+      justify-content: space-between;
+      gap: 10px;
+      color: var(--muted);
+      font-size: 12px;
+      padding: 8px 9px;
+      border-radius: 8px;
+      background: #f8fafc;
+    }
+
+    /* A: user's selected left strip, light blue */
+    .variant-strip .block {
+      padding: 10px 10px 10px 16px;
+    }
+
+    .variant-strip .block::before {
+      content: "";
+      position: absolute;
+      left: 0;
+      top: 0;
+      bottom: 0;
+      width: 5px;
+      background: linear-gradient(180deg, #7dd3fc, #22d3ee);
+    }
+
+    .variant-strip .block-title {
+      padding-bottom: 8px;
+      border-bottom: 1px solid var(--line);
+    }
+
+    /* B: light blue section band */
+    .variant-band .module-head {
+      background: var(--blue-softer);
+    }
+
+    .variant-band .block {
+      padding: 0;
+    }
+
+    .variant-band .block-title {
+      padding: 9px 10px;
+      border-bottom: 1px solid var(--line);
+      background: var(--blue-softer);
+    }
+
+    .variant-band .sub,
+    .variant-band .plan-list {
+      margin: 0 10px 10px;
+    }
+
+    .variant-band .sub:first-of-type,
+    .variant-band .plan-list {
+      margin-top: 10px;
+    }
+
+    /* C: inline number with title */
+    .variant-rail .block {
+      gap: 0;
+      padding: 0;
+    }
+
+    .variant-rail .block-title {
+      padding: 9px 10px;
+      border-bottom: 1px solid var(--line);
+    }
+
+    .variant-rail .sub,
+    .variant-rail .plan-list {
+      margin: 10px 10px 0;
+    }
+
+    .variant-rail .sub:last-child,
+    .variant-rail .plan-list:last-child {
+      margin-bottom: 10px;
+    }
+
+    @media (max-width: 1180px) {
+      .workspace { grid-template-columns: 1fr; }
+    }
+
+    @media (max-width: 680px) {
+      header, main { padding-inline: 14px; }
+      .plan-row { grid-template-columns: 1fr; }
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>复盘三块统一样式方案</h1>
+    <p class="hint">同一套视觉同时覆盖“大盘盘点、板块轮动、个股操作计划”。浅蓝色系，重点看三块是否像一个系统。</p>
+  </header>
+
+  <main>
+    <article class="option variant-strip">
+      <div class="option-head"><strong>A. 浅蓝左侧色条</strong><span>最接近你截图里的方向</span></div>
+      <div class="workspace"></div>
+    </article>
+    <article class="option variant-band">
+      <div class="option-head"><strong>B. 浅蓝表头</strong><span>标题更安静，整体更像工作台</span></div>
+      <div class="workspace"></div>
+    </article>
+    <article class="option variant-rail">
+      <div class="option-head"><strong>C. 浅蓝行内序号</strong><span>序号和标题同一行</span></div>
+      <div class="workspace"></div>
+    </article>
+  </main>
+
+  <template id="modulesTemplate">
+    <section class="module">
+      <div class="module-head"><strong>大盘盘点</strong><span>market</span></div>
+      <div class="module-body">
+        <article class="block">
+          <div class="block-title">
+            <span><span class="num">1</span>标普500点位</span>
+            <span class="tools"><span class="tool"><span class="dots"><i></i><i></i><i></i><i></i><i></i><i></i></span></span><span class="tool">删</span></span>
+          </div>
+          <div class="sub"><strong>CTA流动性</strong><p>Buy 极小，Sell 极小。横盘 sell，上涨突破后转 buy。</p></div>
+          <div class="sub"><strong>JPM collar</strong><p>6150 ~ 6865，小概率极端下行 5190。</p></div>
+        </article>
+        <article class="block">
+          <div class="block-title">
+            <span><span class="num">2</span>十年期国债</span>
+            <span class="tools"><span class="tool"><span class="dots"><i></i><i></i><i></i><i></i><i></i><i></i></span></span><span class="tool">删</span></span>
+          </div>
+          <div class="sub"><strong>利率压力</strong><p>4.48 已经需要注意，继续上行会压制风险偏好。</p></div>
+        </article>
+      </div>
+    </section>
+
+    <section class="module">
+      <div class="module-head"><strong>板块轮动</strong><span>rotation</span></div>
+      <div class="module-body">
+        <article class="block">
+          <div class="block-title">
+            <span><span class="num">1</span>黄金</span>
+            <span class="tools"><span class="tool"><span class="dots"><i></i><i></i><i></i><i></i><i></i><i></i></span></span><span class="tool">删</span></span>
+          </div>
+          <div class="sub"><strong>战争影响</strong><p>地缘风险抬升避险需求，但要继续观察油价。</p></div>
+          <div class="sub"><strong>利率影响</strong><p>实际利率下行时，黄金弹性会更明显。</p></div>
+        </article>
+        <article class="block">
+          <div class="block-title">
+            <span><span class="num">2</span>半导体</span>
+            <span class="tools"><span class="tool"><span class="dots"><i></i><i></i><i></i><i></i><i></i><i></i></span></span><span class="tool">删</span></span>
+          </div>
+          <div class="sub"><strong>GEX</strong><p>高 GEX 下追涨杀跌更明显，泡沫破裂后风险偏长。</p></div>
+        </article>
+      </div>
+    </section>
+
+    <section class="module">
+      <div class="module-head"><strong>个股操作计划</strong><span>action</span></div>
+      <div class="module-body">
+        <article class="block">
+          <div class="block-title">
+            <span><span class="num">1</span>老虎-美股</span>
+            <span class="tools"><span class="tool"><span class="dots"><i></i><i></i><i></i><i></i><i></i><i></i></span></span><span class="tool">删</span></span>
+          </div>
+          <div class="account-line"><span>USD · 总资产 $3.2万</span><strong>账户影响 0~1%</strong></div>
+          <div class="plan-list">
+            <div class="plan-row">
+              <div class="symbol"><span>NVDA</span><span class="badge">观察</span></div>
+              <span class="position">10%</span>
+              <p class="memo">突破后加仓；跌破关键位降低仓位。</p>
+            </div>
+            <div class="plan-row">
+              <div class="symbol"><span>SPY</span><span class="badge">持有</span></div>
+              <span class="position">15%</span>
+              <p class="memo">跟随大盘支撑区间调整节奏。</p>
+            </div>
+          </div>
+        </article>
+      </div>
+    </section>
+  </template>
+
+  <script>
+    const template = document.querySelector("#modulesTemplate");
+    document.querySelectorAll(".workspace").forEach((workspace) => {
+      workspace.appendChild(template.content.cloneNode(true));
+    });
+  </script>
+</body>
+</html>

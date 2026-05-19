@@ -1,0 +1,540 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>结构化复盘一级标题替代方案</title>
+  <style>
+    :root {
+      --bg: #f4f6f8;
+      --panel: #ffffff;
+      --ink: #162033;
+      --muted: #687385;
+      --line: #d9e1ea;
+      --soft: #f8fafc;
+      --drag: #0f766e;
+      --drag-soft: #ccfbf1;
+      --red: #b42318;
+      --gold: #a16207;
+      --slate: #334155;
+      --cyan: #0e7490;
+      --violet: #6d28d9;
+    }
+
+    * { box-sizing: border-box; }
+
+    body {
+      margin: 0;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      color: var(--ink);
+      background: var(--bg);
+    }
+
+    header {
+      padding: 22px 28px 10px;
+    }
+
+    h1 {
+      margin: 0 0 6px;
+      font-size: 24px;
+      letter-spacing: 0;
+    }
+
+    .hint {
+      margin: 0;
+      color: var(--muted);
+      font-size: 13px;
+      line-height: 1.6;
+    }
+
+    main {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 16px;
+      padding: 14px 28px 32px;
+    }
+
+    .option {
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      background: var(--panel);
+      overflow: hidden;
+      box-shadow: 0 14px 28px rgba(15, 23, 42, 0.05);
+    }
+
+    .option-head {
+      display: flex;
+      justify-content: space-between;
+      gap: 12px;
+      padding: 12px 14px;
+      border-bottom: 1px solid var(--line);
+      background: #fbfcfe;
+    }
+
+    .option-head strong { font-size: 15px; }
+    .option-head span { color: var(--muted); font-size: 12px; }
+
+    .canvas {
+      display: grid;
+      gap: 12px;
+      padding: 14px;
+    }
+
+    .section {
+      position: relative;
+      display: grid;
+      gap: 9px;
+      border: 1px solid rgba(15, 23, 42, 0.09);
+      border-radius: 8px;
+      background: #fff;
+      transition: box-shadow 0.16s ease, transform 0.16s ease, opacity 0.16s ease, border-color 0.16s ease;
+    }
+
+    .title-row,
+    .sub-head {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+      min-width: 0;
+    }
+
+    .title-row input {
+      width: 100%;
+      min-width: 0;
+      border: 0;
+      outline: none;
+      background: transparent;
+      color: inherit;
+      font: inherit;
+      font-weight: 800;
+    }
+
+    .sub {
+      display: grid;
+      gap: 6px;
+      padding: 9px 10px;
+      border-left: 3px solid rgba(51, 65, 85, 0.35);
+      border-radius: 7px;
+      background: var(--soft);
+      transition: box-shadow 0.16s ease, transform 0.16s ease, opacity 0.16s ease;
+    }
+
+    .sub strong {
+      font-size: 13px;
+    }
+
+    .sub p {
+      margin: 0;
+      color: #334155;
+      font-size: 13px;
+      line-height: 1.55;
+    }
+
+    .tools {
+      display: flex;
+      align-items: center;
+      gap: 5px;
+      flex-shrink: 0;
+    }
+
+    button {
+      font: inherit;
+    }
+
+    .delete-btn,
+    .drag-handle {
+      border: 1px solid var(--line);
+      border-radius: 999px;
+      background: #fff;
+      color: #64748b;
+      min-height: 26px;
+      font-size: 12px;
+    }
+
+    .delete-btn {
+      padding: 4px 8px;
+    }
+
+    .drag-handle {
+      width: 28px;
+      padding: 0;
+      display: inline-grid;
+      place-items: center;
+      cursor: grab;
+      transition: border-color 0.16s ease, background 0.16s ease, color 0.16s ease;
+    }
+
+    .drag-handle:hover {
+      border-color: rgba(15, 118, 110, 0.34);
+      background: var(--drag-soft);
+      color: var(--drag);
+    }
+
+    .drag-handle:active { cursor: grabbing; }
+
+    .dots {
+      width: 12px;
+      height: 16px;
+      display: grid;
+      grid-template-columns: repeat(2, 4px);
+      grid-auto-rows: 4px;
+      gap: 2px;
+    }
+
+    .dots i {
+      width: 4px;
+      height: 4px;
+      border-radius: 50%;
+      background: currentColor;
+      opacity: 0.58;
+    }
+
+    .sub .drag-handle {
+      width: 24px;
+      min-height: 22px;
+      border-color: transparent;
+      background: rgba(255, 255, 255, 0.72);
+    }
+
+    .sub .dots {
+      width: 10px;
+      height: 14px;
+      grid-template-columns: repeat(2, 3px);
+      grid-auto-rows: 3px;
+    }
+
+    .sub .dots i {
+      width: 3px;
+      height: 3px;
+    }
+
+    .section.dragging,
+    .sub.dragging {
+      opacity: 0.78;
+      border-color: rgba(15, 118, 110, 0.4);
+      box-shadow: 0 18px 35px rgba(15, 118, 110, 0.2);
+      transform: scale(0.995);
+      pointer-events: none;
+    }
+
+    .drop-before { box-shadow: 0 -3px 0 var(--drag); }
+    .drop-after { box-shadow: 0 3px 0 var(--drag); }
+
+    /* 1. no framed title, calm left marker */
+    .variant-ledger .section {
+      padding: 10px 10px 10px 15px;
+    }
+
+    .variant-ledger .section::before {
+      content: "";
+      position: absolute;
+      left: 0;
+      top: 10px;
+      bottom: 10px;
+      width: 4px;
+      border-radius: 0 999px 999px 0;
+      background: var(--red);
+    }
+
+    .variant-ledger .title-row {
+      padding: 3px 0 8px;
+      border-bottom: 1px solid rgba(15, 23, 42, 0.08);
+      color: #7a271a;
+    }
+
+    /* 2. small attached tab */
+    .variant-tab .section {
+      margin-top: 12px;
+      padding: 14px 10px 10px;
+    }
+
+    .variant-tab .title-row {
+      position: absolute;
+      left: 10px;
+      top: -13px;
+      right: 10px;
+      padding: 0;
+      justify-content: flex-start;
+      pointer-events: none;
+    }
+
+    .variant-tab .title-row input {
+      width: auto;
+      max-width: calc(100% - 88px);
+      padding: 4px 9px;
+      border: 1px solid rgba(161, 98, 7, 0.25);
+      border-radius: 999px;
+      background: #fffbeb;
+      color: #854d0e;
+      pointer-events: auto;
+    }
+
+    .variant-tab .title-row .tools {
+      margin-left: auto;
+      pointer-events: auto;
+    }
+
+    .variant-tab .sub {
+      border-left-color: rgba(161, 98, 7, 0.6);
+      background: #fffdf5;
+    }
+
+    /* 3. editorial rule */
+    .variant-rule .section {
+      padding: 10px;
+      border-color: transparent;
+      box-shadow: none;
+    }
+
+    .variant-rule .title-row {
+      padding-bottom: 8px;
+      border-bottom: 2px solid #111827;
+      color: #111827;
+    }
+
+    .variant-rule .title-row input {
+      font-size: 1.04rem;
+    }
+
+    .variant-rule .sub {
+      background: #fff;
+      border-left-color: #111827;
+      border-radius: 0 7px 7px 0;
+    }
+
+    /* 4. neutral workbench header */
+    .variant-band .section {
+      padding: 0;
+      gap: 0;
+    }
+
+    .variant-band .title-row {
+      padding: 9px 11px;
+      border-bottom: 1px solid var(--line);
+      background: #f1f5f9;
+      color: #263244;
+    }
+
+    .variant-band .sub {
+      margin: 10px 10px 0;
+      background: #fff;
+      border-left-color: #64748b;
+    }
+
+    .variant-band .sub:last-child {
+      margin-bottom: 10px;
+    }
+
+    /* 5. vertical index rail */
+    .variant-index .section {
+      grid-template-columns: 40px minmax(0, 1fr);
+      gap: 0;
+      padding: 0;
+      overflow: hidden;
+    }
+
+    .variant-index .index {
+      grid-row: 1 / span 4;
+      display: grid;
+      place-items: start center;
+      padding-top: 12px;
+      background: #172033;
+      color: #fff;
+      font-weight: 900;
+      letter-spacing: 0;
+    }
+
+    .variant-index .title-row {
+      padding: 9px 10px;
+      border-bottom: 1px solid var(--line);
+      color: #172033;
+    }
+
+    .variant-index .sub {
+      margin: 10px 10px 0;
+      border-left-color: #172033;
+      background: #f8fafc;
+    }
+
+    .variant-index .sub:last-child {
+      margin-bottom: 10px;
+    }
+
+    /* 6. compact outline card */
+    .variant-outline .section {
+      padding: 10px;
+      border-color: rgba(109, 40, 217, 0.24);
+      background: linear-gradient(180deg, #fff, #fbfaff);
+    }
+
+    .variant-outline .title-row {
+      color: #4c1d95;
+    }
+
+    .variant-outline .title-row input {
+      padding-left: 9px;
+      border-left: 4px solid #8b5cf6;
+    }
+
+    .variant-outline .sub {
+      border-left-color: #8b5cf6;
+      background: #faf5ff;
+    }
+
+    @media (max-width: 980px) {
+      main {
+        grid-template-columns: 1fr;
+        padding-inline: 16px;
+      }
+
+      header { padding-inline: 16px; }
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>一级标题替代方案</h1>
+    <p class="hint">这组不再围绕“蓝色框”，而是试不同层级表达。拖拽交互还是青绿色，标题视觉单独比较。</p>
+  </header>
+
+  <main>
+    <article class="option variant-ledger">
+      <div class="option-head"><strong>1. 左侧红线</strong><span>醒目但不包标题</span></div>
+      <div class="canvas"></div>
+    </article>
+    <article class="option variant-tab">
+      <div class="option-head"><strong>2. 小标签</strong><span>像文件夹标签，轻一点</span></div>
+      <div class="canvas"></div>
+    </article>
+    <article class="option variant-rule">
+      <div class="option-head"><strong>3. 黑色横线</strong><span>研究报告感，最克制</span></div>
+      <div class="canvas"></div>
+    </article>
+    <article class="option variant-band">
+      <div class="option-head"><strong>4. 灰色表头</strong><span>工作台风格，稳</span></div>
+      <div class="canvas"></div>
+    </article>
+    <article class="option variant-index">
+      <div class="option-head"><strong>5. 序号侧栏</strong><span>层级最清楚</span></div>
+      <div class="canvas"></div>
+    </article>
+    <article class="option variant-outline">
+      <div class="option-head"><strong>6. 紫色细线</strong><span>有一点高级感</span></div>
+      <div class="canvas"></div>
+    </article>
+  </main>
+
+  <template id="sectionTemplate">
+    <section class="section">
+      <div class="index">1</div>
+      <div class="title-row">
+        <input value="标普500点位" />
+        <div class="tools">
+          <button class="drag-handle section-handle" aria-label="拖动一级排序" title="拖动一级排序"><span class="dots" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i><i></i></span></button>
+          <button class="delete-btn">删除</button>
+        </div>
+      </div>
+      <div class="sub">
+        <div class="sub-head">
+          <strong>CTA流动性</strong>
+          <button class="drag-handle sub-handle" aria-label="拖动二级排序" title="拖动二级排序"><span class="dots" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i><i></i></span></button>
+        </div>
+        <p>Buy：极小；Sell：极小。横盘 sell，上涨突破后转 buy，下跌则观察关键触发位。</p>
+      </div>
+      <div class="sub">
+        <div class="sub-head">
+          <strong>JPM collar（6月30日）</strong>
+          <button class="drag-handle sub-handle" aria-label="拖动二级排序" title="拖动二级排序"><span class="dots" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i><i></i></span></button>
+        </div>
+        <p>6150 ~ 6865，小概率极端下行 5190。</p>
+      </div>
+    </section>
+    <section class="section">
+      <div class="index">2</div>
+      <div class="title-row">
+        <input value="黄金" />
+        <div class="tools">
+          <button class="drag-handle section-handle" aria-label="拖动一级排序" title="拖动一级排序"><span class="dots" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i><i></i></span></button>
+          <button class="delete-btn">删除</button>
+        </div>
+      </div>
+      <div class="sub">
+        <div class="sub-head">
+          <strong>战争影响</strong>
+          <button class="drag-handle sub-handle" aria-label="拖动二级排序" title="拖动二级排序"><span class="dots" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i><i></i></span></button>
+        </div>
+        <p>地缘冲突推升避险需求，但要继续观察油价是否重新进入高压区间。</p>
+      </div>
+      <div class="sub">
+        <div class="sub-head">
+          <strong>利率影响</strong>
+          <button class="drag-handle sub-handle" aria-label="拖动二级排序" title="拖动二级排序"><span class="dots" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i><i></i></span></button>
+        </div>
+        <p>实际利率如果继续下行，黄金弹性会更明显；反之需要控制预期。</p>
+      </div>
+    </section>
+  </template>
+
+  <script>
+    const template = document.querySelector("#sectionTemplate");
+    document.querySelectorAll(".canvas").forEach((canvas) => {
+      canvas.appendChild(template.content.cloneNode(true));
+    });
+
+    let dragState = null;
+
+    function refreshIndexes(container) {
+      container.querySelectorAll(".section .index").forEach((node, index) => {
+        node.textContent = String(index + 1);
+      });
+    }
+
+    function clearDropMarkers() {
+      document.querySelectorAll(".drop-before, .drop-after").forEach((node) => {
+        node.classList.remove("drop-before", "drop-after");
+      });
+    }
+
+    document.querySelectorAll(".drag-handle").forEach((handle) => {
+      handle.addEventListener("mousedown", (event) => {
+        const isSub = handle.classList.contains("sub-handle");
+        const item = handle.closest(isSub ? ".sub" : ".section");
+        dragState = {
+          item,
+          container: isSub ? item.closest(".section") : item.parentElement,
+          selector: isSub ? ".sub" : ".section",
+          target: null,
+          after: false,
+        };
+        item.classList.add("dragging");
+        event.preventDefault();
+      });
+    });
+
+    document.addEventListener("mousemove", (event) => {
+      if (!dragState) return;
+      const target = document.elementFromPoint(event.clientX, event.clientY)?.closest(dragState.selector);
+      const sameContainer = dragState.selector === ".sub"
+        ? target?.closest(".section") === dragState.container
+        : target?.parentElement === dragState.container;
+      if (!target || target === dragState.item || !sameContainer) return;
+      const rect = target.getBoundingClientRect();
+      dragState.target = target;
+      dragState.after = event.clientY > rect.top + rect.height / 2;
+      clearDropMarkers();
+      target.classList.add(dragState.after ? "drop-after" : "drop-before");
+    });
+
+    document.addEventListener("mouseup", () => {
+      if (dragState?.target) {
+        dragState.target.insertAdjacentElement(dragState.after ? "afterend" : "beforebegin", dragState.item);
+        if (dragState.selector === ".section") refreshIndexes(dragState.container);
+      }
+      if (dragState?.item) dragState.item.classList.remove("dragging");
+      dragState = null;
+      clearDropMarkers();
+    });
+  </script>
+</body>
+</html>
