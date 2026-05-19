@@ -1263,10 +1263,7 @@ function buildReviewOutlineGroups() {
       items: blocks.map((section, sectionIndex) => ({
         label: `${sectionIndex + 1}. ${section.title || "未命名主题"}`,
         targetId: getReviewNoteSectionAnchor(group.field, sectionIndex),
-        children: (section.children || []).map((child, childIndex) => ({
-          label: child.title || "未命名维度",
-          targetId: getReviewNoteSubsectionAnchor(group.field, sectionIndex, childIndex),
-        })),
+        children: [],
       })),
     });
   });
