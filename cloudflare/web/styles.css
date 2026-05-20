@@ -3198,8 +3198,43 @@ textarea[name="reviewerNewsNotes"] {
   color: #b91c1c;
 }
 
-/* hero 右侧 action 区：状态 pill + 按钮排（对齐 demo .action-bar） */
-.action-bar.review-header-actions {
+/* demo .topbar：标题 + cycle-line（左）/ status pill + 按钮（右），白底带分隔 */
+.topbar {
+  display: flex;
+  justify-content: space-between;
+  gap: 18px;
+  align-items: flex-start;
+  padding: 18px 20px;
+  border: 1px solid #e4e9f1;
+  background: #ffffff;
+  border-radius: 14px;
+  box-shadow: 0 2px 8px rgba(15, 23, 42, 0.04);
+}
+
+.topbar h1 {
+  margin: 0;
+  font-size: 22px;
+  font-weight: 900;
+  line-height: 1.2;
+  letter-spacing: 0;
+  color: #142033;
+}
+
+.cycle-line {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 6px;
+  color: #66758a;
+  font-size: 12px;
+}
+
+.cycle-line .sep {
+  color: #c7cfdc;
+}
+
+/* 右侧 action 区：status pill 在上、按钮排在下 */
+.topbar .action-bar {
   display: flex;
   flex-direction: column;
   align-items: flex-end;
@@ -3207,12 +3242,12 @@ textarea[name="reviewerNewsNotes"] {
   min-width: 0;
 }
 
-.action-bar.review-header-actions .btn-row {
+.topbar .action-bar .btn-row {
   display: flex;
   gap: 8px;
 }
 
-.action-bar.review-header-actions button {
+.topbar .action-bar button {
   height: 38px;
   padding: 0 18px;
   border-radius: 10px;
@@ -3225,19 +3260,19 @@ textarea[name="reviewerNewsNotes"] {
   box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04);
 }
 
-.action-bar.review-header-actions button.primary {
+.topbar .action-bar button.primary {
   background: #2563eb;
   border-color: #2563eb;
   color: #ffffff;
   box-shadow: 0 6px 14px rgba(37, 99, 235, 0.18);
 }
 
-.action-bar.review-header-actions button.ghost {
+.topbar .action-bar button.ghost {
   background: #ffffff;
   color: #475569;
 }
 
-.action-bar.review-header-actions button:disabled {
+.topbar .action-bar button:disabled {
   opacity: 0.5;
   cursor: not-allowed;
 }

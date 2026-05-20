@@ -435,29 +435,25 @@
       <div class="review-modal-backdrop" id="closeDrawerBackdrop"></div>
       <div class="review-modal-panel">
         <div class="panel-header review-panel-header">
-          <section class="review-hero-strip review-hero-compact">
-            <div class="review-hero-top">
-              <div class="review-identity-compact">
-                <strong id="archiveDateLabel">-</strong>
-              </div>
-              <div class="action-bar review-header-actions">
-                <div id="reviewStatusBadge" class="status-pill">编辑中</div>
-                <div class="btn-row">
-                  <div id="reviewActionGroup" class="btn-row">
-                    <button id="saveDraftBtn" class="primary">保存</button>
-                    <button id="initializeBtn" class="ghost">编辑</button>
-                  </div>
-                  <button id="closeDrawerBtn" class="ghost">关闭</button>
-                </div>
+          <header class="topbar">
+            <div>
+              <h1 id="archiveDateLabel">-</h1>
+              <div class="cycle-line">
+                <span id="drawerSubtitle">按步骤完成当天复盘。收盘任务会先初始化记录，后续可继续填写并标记已复盘。</span>
+                <span id="carryForwardLabel"></span>
               </div>
             </div>
-            <div class="review-hero-bottom">
-              <div class="review-summary-line">
-                <p id="drawerSubtitle" class="muted">按步骤完成当天复盘。收盘任务会先初始化记录，后续可继续填写并标记已复盘。</p>
-                <p id="carryForwardLabel" class="muted">-</p>
+            <div class="action-bar">
+              <span id="reviewStatusBadge" class="status-pill">编辑中</span>
+              <div class="btn-row">
+                <span id="reviewActionGroup" class="btn-row">
+                  <button id="saveDraftBtn" class="primary">保存</button>
+                  <button id="initializeBtn" class="ghost">编辑</button>
+                </span>
+                <button id="closeDrawerBtn" class="ghost">关闭</button>
               </div>
             </div>
-          </section>
+          </header>
         </div>
 
         <nav id="reviewOutline" class="review-outline hidden" aria-label="复盘目录"></nav>
