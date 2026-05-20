@@ -1538,17 +1538,17 @@ textarea {
 }
 
 .review-outline-title {
-  padding: 2px 4px 8px;
-  color: #64748b;
-  font-size: 0.72rem;
+  padding: 2px 6px 8px;
+  color: #66758a;
+  font-size: 12px;
   font-weight: 900;
   letter-spacing: 0;
 }
 
 .review-outline-group {
   display: grid;
-  gap: 2px;
-  padding: 6px 0;
+  gap: 1px;
+  padding: 6px 0 4px;
   border-top: 1px solid rgba(15, 23, 42, 0.07);
 }
 
@@ -1559,14 +1559,14 @@ textarea {
 .review-outline-item {
   width: 100%;
   min-height: 0;
-  padding: 5px 7px;
+  padding: 7px 8px;
   border-radius: 8px;
   background: transparent;
   border: 0;
   box-shadow: none;
-  color: #334155;
-  font-size: 0.78rem;
-  font-weight: 700;
+  color: #0f172a;
+  font-size: 13px;
+  font-weight: 800;
   line-height: 1.35;
   text-align: left;
   white-space: nowrap;
@@ -1574,28 +1574,42 @@ textarea {
   text-overflow: ellipsis;
 }
 
-.review-outline-item:hover {
+.review-outline-item:hover,
+.review-outline-item.active {
   transform: none;
-  background: rgba(14, 165, 233, 0.08);
+  background: #edf5ff;
   box-shadow: none;
-  color: #075985;
+  color: #1d4ed8;
 }
 
 .review-outline-item.group {
   color: #0f172a;
-  font-size: 0.8rem;
-  font-weight: 900;
+  font-size: 13px;
+  font-weight: 800;
   margin-top: 2px;
 }
 
 .review-outline-item.section {
-  padding-left: 16px;
+  padding: 5px 8px 5px 18px;
+  font-size: 12px;
+  font-weight: 600;
+  color: #5a6779;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  box-shadow: none;
+}
+
+.review-outline-item.section:hover,
+.review-outline-item.section.active {
+  background: #edf5ff;
+  color: #174ea6;
 }
 
 .review-outline-item.child {
   padding-left: 30px;
   color: #64748b;
-  font-size: 0.75rem;
+  font-size: 11px;
   font-weight: 650;
 }
 
@@ -1620,14 +1634,12 @@ textarea {
 .review-hero-compact {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
-  gap: 12px 16px;
+  gap: 8px 16px;
   padding: 18px 20px;
-  border-radius: 26px;
-  border: 1px solid rgba(15, 23, 42, 0.07);
-  background:
-    radial-gradient(circle at top right, rgba(244, 180, 0, 0.08), transparent 20%),
-    radial-gradient(circle at top left, rgba(37, 99, 235, 0.06), transparent 24%),
-    linear-gradient(180deg, rgba(255, 255, 255, 0.95), rgba(248, 250, 254, 0.9));
+  border-radius: 14px;
+  border: 1px solid #e4e9f1;
+  background: #ffffff;
+  box-shadow: 0 2px 8px rgba(15, 23, 42, 0.04);
 }
 
 .review-hero-top {
@@ -1647,9 +1659,11 @@ textarea {
 }
 
 .review-identity-compact strong {
-  font-size: clamp(2.2rem, 4.8vw, 4rem);
-  line-height: 1.02;
-  letter-spacing: -0.045em;
+  font-size: 22px;
+  font-weight: 900;
+  line-height: 1.2;
+  letter-spacing: 0;
+  color: #142033;
 }
 
 .review-hero-bottom {
@@ -1667,7 +1681,8 @@ textarea {
 
 .review-summary-line p {
   margin: 0;
-  font-size: 0.98rem;
+  font-size: 12px;
+  color: #66758a;
 }
 
 .review-summary-line p + p::before {
@@ -1764,7 +1779,14 @@ textarea {
 .review-step-panel {
   scroll-margin-top: 88px;
   min-width: 0;
+  border: 1px solid #d6dde9;
+  border-radius: 14px;
+  background: #fff;
+  box-shadow: 0 10px 24px rgba(15, 23, 42, 0.06);
+  padding: 18px;
 }
+
+.review-step-panel.hidden { display: none; }
 
 .review-step-panel-active .step-card,
 .review-step-panel-active .review-field {
@@ -1772,11 +1794,44 @@ textarea {
 }
 
 .review-section-title {
-  color: #b42318;
-  font-size: 1.04rem;
+  color: #c24135;
+  font-size: 18px;
   font-weight: 900;
-  letter-spacing: 0;
+  letter-spacing: 0.2px;
   line-height: 1.35;
+}
+
+/* Section-head banner: 红色左条 + 渐变标题背景 + 底部分隔线，沿用 demo 的 .section-head 视觉 */
+.review-step-panel .snapshot-head,
+.review-step-panel > .review-field > .structured-note-head,
+.review-step-panel .action-plan-head {
+  position: relative;
+  margin: -18px -18px 14px;
+  padding: 14px 18px 14px 22px;
+  border-bottom: 1px solid #e4e9f1;
+  background: linear-gradient(180deg, #fdf2f1, #fbfcfe);
+  border-top-left-radius: 13px;
+  border-top-right-radius: 13px;
+}
+
+.review-step-panel .snapshot-head::before,
+.review-step-panel > .review-field > .structured-note-head::before,
+.review-step-panel .action-plan-head::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: 4px;
+  background: #c24135;
+}
+
+.review-step-panel .snapshot-head h3 {
+  font-size: 18px;
+  font-weight: 900;
+  color: #c24135;
+  letter-spacing: 0.2px;
+  margin: 0;
 }
 
 .step-card {
@@ -1826,11 +1881,11 @@ textarea {
 .review-news-section,
 .review-news-detail {
   display: grid;
-  gap: 8px;
+  gap: 0;
   padding: 0;
-  border-radius: 24px;
-  background: rgba(255, 255, 255, 0.74);
-  border: 1px solid rgba(15, 23, 42, 0.06);
+  border-radius: 9px;
+  background: #ffffff;
+  border: 1px solid #e4e9f1;
   overflow: hidden;
 }
 
@@ -1838,7 +1893,7 @@ textarea {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 12px;
+  gap: 10px;
 }
 
 details.review-news-overview > summary.review-news-section-head {
@@ -1847,10 +1902,15 @@ details.review-news-overview > summary.review-news-section-head {
   display: flex;
   align-items: center;
   width: 100%;
-  min-height: 52px;
-  padding: 10px 18px;
+  padding: 9px 12px;
   box-sizing: border-box;
   user-select: none;
+  background: #fbfcfe;
+  border-bottom: 1px solid transparent;
+}
+
+details.review-news-overview[open] > summary.review-news-section-head {
+  border-bottom-color: #e4e9f1;
 }
 
 details.review-news-overview > summary.review-news-section-head::-webkit-details-marker {
@@ -1871,15 +1931,25 @@ details.review-news-overview[open] > summary.review-news-section-head::after {
 
 .review-news-section-head h4 {
   margin: 0;
+  font-size: 13px;
+  font-weight: 800;
+  color: #334155;
+}
+
+.review-news-section-head small {
+  font-size: 11px;
+  font-weight: 700;
 }
 
 details.review-news-overview > .symbol-group,
 details.review-news-overview > .empty-state {
-  margin: 0 10px 10px;
+  margin: 8px;
 }
 
 details.review-news-overview > .empty-state {
-  padding: 12px 14px;
+  padding: 14px;
+  text-align: center;
+  font-size: 12px;
 }
 
 .news-section-toggle-btn {
@@ -1925,35 +1995,61 @@ details.review-news-overview > .empty-state {
 }
 
 .review-news-item {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr);
-  gap: 8px;
-  padding: 10px 12px;
-  border-radius: 16px;
-  background: rgba(245, 248, 252, 0.88);
-  border: 1px solid rgba(15, 23, 42, 0.06);
+  display: block;
+  padding: 10px 11px;
+  border-radius: 9px;
+  background: #ffffff;
+  border: 1px solid #e4e9f1;
 }
 
-.review-news-item-body {
-  display: grid;
-  gap: 8px;
-  min-width: 0;
+.review-news-item header {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  align-items: flex-start;
 }
 
-.review-news-item-body strong {
+.review-news-item strong {
+  font-size: 13px;
   line-height: 1.5;
 }
 
-.review-news-item-body p {
-  margin: 0;
-  line-height: 1.6;
+.review-news-item header span {
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 600;
+  white-space: nowrap;
 }
 
-.review-news-item-foot {
+.review-news-item > p {
+  margin: 6px 0 0;
+  color: #26344d;
+  font-size: 13px;
+  line-height: 1.55;
+}
+
+.review-news-item footer {
   display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 8px;
   align-items: center;
-  justify-content: space-between;
-  gap: 12px;
+}
+
+.review-news-item footer > span {
+  padding: 2px 7px;
+  border-radius: 999px;
+  background: #f1f5f9;
+  color: #64748b;
+  font-size: 11px;
+  font-weight: 750;
+}
+
+.review-news-item .review-news-detail-btn {
+  margin-left: auto;
+  font-size: 11px;
+  padding: 3px 10px;
+  min-height: unset;
 }
 
 .review-news-detail {
@@ -2259,9 +2355,9 @@ textarea[name="reviewerNewsNotes"] {
   margin-top: 10px;
   padding: 12px 12px 12px 17px;
   border: 1px solid rgba(15, 23, 42, 0.08);
-  border-radius: 8px;
+  border-radius: 14px;
   background: #ffffff;
-  box-shadow: 0 12px 28px rgba(15, 23, 42, 0.05);
+  box-shadow: 0 12px 28px rgba(15, 23, 42, 0.06);
   overflow: hidden;
 }
 
@@ -2283,6 +2379,10 @@ textarea[name="reviewerNewsNotes"] {
   justify-content: flex-start;
   flex-wrap: wrap;
   gap: 12px;
+  margin: -12px -12px 0 -17px;
+  padding: 12px 14px;
+  border-bottom: 1px solid rgba(15, 23, 42, 0.08);
+  background: #fbfcfe;
 }
 
 .action-plan-group-head > div:first-child {
@@ -2310,6 +2410,45 @@ textarea[name="reviewerNewsNotes"] {
   margin-top: 5px;
   font-size: 0.74rem;
   color: #64748b;
+}
+
+.action-plan-account-info {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+}
+
+.action-plan-account-text {
+  min-width: 0;
+}
+
+.action-plan-account-logo {
+  width: 44px;
+  height: 44px;
+  flex: none;
+  border-radius: 11px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: #f1f5f9;
+  color: #fff;
+  font-size: 18px;
+  font-weight: 900;
+  user-select: none;
+  overflow: hidden;
+  box-shadow: 0 4px 12px rgba(15, 23, 42, 0.18);
+}
+
+.action-plan-account-logo img {
+  width: 100%;
+  height: 100%;
+  display: block;
+  object-fit: cover;
+}
+
+.action-plan-account-logo--fallback {
+  background: linear-gradient(135deg, #64748b 0%, #334155 100%);
 }
 
 .action-plan-account-impact {
@@ -2364,9 +2503,6 @@ textarea[name="reviewerNewsNotes"] {
   scrollbar-width: thin;
   scrollbar-gutter: stable;
   padding-bottom: 8px;
-  border-radius: 18px;
-  border: 1px solid rgba(15, 23, 42, 0.07);
-  background: rgba(255, 255, 255, 0.86);
 }
 
 .action-plan-table {
@@ -2427,20 +2563,22 @@ textarea[name="reviewerNewsNotes"] {
   top: 0;
   z-index: 1;
   color: #475569;
-  background: rgba(241, 245, 249, 0.96);
+  background: #f1f5f9;
   font-size: 0.76rem;
+  font-weight: 700;
 }
 
 .action-plan-table tbody tr {
   cursor: pointer;
+  transition: background 0.14s ease;
 }
 
 .action-plan-table tbody tr:hover td {
-  background: rgba(248, 250, 252, 0.92);
+  background: #f8fafc;
 }
 
 .action-plan-table tbody tr.selected td {
-  background: rgba(37, 99, 235, 0.045);
+  background: rgba(37, 99, 235, 0.05);
   box-shadow: none;
 }
 
@@ -2936,23 +3074,72 @@ textarea[name="reviewerNewsNotes"] {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  min-width: 112px;
-  padding: 10px 16px;
+  height: 26px;
+  padding: 0 10px;
   border-radius: 999px;
-  background: rgba(191, 90, 36, 0.12);
-  color: #b45309;
-  font-size: 0.9rem;
-  font-weight: 700;
+  background: #fff7e6;
+  border: 1px solid #f5d99a;
+  color: #a86a00;
+  font-size: 12px;
+  font-weight: 800;
 }
 
-.status-pill.success {
-  background: rgba(47, 125, 50, 0.14);
-  color: var(--success);
+/* 生产 reviewed 用 .success 类（demo 用 .reviewed），保持兼容 */
+.status-pill.success,
+.status-pill.reviewed {
+  background: #e7f6ec;
+  border-color: #b5e2c4;
+  color: #157347;
 }
 
 .status-pill.danger {
-  background: rgba(185, 28, 28, 0.14);
+  background: #fde8e7;
+  border-color: #f5b4ae;
   color: #b91c1c;
+}
+
+/* hero 右侧 action 区：状态 pill + 按钮排（对齐 demo .action-bar） */
+.action-bar.review-header-actions {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 10px;
+  min-width: 0;
+}
+
+.action-bar.review-header-actions .btn-row {
+  display: flex;
+  gap: 8px;
+}
+
+.action-bar.review-header-actions button {
+  height: 38px;
+  padding: 0 18px;
+  border-radius: 10px;
+  border: 1px solid #e4e9f1;
+  background: #ffffff;
+  color: #1f2937;
+  font-size: 14px;
+  font-weight: 800;
+  cursor: pointer;
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04);
+}
+
+.action-bar.review-header-actions button.primary {
+  background: #2563eb;
+  border-color: #2563eb;
+  color: #ffffff;
+  box-shadow: 0 6px 14px rgba(37, 99, 235, 0.18);
+}
+
+.action-bar.review-header-actions button.ghost {
+  background: #ffffff;
+  color: #475569;
+}
+
+.action-bar.review-header-actions button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
 }
 
 .review-snapshot-grid {
@@ -3111,19 +3298,12 @@ textarea[name="reviewerNewsNotes"] {
 
 .analysis-panel {
   display: grid;
-  gap: 16px;
+  gap: 10px;
 }
 
+/* demo real-test 的 news section 里没有"每日新闻总结" hero，隐藏 */
 .analysis-summary {
-  padding: 16px 18px;
-  border-radius: 24px;
-  background: linear-gradient(135deg, rgba(18, 52, 86, 0.95), rgba(30, 64, 175, 0.84));
-  color: rgba(255, 255, 255, 0.96);
-  min-height: 240px;
-}
-
-.analysis-summary .eyebrow {
-  color: rgba(255, 255, 255, 0.72);
+  display: none;
 }
 
 .ai-badge {
@@ -3151,29 +3331,36 @@ textarea[name="reviewerNewsNotes"] {
 
 .analysis-outline {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 12px;
+  gap: 10px;
+}
+
+/* demo real-test 只显示"市场影响"一张卡，"逻辑链"那张隐藏 */
+.analysis-outline-card + .analysis-outline-card {
+  display: none;
 }
 
 .analysis-outline-card {
-  padding: 14px 16px;
-  border-radius: 22px;
-  background: rgba(255, 255, 255, 0.74);
-  border: 1px solid rgba(15, 23, 42, 0.06);
-  min-height: 420px;
+  padding: 11px 13px;
+  border-radius: 10px;
+  background: #fbfcfe;
+  border: 1px solid #e4e9f1;
 }
 
 .analysis-outline-card strong {
   display: flex;
   align-items: center;
-  gap: 4px;
-  margin-bottom: 8px;
+  gap: 6px;
+  margin-bottom: 6px;
+  font-size: 13px;
+  font-weight: 700;
+  color: #1e293b;
 }
 
 .analysis-outline-card p {
   margin: 0;
-  color: #15233B;
-  line-height: 1.6;
+  color: #27364f;
+  line-height: 1.55;
+  font-size: 13px;
   white-space: pre-line;
 }
 

@@ -440,21 +440,21 @@
               <div class="review-identity-compact">
                 <strong id="archiveDateLabel">-</strong>
               </div>
-              <div class="action-row review-header-actions">
-                <div id="reviewActionGroup" class="action-row">
-                  <button id="saveDraftBtn">保存</button>
-                  <button id="initializeBtn" class="ghost">编辑</button>
+              <div class="action-bar review-header-actions">
+                <div id="reviewStatusBadge" class="status-pill">编辑中</div>
+                <div class="btn-row">
+                  <div id="reviewActionGroup" class="btn-row">
+                    <button id="saveDraftBtn" class="primary">保存</button>
+                    <button id="initializeBtn" class="ghost">编辑</button>
+                  </div>
+                  <button id="closeDrawerBtn" class="ghost">关闭</button>
                 </div>
-                <button id="closeDrawerBtn" class="ghost">关闭</button>
               </div>
             </div>
             <div class="review-hero-bottom">
               <div class="review-summary-line">
                 <p id="drawerSubtitle" class="muted">按步骤完成当天复盘。收盘任务会先初始化记录，后续可继续填写并标记已复盘。</p>
                 <p id="carryForwardLabel" class="muted">-</p>
-              </div>
-              <div class="review-cycle-meta">
-                <div id="reviewStatusBadge" class="status-pill">编辑中</div>
               </div>
             </div>
           </section>
@@ -483,10 +483,12 @@
                 </div>
                 <div id="analysisBox" class="analysis-panel"></div>
                 <div id="newsPicker" class="news-picker"></div>
-                <label class="review-field wide">
-                  <span class="review-section-title">新闻总结与点评</span>
-                  <textarea id="reviewerNewsNotesInput" name="reviewerNewsNotes" rows="8" placeholder="基于上面的 AI 日总结和重点新闻，写下你自己的主线判断、补充观点和交易点评。"></textarea>
-                </label>
+                <div class="reviewer-notes-field">
+                  <label>
+                    <span class="field-title">新闻总结与点评</span>
+                    <textarea id="reviewerNewsNotesInput" name="reviewerNewsNotes" rows="8" placeholder="基于上面的 AI 日总结和重点新闻，写下你自己的主线判断、补充观点和交易点评。" data-no-md></textarea>
+                  </label>
+                </div>
               </div>
             </section>
 
@@ -529,8 +531,11 @@
             </section>
 
             <section class="review-step-panel hidden" data-step="thinking">
+              <div class="snapshot-head">
+                <h3>深度思考与交易总结（可选）</h3>
+                <small class="muted">今天真正重要的判断是什么？自己最可能犯的错是什么？下一次怎么做得更好？</small>
+              </div>
               <label class="review-field wide">
-                <span class="review-section-title">深度思考与交易总结（可选）</span>
                 <textarea name="tradingSummary" rows="12" placeholder="今天真正重要的判断是什么？自己最可能犯的错是什么？下一次怎么做得更好？"></textarea>
               </label>
             </section>

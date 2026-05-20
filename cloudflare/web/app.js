@@ -43,6 +43,48 @@ function formatNewsSource(source, subSource) {
   return NEWS_SOURCE_LABELS[source] || source || "未知来源";
 }
 
+// 券商账户 App 图标查表：URL 由 Apple iTunes Search API 公开返回，浏览器渲染时直接从 Apple CDN 拉取。
+// 新增券商：在 BROKER_ICONS 写一行 URL，再在 resolveBrokerKey 加一条匹配规则即可。
+const BROKER_ICONS = {
+  tiger:       "https://is1-ssl.mzstatic.com/image/thumb/Purple221/v4/4e/d2/54/4ed254e2-582f-d399-8f62-ce8863a5a24b/AppIcon-0-0-1x_U007ephone-0-1-85-220.png/128x128bb.jpg",
+  eastmoney:   "https://is1-ssl.mzstatic.com/image/thumb/Purple211/v4/e1/55/d9/e155d91d-e19b-0f84-fa25-5e01d3cf3ae0/AppIcon-0-0-1x_U007ephone-0-11-0-0-sRGB-85-220.png/128x128bb.jpg",
+  tiantian:    "https://is1-ssl.mzstatic.com/image/thumb/Purple221/v4/03/5d/e2/035de212-9107-41f2-3365-85ba93c9ab45/AppIcon-0-0-1x_U007emarketing-0-11-0-0-85-220.jpeg/128x128bb.jpg",
+  tonghuashun: "https://is1-ssl.mzstatic.com/image/thumb/Purple221/v4/a6/62/71/a6627199-cd36-773c-9557-f9dac017c2fa/AppIcon-0-0-1x_U007emarketing-0-6-0-85-220.png/128x128bb.jpg",
+  moomoo:      "https://is1-ssl.mzstatic.com/image/thumb/Purple221/v4/4c/c2/4a/4cc24ab0-0522-b0f5-d5cb-aa650f4324e9/AppIcon-MooMoo-0-0-1x_U007epad-0-1-sRGB-85-220.png/128x128bb.jpg",
+  futu:        "https://is1-ssl.mzstatic.com/image/thumb/Purple221/v4/8c/ab/89/8cab8954-e76e-4297-c12b-a2647879734e/AppIcon-NiuNiu-0-0-1x_U007epad-0-1-sRGB-85-220.png/128x128bb.jpg",
+  ibkr:        "https://is1-ssl.mzstatic.com/image/thumb/Purple221/v4/44/79/b5/4479b5d9-903a-8f64-e008-23d937b09660/AppIcon-0-0-1x_U007emarketing-0-8-0-0-85-220.png/128x128bb.jpg",
+  schwab:      "https://is1-ssl.mzstatic.com/image/thumb/Purple221/v4/63/35/22/63352205-efb2-052a-5b6d-2a93838754e7/AppIcon-0-0-1x_U007epad-0-1-0-85-220.png/128x128bb.jpg",
+  usmart:      "https://is1-ssl.mzstatic.com/image/thumb/Purple221/v4/95/b7/30/95b730b8-a366-104c-78d7-be723d6a3f86/AppIcon-0-0-1x_U007emarketing-0-6-0-85-220.png/128x128bb.jpg",
+  sharppoint:  "https://is1-ssl.mzstatic.com/image/thumb/Purple221/v4/79/07/fa/7907fadf-2b20-1c55-62a3-0d9a01d1083e/AppIcon-production-0-0-1x_U007emarketing-0-11-0-85-220.png/128x128bb.jpg",
+  bbae:        "https://is1-ssl.mzstatic.com/image/thumb/Purple211/v4/eb/6b/c2/eb6bc2a5-7614-c755-b040-9e0373a326bf/AppIcon-0-0-1x_U007emarketing-0-8-0-85-220.png/128x128bb.jpg",
+};
+
+function resolveBrokerKey(account) {
+  const text = `${account?.broker || ""} ${account?.name || ""}`.toLowerCase();
+  if (text.includes("老虎") || text.includes("tiger")) return "tiger";
+  if (text.includes("东方财富") || text.includes("eastmoney") || text.includes("east money")) return "eastmoney";
+  if (text.includes("天天基金") || text.includes("tiantian")) return "tiantian";
+  if (text.includes("同花顺") || text.includes("tonghuashun") || text.includes("ths")) return "tonghuashun";
+  if (text.includes("moomoo")) return "moomoo";
+  if (text.includes("富途") || text.includes("futu") || text.includes("牛牛")) return "futu";
+  if (text.includes("盈透") || text.includes("ibkr") || text.includes("interactive broker")) return "ibkr";
+  if (text.includes("嘉信") || text.includes("schwab")) return "schwab";
+  if (text.includes("盈立") || text.includes("usmart")) return "usmart";
+  if (text.includes("卓锐") || text.includes("sharp point") || text.includes("sptrader")) return "sharppoint";
+  if (text.includes("bbae")) return "bbae";
+  return null;
+}
+
+function renderAccountLogoHtml(account) {
+  const key = resolveBrokerKey(account);
+  const url = key ? BROKER_ICONS[key] : null;
+  if (url) {
+    return `<span class="action-plan-account-logo" aria-hidden="true"><img src="${escapeAttribute(url)}" alt="" referrerpolicy="no-referrer" /></span>`;
+  }
+  const fallback = ((account?.name || "?").trim().charAt(0)) || "?";
+  return `<span class="action-plan-account-logo action-plan-account-logo--fallback" aria-hidden="true">${escapeHtml(fallback)}</span>`;
+}
+
 const state = {
   activeView: "reviews",
   activeDate: null,
@@ -1834,11 +1876,14 @@ function renderActionPlans(options = {}) {
     actionPlanAccountGroups.innerHTML = visibleAccounts.map((account) => `
       <div id="${escapeAttribute(getActionPlanAccountAnchor(account))}" class="action-plan-group" data-account-id="${escapeAttribute(String(account.id))}">
         <div class="action-plan-group-head">
-          <div>
-            <span class="action-plan-group-label">${escapeHtml(account.name)}</span>
-            <span class="action-plan-account-funds">
-              ${escapeHtml(account.currency)} · 总资产 ${escapeHtml(formatAccountMoney(account.totalAssets, account.currency))} · 可用 ${escapeHtml(formatAccountMoney(account.availableCash, account.currency))}
-            </span>
+          <div class="action-plan-account-info">
+            ${renderAccountLogoHtml(account)}
+            <div class="action-plan-account-text">
+              <span class="action-plan-group-label">${escapeHtml(account.name)}</span>
+              <span class="action-plan-account-funds">
+                ${escapeHtml(account.currency)} · 总资产 ${escapeHtml(formatAccountMoney(account.totalAssets, account.currency))} · 可用 ${escapeHtml(formatAccountMoney(account.availableCash, account.currency))}
+              </span>
+            </div>
           </div>
           ${renderActionPlanAccountImpact(account, impactByAccountId.get(Number(account.id)))}
           <div class="action-row">
@@ -2501,7 +2546,9 @@ function renderNewsPicker(news) {
     if (collapseNewsSections) section.open = false;
     const head = document.createElement(collapseNewsSections ? "summary" : "div");
     head.className = "review-news-section-head";
-    head.innerHTML = `<h4>${label}</h4><small>${items.length} 条</small>`;
+    const topStars = Number(items[0]?.importance_stars || 0);
+    const starsSuffix = items.length && topStars > 0 ? ` · 最高 ${formatStarLabel(topStars)}` : "";
+    head.innerHTML = `<h4>${label}</h4><small>${items.length} 条${starsSuffix}</small>`;
 
     section.appendChild(head);
 
@@ -2543,33 +2590,40 @@ function buildReviewNewsItem(item) {
   const article = document.createElement("article");
   article.className = "review-news-item";
 
-  const body = document.createElement("div");
-  body.className = "review-news-item-body";
+  // header: 标题 + 时间·来源（对齐 demo .news-card header）
+  const header = document.createElement("header");
   const title = document.createElement("strong");
   title.textContent = item.ai_summary || item.title || item.content || "未命名新闻";
+  const meta = document.createElement("span");
+  meta.textContent = `${item.pub_date || "未知时间"} · ${formatNewsSource(item.source, item.sub_source)}`;
+  header.append(title, meta);
 
-  const meta = document.createElement("div");
-  meta.className = "chip-row compact";
-  meta.appendChild(buildChip(formatStarLabel(item.importance_stars), "highlight"));
-  meta.appendChild(buildChip(formatNewsType(item.type)));
-  (item.related_symbols || []).slice(0, 3).forEach((symbol) => meta.appendChild(buildChip(symbol)));
-
+  // 市场影响段
   const impact = document.createElement("p");
   impact.textContent = item.market_impact || item.rule_reason || "暂无市场影响说明";
 
-  const foot = document.createElement("div");
-  foot.className = "review-news-item-foot";
-  const time = document.createElement("small");
-  time.textContent = `${item.pub_date || "未知时间"} · ${formatNewsSource(item.source, item.sub_source)}`;
+  // footer: 星级 + 类型 + 标的 + 查看新闻按钮（保留原 handler）
+  const footer = document.createElement("footer");
+  const stars = document.createElement("span");
+  stars.className = "review-news-stars";
+  stars.textContent = formatStarLabel(item.importance_stars);
+  footer.append(stars);
+  const typeSpan = document.createElement("span");
+  typeSpan.textContent = formatNewsType(item.type);
+  footer.append(typeSpan);
+  (item.related_symbols || []).slice(0, 3).forEach((symbol) => {
+    const s = document.createElement("span");
+    s.textContent = symbol;
+    footer.append(s);
+  });
   const button = document.createElement("button");
   button.type = "button";
-  button.className = "ghost";
+  button.className = "ghost review-news-detail-btn";
   button.textContent = "查看新闻";
   button.addEventListener("click", () => openNewsDetailFromItem(item));
-  foot.append(time, button);
+  footer.append(button);
 
-  body.append(title, meta, impact, foot);
-  article.append(body);
+  article.append(header, impact, footer);
   return article;
 }
 
