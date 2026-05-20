@@ -2648,6 +2648,8 @@ function setReviewStep(stepKey = null) {
   const maxReachableIndex = getMaxReachableStepIndex();
   const reviewedMode = state.reviewStatus === "reviewed" && !state.editMode;
   reviewStepNav.classList.toggle("reviewed-mode", reviewedMode);
+  // 已复盘后整条步骤导航不再需要，靠目录跳转即可
+  reviewStepNav.classList.toggle("hidden", state.reviewStatus === "reviewed");
 
   REVIEW_STEPS.forEach((step, index) => {
     const button = document.createElement("button");
