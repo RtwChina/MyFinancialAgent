@@ -2828,6 +2828,8 @@ function setReviewMode(status) {
   applyActionPlanReadOnly(readOnly);
   renderActionPlans();
   renderStructuredNoteEditors();
+  // 非编辑状态（已复盘且未点编辑）整个隐藏保存按钮，而不是 disabled 灰显
+  saveDraftBtn.classList.toggle("hidden", readOnly);
   saveDraftBtn.disabled = readOnly;
   if (status === "reviewed") {
     initializeBtn.textContent = state.editMode ? "退出编辑" : "编辑";
