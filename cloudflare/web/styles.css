@@ -2187,11 +2187,20 @@ textarea[name="reviewerNewsNotes"] {
   width: 100%;
   min-width: 0;
   border: 0;
-  border-bottom: 1px solid rgba(15, 23, 42, 0.12);
+  border-bottom: 1px solid transparent;
   border-radius: 0;
   background: transparent;
   padding: 3px 0;
   font-weight: 800;
+  font-size: 13px;
+  color: #1e293b;
+  transition: border-color 0.14s ease;
+}
+
+.structured-note-subsection-head input:hover,
+.structured-note-subsection-head input:focus {
+  border-bottom-color: rgba(15, 23, 42, 0.18);
+  outline: 0;
 }
 
 .structured-note-section-head input {
@@ -2202,17 +2211,23 @@ textarea[name="reviewerNewsNotes"] {
 
 .structured-note-subsections {
   display: grid;
-  gap: 8px;
+  gap: 0;
 }
 
+/* 对齐 demo .note-sub：只用 border-top 分隔，无外框/圆角/白底 */
 .structured-note-subsection {
   display: grid;
-  gap: 5px;
-  padding: 8px 10px;
-  border: 1px solid rgba(14, 116, 144, 0.08);
-  border-radius: 8px;
-  background: #ffffff;
+  gap: 4px;
+  padding: 9px 11px;
+  border: 0;
+  border-top: 1px solid #eef2f7;
+  border-radius: 0;
+  background: transparent;
   transition: box-shadow 0.16s ease, opacity 0.16s ease, transform 0.16s ease;
+}
+
+.structured-note-subsection:first-of-type {
+  border-top: 0;
 }
 
 .structured-note-section.is-dragging,
