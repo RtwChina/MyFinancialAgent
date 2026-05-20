@@ -1621,7 +1621,14 @@ textarea {
 
 .review-panel-header {
   display: block;
-  margin-bottom: 12px;
+  margin: -22px -22px 12px;
+  padding: 22px 22px 12px;
+  position: sticky;
+  top: -22px;
+  z-index: 5;
+  background:
+    linear-gradient(180deg, rgba(255, 252, 246, 0.98) 0%, rgba(255, 252, 246, 0.96) 80%, rgba(255, 252, 246, 0.88) 100%);
+  backdrop-filter: blur(8px);
 }
 
 .review-hero-strip {
