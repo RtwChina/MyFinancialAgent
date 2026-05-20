@@ -2203,16 +2203,20 @@ textarea[name="reviewerNewsNotes"] {
   outline: 0;
 }
 
-/* 编辑模式：input 走整齐的浅蓝实线方框 */
-.note-sub-head input:not([readonly]) {
+/* 编辑模式：默认看起来仍是平铺文字，hover 才出现浅蓝框，focus 加深 */
+.note-sub-head input:not([readonly]):hover {
   border: 1px solid #bfdbfe;
+  border-bottom-color: #bfdbfe;
   border-radius: 6px;
-  padding: 5px 9px;
+  padding: 2px 8px;
   background: #ffffff;
 }
 
 .note-sub-head input:not([readonly]):focus {
-  border-color: #2563eb;
+  border: 1px solid #2563eb;
+  border-radius: 6px;
+  padding: 2px 8px;
+  background: #ffffff;
   box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.12);
   outline: 0;
 }
@@ -2289,19 +2293,23 @@ textarea[name="reviewerNewsNotes"] {
   transition: background 0.14s ease, border-color 0.14s ease;
 }
 
-/* 编辑模式：textarea 用和 input 一致的浅蓝实线方框 */
-.note-sub textarea:not([readonly]),
-.review-field.wide .note-sub textarea:not([readonly]) {
-  padding: 7px 9px;
+/* 编辑模式：textarea 默认平铺，hover/focus 才显框 */
+.note-sub textarea:not([readonly]):hover,
+.review-field.wide .note-sub textarea:not([readonly]):hover {
+  padding: 5px 8px;
   background: #ffffff;
   border: 1px solid #bfdbfe;
   border-radius: 6px;
 }
 
-.note-sub textarea:not([readonly]):focus {
-  outline: 0;
-  border-color: #2563eb;
+.note-sub textarea:not([readonly]):focus,
+.review-field.wide .note-sub textarea:not([readonly]):focus {
+  padding: 5px 8px;
+  background: #ffffff;
+  border: 1px solid #2563eb;
+  border-radius: 6px;
   box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.12);
+  outline: 0;
 }
 
 .note-sub textarea[readonly]:focus {
