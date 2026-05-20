@@ -114,7 +114,7 @@ const state = {
   newsPage: 1,
   newsPageSize: 20,
   reviewsPage: 1,
-  reviewsPageSize: 20,
+  reviewsPageSize: 10,
 };
 
 const APP_TOKEN_STORAGE_KEY = "myFinancialAgentApiToken";
