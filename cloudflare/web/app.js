@@ -794,7 +794,9 @@ async function openReviewDrawer(archiveDate, options = {}) {
 
   initMdTabs();
   setReviewMode(reviewStatus);
-  setReviewStep(editPlan ? "plan" : initialStep);
+  // editPlan 只在已复盘记录上跳到"个股操作"；未复盘时按正常顺序从 news 开始
+  const jumpToPlan = editPlan && reviewStatus === "reviewed";
+  setReviewStep(jumpToPlan ? "plan" : initialStep);
   reviewDrawer.classList.remove("hidden");
   scheduleStructuredNoteTextareaResize();
 }
