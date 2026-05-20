@@ -944,17 +944,26 @@ function buildReviewRow(item) {
   const actionGroup = document.createElement("div");
   actionGroup.className = "review-row-actions";
 
-  const viewButton = document.createElement("button");
-  viewButton.className = "ghost compact-button";
-  viewButton.textContent = "查看";
-  viewButton.addEventListener("click", () => openReviewDrawer(item.archive_date));
+  if (isReviewed) {
+    const viewButton = document.createElement("button");
+    viewButton.className = "ghost compact-button";
+    viewButton.textContent = "查看";
+    viewButton.addEventListener("click", () => openReviewDrawer(item.archive_date));
 
-  const editButton = document.createElement("button");
-  editButton.className = "compact-button";
-  editButton.textContent = "编辑";
-  editButton.addEventListener("click", () => openReviewDrawer(item.archive_date, { editPlan: true }));
+    const editButton = document.createElement("button");
+    editButton.className = "compact-button";
+    editButton.textContent = "编辑";
+    editButton.addEventListener("click", () => openReviewDrawer(item.archive_date, { editPlan: true }));
 
-  actionGroup.append(viewButton, editButton);
+    actionGroup.append(viewButton, editButton);
+  } else {
+    const startButton = document.createElement("button");
+    startButton.className = "compact-button";
+    startButton.textContent = "开始复盘";
+    startButton.addEventListener("click", () => openReviewDrawer(item.archive_date));
+    actionGroup.append(startButton);
+  }
+
   actionCell.appendChild(actionGroup);
   return row;
 }
