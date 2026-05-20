@@ -2677,9 +2677,9 @@ function setReviewStep(stepKey = null) {
   scheduleStructuredNoteTextareaResize();
 
   const index = REVIEW_STEPS.findIndex((step) => step.key === state.reviewStep);
-  reviewStepHint.textContent = reviewedMode
-    ? "点击上方标记可直接跳到对应模块。"
-    : REVIEW_STEPS[index]?.hint || "";
+  // 已复盘后 step-nav 已隐藏，没有"上方标记"可点，把提示也清掉
+  reviewStepHint.textContent = reviewedMode ? "" : REVIEW_STEPS[index]?.hint || "";
+  reviewStepHint.classList.toggle("hidden", reviewedMode || !reviewStepHint.textContent);
   prevStepBtn.disabled = reviewedMode || index <= 0;
   nextStepBtn.textContent = reviewedMode ? "已复盘" : index === REVIEW_STEPS.length - 1 ? "完成复盘" : "下一步";
   nextStepBtn.disabled = reviewedMode;
