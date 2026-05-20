@@ -1148,11 +1148,13 @@ function renderStructuredNoteEditor(field, container) {
 }
 
 function buildReviewNoteSubsection(field, sectionIndex, childIndex, child, readOnly) {
-  const wrapper = document.createElement("section");
-  wrapper.className = "structured-note-subsection";
+  // 对齐 demo .note-sub 结构：<div class="note-sub"><div class="note-sub-head"><b><span class="note-sub-tools"></span></div><p></p></div>
+  // input/textarea 仍保留以维持编辑能力，readOnly 时通过 CSS 让其视觉等同 <b>/<p>
+  const wrapper = document.createElement("div");
+  wrapper.className = "note-sub";
   wrapper.id = getReviewNoteSubsectionAnchor(field, sectionIndex, childIndex);
   const head = document.createElement("div");
-  head.className = "structured-note-subsection-head";
+  head.className = "note-sub-head";
   const input = document.createElement("input");
   input.value = child.title;
   input.placeholder = "二级标题";
@@ -1160,11 +1162,10 @@ function buildReviewNoteSubsection(field, sectionIndex, childIndex, child, readO
   input.addEventListener("input", () => updateReviewNoteSubsection(field, sectionIndex, childIndex, { title: input.value }));
   head.appendChild(input);
   const siblings = state.reviewNoteBlocks[field]?.[sectionIndex]?.children || [];
-  const subsectionTools = buildReviewNoteTools([
-    ["删除", () => deleteReviewNoteSubsection(field, sectionIndex, childIndex), false],
-  ], readOnly);
+  const tools = document.createElement("span");
+  tools.className = "note-sub-tools";
   if (!readOnly && siblings.length > 1) {
-    subsectionTools.prepend(buildReviewNoteDragHandle({
+    tools.appendChild(buildReviewNoteDragHandle({
       label: "拖动二级排序",
       type: "subsection",
       field,
@@ -1172,7 +1173,14 @@ function buildReviewNoteSubsection(field, sectionIndex, childIndex, child, readO
       childIndex,
     }));
   }
-  head.appendChild(subsectionTools);
+  const deleteBtn = document.createElement("button");
+  deleteBtn.type = "button";
+  deleteBtn.className = "compact-button danger";
+  deleteBtn.textContent = "删除";
+  deleteBtn.disabled = readOnly;
+  deleteBtn.addEventListener("click", () => deleteReviewNoteSubsection(field, sectionIndex, childIndex));
+  tools.appendChild(deleteBtn);
+  head.appendChild(tools);
   const textarea = document.createElement("textarea");
   textarea.rows = 2;
   textarea.placeholder = "正文";
@@ -1213,12 +1221,12 @@ let reviewNoteDragState = null;
 function buildReviewNoteDragHandle({ label, type, field, sectionIndex, childIndex = null }) {
   const button = document.createElement("button");
   button.type = "button";
-  button.className = "ghost compact-button structured-note-drag-handle";
+  button.className = "drag-handle";
   button.title = label;
   button.setAttribute("aria-label", label);
   button.innerHTML = `<span aria-hidden="true"><i></i><i></i><i></i><i></i><i></i><i></i></span>`;
   button.addEventListener("mousedown", (event) => {
-    const itemEl = button.closest(type === "section" ? ".structured-note-section" : ".structured-note-subsection");
+    const itemEl = button.closest(type === "section" ? ".structured-note-section" : ".note-sub");
     if (!itemEl) return;
     reviewNoteDragState = {
       type,
@@ -1229,7 +1237,7 @@ function buildReviewNoteDragHandle({ label, type, field, sectionIndex, childInde
       containerEl: type === "section"
         ? itemEl.parentElement
         : itemEl.closest(".structured-note-subsections"),
-      selector: type === "section" ? ".structured-note-section" : ".structured-note-subsection",
+      selector: type === "section" ? ".structured-note-section" : ".note-sub",
       dropTarget: null,
       dropAfter: false,
     };
@@ -1613,7 +1621,7 @@ function scheduleTextareaResize(el) {
 }
 
 function resizeStructuredNoteTextareas() {
-  reviewForm.querySelectorAll(".structured-note-subsection textarea").forEach(autoResizeTextarea);
+  reviewForm.querySelectorAll(".note-sub textarea").forEach(autoResizeTextarea);
 }
 
 function scheduleStructuredNoteTextareaResize() {

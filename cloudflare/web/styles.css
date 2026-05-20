@@ -2183,7 +2183,7 @@ textarea[name="reviewerNewsNotes"] {
 }
 
 .structured-note-section-head input,
-.structured-note-subsection-head input {
+.note-sub-head input {
   width: 100%;
   min-width: 0;
   border: 0;
@@ -2197,8 +2197,8 @@ textarea[name="reviewerNewsNotes"] {
   transition: border-color 0.14s ease;
 }
 
-.structured-note-subsection-head input:hover,
-.structured-note-subsection-head input:focus {
+.note-sub-head input:hover,
+.note-sub-head input:focus {
   border-bottom-color: rgba(15, 23, 42, 0.18);
   outline: 0;
 }
@@ -2214,24 +2214,36 @@ textarea[name="reviewerNewsNotes"] {
   gap: 0;
 }
 
-/* 对齐 demo .note-sub：只用 border-top 分隔，无外框/圆角/白底 */
-.structured-note-subsection {
+/* demo .note-sub 风格：只用 border-top 分隔，无外框/圆角/白底 */
+.note-sub {
   display: grid;
   gap: 4px;
   padding: 9px 11px;
-  border: 0;
   border-top: 1px solid #eef2f7;
-  border-radius: 0;
-  background: transparent;
   transition: box-shadow 0.16s ease, opacity 0.16s ease, transform 0.16s ease;
 }
 
-.structured-note-subsection:first-of-type {
+.note-sub:first-of-type {
   border-top: 0;
 }
 
+.note-sub-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  min-width: 0;
+}
+
+.note-sub-tools {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+}
+
 .structured-note-section.is-dragging,
-.structured-note-subsection.is-dragging {
+.note-sub.is-dragging {
   opacity: 0.78;
   border-color: rgba(15, 118, 110, 0.4);
   box-shadow: 0 18px 35px rgba(15, 118, 110, 0.2);
@@ -2247,16 +2259,23 @@ textarea[name="reviewerNewsNotes"] {
   box-shadow: 0 3px 0 #0f766e;
 }
 
-.structured-note-subsection textarea,
-.review-field.wide .structured-note-subsection textarea {
+.note-sub textarea,
+.review-field.wide .note-sub textarea {
   min-height: 42px;
   height: auto;
   overflow: hidden;
   line-height: 1.5;
   resize: vertical;
-  padding: 8px 10px;
-  border-radius: 14px;
-  font-size: 0.92rem;
+  padding: 6px 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  font-size: 13px;
+  color: #26344d;
+}
+
+.note-sub textarea:focus {
+  outline: 0;
 }
 
 .structured-note-tools {
@@ -2277,27 +2296,54 @@ textarea[name="reviewerNewsNotes"] {
   width: fit-content;
 }
 
-.structured-note-tools .structured-note-drag-handle {
-  width: 30px;
-  min-width: 30px;
+/* 危险/删除按钮：红底白字，对齐 demo .compact-button.danger */
+.compact-button.danger {
+  background: #fef2f2;
+  border: 1px solid #fecaca;
+  color: #b91c1c;
+  border-radius: 8px;
+  min-height: 26px;
+  padding: 3px 10px;
+  font-size: 11px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.compact-button.danger:hover:not(:disabled) {
+  background: #fee2e2;
+  border-color: #f5b4ae;
+}
+
+.compact-button.danger:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* 拖拽手柄 6 圆点（对齐 demo .drag-handle） */
+.drag-handle {
+  width: 26px;
+  height: 26px;
   padding: 0;
   display: inline-grid;
   place-items: center;
+  border: 1px solid #e4e9f1;
+  border-radius: 8px;
+  background: #ffffff;
   color: #64748b;
   cursor: grab;
 }
 
-.structured-note-tools .structured-note-drag-handle:hover {
+.drag-handle:hover {
   border-color: rgba(15, 118, 110, 0.34);
   background: #ccfbf1;
   color: #0f766e;
 }
 
-.structured-note-tools .structured-note-drag-handle:active {
+.drag-handle:active {
   cursor: grabbing;
 }
 
-.structured-note-drag-handle span {
+.drag-handle span {
   width: 12px;
   height: 16px;
   display: grid;
@@ -2306,7 +2352,7 @@ textarea[name="reviewerNewsNotes"] {
   gap: 2px;
 }
 
-.structured-note-drag-handle i {
+.drag-handle i {
   width: 4px;
   height: 4px;
   border-radius: 50%;
@@ -2327,6 +2373,7 @@ textarea[name="reviewerNewsNotes"] {
 
 .review-modal.review-readonly .structured-note-head > button,
 .structured-note-editor.is-readonly .structured-note-tools,
+.structured-note-editor.is-readonly .note-sub-tools,
 .structured-note-editor.is-readonly .structured-note-add-sub {
   display: none;
 }
