@@ -495,9 +495,10 @@ function syncPositionBucketFromAmount() {
   const amountRaw = wan * 10000;
   const accountId = Number(actionPlanAccountSelect?.value || 0);
   const account = findAccountById(accountId);
-  const bucket = mapAmountToPositionBucket(amountRaw, account?.totalAssets);
+  const total = Number(account?.totalAssets);
+  if (!Number.isFinite(total) || total <= 0) return;
+  const bucket = mapAmountToPositionBucket(amountRaw, total);
   if (!bucket) return;
-  if (ZERO_POSITION_ACTIONS.has(actionPlanActionSelect?.value)) return;
   actionPlanPositionSelect.value = bucket;
 }
 
