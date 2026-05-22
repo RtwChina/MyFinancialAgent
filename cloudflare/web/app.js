@@ -427,7 +427,6 @@ const actionPlanMetrics = document.querySelector("#actionPlanMetrics");
 const actionPlanActionSelect = document.querySelector("#actionPlanActionSelect");
 const actionPlanPositionSelect = document.querySelector("#actionPlanPositionSelect");
 const actionPlanPositionAmountInput = document.querySelector("#actionPlanPositionAmountInput");
-const actionPlanAccountTotalHint = document.querySelector("#actionPlanAccountTotalHint");
 const actionPlanSupportLevelsInput = document.querySelector("#actionPlanSupportLevelsInput");
 const actionPlanResistanceLevelsInput = document.querySelector("#actionPlanResistanceLevelsInput");
 const actionPlanEntryInput = document.querySelector("#actionPlanEntryInput");
@@ -478,7 +477,6 @@ saveActionPlanDetailBtn?.addEventListener("click", () => saveActionPlanDetailAnd
 actionPlanActionSelect?.addEventListener("change", syncZeroPositionForAction);
 actionPlanAccountSelect?.addEventListener("change", () => {
   updateActionPlanDetailHeading();
-  updateActionPlanAccountTotalHint();
   syncPositionBucketFromAmount();
 });
 actionPlanSymbolSelect?.addEventListener("change", () => {
@@ -492,9 +490,12 @@ function syncPositionBucketFromAmount() {
   if (!actionPlanPositionAmountInput || !actionPlanPositionSelect) return;
   const raw = actionPlanPositionAmountInput.value;
   if (raw === "" || raw == null) return;
+  const wan = Number(raw);
+  if (!Number.isFinite(wan)) return;
+  const amountRaw = wan * 10000;
   const accountId = Number(actionPlanAccountSelect?.value || 0);
   const account = findAccountById(accountId);
-  const bucket = mapAmountToPositionBucket(raw, account?.totalAssets);
+  const bucket = mapAmountToPositionBucket(amountRaw, account?.totalAssets);
   if (!bucket) return;
   if (ZERO_POSITION_ACTIONS.has(actionPlanActionSelect?.value)) return;
   actionPlanPositionSelect.value = bucket;
@@ -1782,20 +1783,6 @@ function mapAmountToPositionBucket(amount, totalAssets) {
   return ">30%";
 }
 
-function updateActionPlanAccountTotalHint() {
-  if (!actionPlanAccountTotalHint) return;
-  const accountId = Number(actionPlanAccountSelect?.value || 0);
-  const account = findAccountById(accountId);
-  if (!account) {
-    actionPlanAccountTotalHint.textContent = "";
-    return;
-  }
-  if (account.totalAssets == null) {
-    actionPlanAccountTotalHint.textContent = `${account.currency} · 未设置总资产`;
-    return;
-  }
-  actionPlanAccountTotalHint.textContent = `${account.currency} · 总资产 ${formatAccountMoney(account.totalAssets, account.currency)}`;
-}
 
 function formatSupportResistanceLevels(supportLevels, resistanceLevels) {
   const sections = [];
@@ -2293,8 +2280,11 @@ function fillActionPlanEditor(plan) {
   renderActionPlanMetrics(plan.symbol || "");
   if (actionPlanActionSelect) actionPlanActionSelect.value = normalizeActionPlanAction(plan.actionType);
   if (actionPlanPositionSelect) actionPlanPositionSelect.value = normalizeActionPlanPosition(plan.currentPosition);
-  if (actionPlanPositionAmountInput) actionPlanPositionAmountInput.value = plan.positionAmount != null ? plan.positionAmount : "";
-  updateActionPlanAccountTotalHint();
+  if (actionPlanPositionAmountInput) {
+    actionPlanPositionAmountInput.value = plan.positionAmount != null
+      ? Number((plan.positionAmount / 10000).toFixed(4))
+      : "";
+  }
   if (actionPlanSupportLevelsInput) actionPlanSupportLevelsInput.value = plan.supportLevels || "";
   if (actionPlanResistanceLevelsInput) actionPlanResistanceLevelsInput.value = plan.resistanceLevels || "";
   if (actionPlanEntryInput) actionPlanEntryInput.value = plan.entryPlan || "";
@@ -2337,9 +2327,10 @@ function syncSelectedActionPlanFromEditor() {
   if (actionPlanSymbolInput) actionPlanSymbolInput.value = selectedSymbol;
   const account = findAccountById(selectedAccountId);
   const positionAmountRaw = actionPlanPositionAmountInput?.value;
-  const positionAmount = positionAmountRaw == null || positionAmountRaw === ""
+  const positionAmountWan = positionAmountRaw == null || positionAmountRaw === ""
     ? null
     : (Number.isFinite(Number(positionAmountRaw)) ? Number(positionAmountRaw) : null);
+  const positionAmount = positionAmountWan == null ? null : Math.round(positionAmountWan * 10000 * 100) / 100;
   state.actionPlans[index] = normalizeActionPlan({
     ...state.actionPlans[index],
     accountId: selectedAccountId,
@@ -2365,10 +2356,21 @@ function syncSelectedActionPlanFromEditor() {
 
 function updateActionPlanDetailHeading() {
   const symbol = String(actionPlanSymbolInput?.value || "").trim() || "未命名标的";
-  const accountName = findAccountById(actionPlanAccountSelect?.value)?.name || "未分配账户";
+  const accountId = Number(actionPlanAccountSelect?.value || 0);
+  const account = findAccountById(accountId);
+  const accountName = account?.name || "未分配账户";
   const actionType = String(actionPlanActionSelect?.value || "").trim();
-  if (actionPlanDetailTitle) actionPlanDetailTitle.textContent = symbol;
-  if (actionPlanDetailSubtitle) actionPlanDetailSubtitle.textContent = [accountName, actionType].filter(Boolean).join(" · ");
+  const fundsPart = account
+    ? (account.totalAssets == null
+        ? `${account.currency} · 未设置总资产`
+        : `${account.currency} · 总资产 ${formatAccountMoney(account.totalAssets, account.currency)}`)
+    : "";
+  if (actionPlanDetailTitle) {
+    actionPlanDetailTitle.textContent = fundsPart ? `${accountName}（${fundsPart}）` : accountName;
+  }
+  if (actionPlanDetailSubtitle) {
+    actionPlanDetailSubtitle.textContent = actionType ? `${symbol}（${actionType}）` : symbol;
+  }
 }
 
 function openActionPlanDetail(index) {

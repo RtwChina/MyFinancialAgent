@@ -3075,16 +3075,25 @@ textarea[name="reviewerNewsNotes"] {
 
 .action-plan-editor label.span-2 {
   grid-column: span 2;
+  min-width: 0;
 }
 
 .action-plan-editor label.span-4 {
   grid-column: 1 / -1;
+  min-width: 0;
+}
+
+.action-plan-editor label.span-2 > textarea,
+.action-plan-editor label.span-4 > textarea {
+  min-width: 0;
+  box-sizing: border-box;
 }
 
 .action-plan-top-row {
   grid-column: 1 / -1;
   display: flex;
   align-items: center;
+  flex-wrap: wrap;
   gap: 12px;
   min-width: 0;
 }
@@ -3139,6 +3148,21 @@ textarea[name="reviewerNewsNotes"] {
 
 .action-plan-editor label.compact-position-amount input {
   width: 200px;
+  padding-right: 30px;
+}
+
+.action-plan-editor label.compact-position-amount .amount-input-wrap {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+}
+
+.action-plan-editor label.compact-position-amount .amount-input-suffix {
+  position: absolute;
+  right: 10px;
+  font-size: 0.85rem;
+  color: var(--muted);
+  pointer-events: none;
 }
 
 .action-plan-editor label.compact-position-amount .field-title-row {
