@@ -3133,28 +3133,24 @@ textarea[name="reviewerNewsNotes"] {
 }
 
 .action-plan-editor label.compact-symbol select {
-  width: 160px;
-}
-
-.action-plan-editor label.compact-account select {
   width: 150px;
 }
 
+.action-plan-editor label.compact-account select {
+  width: 130px;
+}
+
 .action-plan-editor label.compact-action select {
-  width: 122px;
+  width: 110px;
 }
 
 .action-plan-editor label.compact-position select {
-  width: 112px;
-}
-
-.action-plan-editor label.compact-position-amount {
-  min-width: 220px;
+  width: 96px;
 }
 
 .action-plan-editor label.compact-position-amount input {
-  width: 200px;
-  padding-right: 30px;
+  width: 110px;
+  padding-right: 26px;
 }
 
 .action-plan-editor label.compact-position-amount .amount-input-wrap {
