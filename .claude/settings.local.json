@@ -1,21 +1,23 @@
 {
   "permissions": {
     "allow": [
-      "Bash",
-      "Read",
-      "Edit",
-      "Write",
-      "Glob",
-      "Grep",
-      "WebSearch",
-      "WebFetch",
-      "Agent",
-      "Skill",
-      "mcp__ide__getDiagnostics"
+      "Read(*)",
+      "Write(*)",
+      "WebSearch(*)",
+      "WebFetch(*)",
+      "mcp__ide__getDiagnostics",
+      "Bash(node --check cloudflare/worker/src/index.js)",
+      "Bash(node --check cloudflare/web/app.js)",
+      "Bash(npx wrangler *)",
+      "Bash(npm run *)",
+      "Bash(kill 3305)",
+      "Bash(git add *)",
+      "Bash(git commit *)",
+      "Bash(curl -s https://my-financial-agent.rtw1994.workers.dev/api/health)"
     ],
     "deny": [
       "Bash(rm -rf:*)"
     ],
-    "defaultMode": "dontAsk"
+    "defaultMode": "bypassPermissions"
   }
 }
