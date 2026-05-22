@@ -2359,17 +2359,16 @@ function updateActionPlanDetailHeading() {
   const accountId = Number(actionPlanAccountSelect?.value || 0);
   const account = findAccountById(accountId);
   const accountName = account?.name || "未分配账户";
-  const actionType = String(actionPlanActionSelect?.value || "").trim();
   const fundsPart = account
     ? (account.totalAssets == null
         ? `${account.currency} · 未设置总资产`
         : `${account.currency} · 总资产 ${formatAccountMoney(account.totalAssets, account.currency)}`)
     : "";
   if (actionPlanDetailTitle) {
-    actionPlanDetailTitle.textContent = fundsPart ? `${accountName}（${fundsPart}）` : accountName;
+    actionPlanDetailTitle.textContent = symbol;
   }
   if (actionPlanDetailSubtitle) {
-    actionPlanDetailSubtitle.textContent = actionType ? `${symbol}（${actionType}）` : symbol;
+    actionPlanDetailSubtitle.textContent = fundsPart ? `${accountName} · ${fundsPart}` : accountName;
   }
 }
 

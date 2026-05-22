@@ -2997,11 +2997,17 @@ textarea[name="reviewerNewsNotes"] {
 
 .action-plan-detail-head h3 {
   margin: 0;
-  font-size: 1.15rem;
+  font-size: 1.55rem;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  color: #0f172a;
+  line-height: 1.2;
 }
 
 .action-plan-detail-head p {
   margin: 4px 0 0;
+  font-size: 0.82rem;
+  color: var(--muted);
 }
 
 .action-plan-detail-footer {
