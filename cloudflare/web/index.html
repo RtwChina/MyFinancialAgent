@@ -276,34 +276,19 @@
         </section>
 
         <section id="accountsView" class="view">
-          <section class="panel symbols-panel">
+          <section class="panel symbols-panel accounts-panel">
             <div class="panel-header">
               <div>
                 <h2>账户管理</h2>
-                <p class="toolbar-caption">维护每个股票/基金账户的总资产与可用资金，操作计划会按账户分组。</p>
+                <p class="toolbar-caption">维护每个账户的资金状态，以及该账户下追踪的标的。保存后会同步到最新复盘日。</p>
               </div>
               <div class="panel-header-meta">
                 <button id="newAccountBtn" class="ghost">新增账户</button>
                 <button id="refreshAccountsBtn" class="ghost">刷新</button>
               </div>
             </div>
-            <div id="accountFormPreview" class="symbol-resolve-preview hidden"></div>
-            <div class="symbols-table-wrap">
-              <table class="symbols-table accounts-table">
-                <thead>
-                  <tr>
-                    <th>账户</th>
-                    <th>类型</th>
-                    <th>币种</th>
-                    <th>总资产</th>
-                    <th>可用资金</th>
-                    <th>状态</th>
-                    <th></th>
-                  </tr>
-                </thead>
-                <tbody id="accountsList"></tbody>
-              </table>
-            </div>
+            <div id="accountsSummary" class="accounts-summary muted"></div>
+            <div id="accountLivePlans" class="action-plan-account-groups accounts-list"></div>
           </section>
         </section>
 
@@ -564,6 +549,20 @@
       </div>
     </aside>
 
+    <aside id="accountFormModal" class="account-form-modal hidden">
+      <div id="accountFormBackdrop" class="account-form-backdrop"></div>
+      <div class="account-form-panel">
+        <header class="account-form-head">
+          <div>
+            <h3 id="accountFormTitle">新增账户</h3>
+            <p class="muted">维护账户基础信息，标的与资金计划在卡片内单独管理。</p>
+          </div>
+          <button id="closeAccountFormBtn" type="button" class="ghost compact-button">关闭</button>
+        </header>
+        <div id="accountFormBody"></div>
+      </div>
+    </aside>
+
     <aside id="actionPlanDetailModal" class="action-plan-detail-modal hidden">
       <div id="actionPlanDetailBackdrop" class="action-plan-detail-backdrop"></div>
       <div class="action-plan-detail-panel">
@@ -611,6 +610,13 @@
                 <option>25%-30%</option>
                 <option>&gt;30%</option>
               </select>
+            </label>
+            <label class="compact compact-position-amount">
+              <span class="field-title-row">
+                <span>持仓金额</span>
+                <small id="actionPlanAccountTotalHint" class="muted"></small>
+              </span>
+              <input id="actionPlanPositionAmountInput" type="number" step="0.01" min="0" placeholder="输入金额自动换算" />
             </label>
           </div>
           <label class="span-4 daily-record-field">

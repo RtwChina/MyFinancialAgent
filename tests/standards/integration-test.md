@@ -119,3 +119,74 @@
 | 2 | 通过 PUT 停用一个 macro 词后重新运行 | 下次 Pipeline 日志中宏观词计数减少 1 |
 | 3 | 添加新 market 词后重新运行 | 下次 Pipeline 日志中市场词计数增加 1 |
 | 4 | 将 INGEST_API_BASE_URL 改为无效值，运行 Pipeline | 日志含 "关键词来源=FALLBACK"，Pipeline 正常完成，词表数量与 FALLBACK_KEYWORDS 一致 |
+
+### IT-LIVEPLANS-001：账户活态操作计划 CRUD + 双向同步端到端集成
+
+**场景**：账户活态计划全链路验证 —— CRUD、init 复制幂等、最新日双向同步、历史日不同步。
+
+**对应文件**：`tests/integration/account_live_action_plans_e2e.py`、`openspec/changes/account-managed-live-action-plans/specs/account-live-action-plans/spec.md`
+
+**前置条件**：
+- migration 023 已 apply
+- 至少 2 个 enabled 账户、tracked_symbols 含 `MU` 与一个 A 股 symbol（如 `600519`）
+- 存在已初始化的当天 archive_date `D`，且 `D = MAX(archive_date)`
+
+**步骤与预期**：
+
+| # | 步骤 | 预期 |
+|---|------|------|
+| 1 | `POST /api/account-live-action-plans` 创建 `(老虎-美股, MU)` + `(东方财富-国内, 600519)` | 各返回 2xx 含 id；`daily_review_action_plans(D)` 同步出现这两行 |
+| 2 | 重复 POST 第 1 步任意一条 | 返回 HTTP 409，库中无重复行 |
+| 3 | `PUT /api/account-live-action-plans/<id>` 修改 take_profit_plan | live 与 `daily(D)` 都更新；`updated_at` 推进 |
+| 4 | `DELETE /api/account-live-action-plans/<id>` 删除其中一条 | live 该行消失；`daily(D)` 对应行同步删除 |
+| 5 | 清空 `daily(D')` 后调用 `POST /api/reviews/D'/initialize`（`D' = D + 1` 新日） | `daily(D') = live` 行对行；再次调用不重复、不覆盖 |
+| 6 | 让某 live plan 的 symbol 在 `tracked_symbols.is_active = 0`，再清空 `daily(D'')` 后调用 init | 该行被跳过，其余 plan 仍复制；日志/返回含 warning |
+| 7 | 取一个 reviewed 历史日 `H` (`H < D`)，`POST /api/reviews/H` 修改 plan | `daily(H)` 改变；`account_live_action_plans` 不变 |
+| 8 | 重新 `POST /api/reviews/D` 用空 plan 集合保存 | live 集合清空；`daily(D)` 清空；`daily(H)` 不动 |
+
+**通过标准**：步骤 1–8 全部预期成立即视为通过；任意一步失败需作为归因记录。
+
+### IT-LIVEPLANS-002：Backlog 多未复盘日隔离
+
+**场景**：构造 4 个连续 archive_date 全部 `review_status != 'reviewed'`，仅最新日同步 live，其他日编辑不动 live。
+
+**对应文件**：`tests/integration/backlog_isolation.py`
+
+**前置条件**：
+- migration 023 已 apply
+- `daily_review_archive` 内存在 `D-3, D-2, D-1, D` 四行，全部 unreviewed
+- live 已有至少 2 条 plan
+
+**步骤与预期**：
+
+| # | 步骤 | 预期 |
+|---|------|------|
+| 1 | 在 `D-2` 抽屉里改动 plan 并保存 | `daily(D-2)` 改变；`account_live_action_plans` 不变；前端列表行显示「历史草稿」徽标 |
+| 2 | 在 `D-1` 抽屉里改动 plan 并保存 | `daily(D-1)` 改变；live 仍不变 |
+| 3 | 在 `D`（最新）抽屉里改动 plan 并保存 | `daily(D)` 改变；live 同集合替换；其他日 daily 行不被触碰 |
+| 4 | `GET /api/reviews/D-2/bootstrap` 与 `GET /api/reviews/D/bootstrap` | 两者 `actionPlans` 各自反映本日数据；响应均含 `latestArchiveDate = D`，且无 `carryForward` 字段 |
+
+**通过标准**：步骤 1–4 预期全部成立；任意一步 live 被非最新日改动 → 视为失败。
+
+### IT-LIVEPLANS-003：Migration 023 种子在两种基线下的行为
+
+**场景**：验证 migration 023 在「存在 reviewed 日」与「不存在 reviewed 日」两种基线下种子结果正确，且重复执行幂等。
+
+**对应文件**：`tests/integration/migration_023_seed.py`
+
+**前置条件**：
+- 测试环境 D1 可执行 migration
+- 用例 A 基线：`daily_review_archive` 含至少一条 `review_status = 'reviewed'` 的日 `R`，且 `daily_review_action_plans(R)` 含若干行
+- 用例 B 基线：`daily_review_archive` 无任何 `review_status = 'reviewed'` 行
+
+**步骤与预期**：
+
+| # | 步骤 | 预期 |
+|---|------|------|
+| A1 | 在用例 A 基线下执行 migration 023 | `account_live_action_plans` 行数 = `daily_review_action_plans` 中 `archive_date = R` 的行数，字段一一对应（不含 archive_date）|
+| A2 | 再跑一次 migration 023 | 无新增行、无字段被覆盖（INSERT OR IGNORE 幂等）|
+| A3 | 检查老 archive 日 `daily_review_action_plans` 行 | 与 migration 前完全一致，未被触碰 |
+| B1 | 在用例 B 基线下执行 migration 023 | `account_live_action_plans` 为空；不报错 |
+| B2 | 在 B 基线下追加 reviewed 行后再次执行 migration | 因 IGNORE 语义，旧行不补种子（业务上用户应通过账户管理手动建立活态计划）|
+
+**通过标准**：A1–A3 与 B1–B2 全部预期成立。

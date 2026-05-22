@@ -170,6 +170,36 @@ async function handleApi(request, env, url, appEnv) {
       if (request.method === "PUT") return json(await updateInvestmentAccount(env, accountId, await request.json()), 200, request);
       if (request.method === "DELETE") return json(await deleteInvestmentAccount(env, accountId), 200, request);
     }
+    // ── Account-managed Live Action Plans ─────────────────────
+    if (url.pathname === "/api/account-live-action-plans/symbols" && request.method === "GET") {
+      return json(await getAccountLiveActionPlanSymbolCatalog(env), 200, request);
+    }
+    if (url.pathname === "/api/account-live-action-plans" && request.method === "GET") {
+      return json(await getAccountLiveActionPlansResponse(env), 200, request);
+    }
+    if (url.pathname === "/api/account-live-action-plans" && request.method === "POST") {
+      const body = await request.json();
+      return json(await createAccountLiveActionPlan(env, body), 200, request);
+    }
+    const liveActionPlanMatch = url.pathname.match(/^\/api\/account-live-action-plans\/(\d+)$/);
+    if (liveActionPlanMatch) {
+      const planId = Number(liveActionPlanMatch[1]);
+      if (request.method === "GET") {
+        const item = await getAccountLiveActionPlanById(env, planId);
+        if (!item) {
+          const error = new Error("活态操作计划不存在");
+          error.statusCode = 404;
+          throw error;
+        }
+        return json({ item }, 200, request);
+      }
+      if (request.method === "PUT") {
+        return json(await updateAccountLiveActionPlan(env, planId, await request.json()), 200, request);
+      }
+      if (request.method === "DELETE") {
+        return json(await deleteAccountLiveActionPlan(env, planId), 200, request);
+      }
+    }
     // ── Screening Keywords Management ─────────────────────────
     if (url.pathname === "/api/screening-keywords" && request.method === "GET") {
       return json(await getScreeningKeywords(env, url), 200, request);
@@ -876,13 +906,14 @@ async function getReviews(env, url) {
 
   if (usePagination) {
     const countQuery = `SELECT COUNT(*) AS cnt FROM daily_review_archive a ${whereClause}`;
-    const [countResult, dataResult] = await Promise.all([
+    const [countResult, dataResult, latestArchiveDate] = await Promise.all([
       env.DB.prepare(countQuery).bind(...params).first(),
       env.DB.prepare(dataQuery).bind(...params, limitVal, offset).all(),
+      getLatestArchiveDate(env),
     ]);
     const total = Number(countResult?.cnt || 0);
     const items = await buildReviewListItems(env, dataResult.results || []);
-    return { items, total, page, pageSize, totalPages: Math.ceil(total / pageSize) };
+    return { items, total, page, pageSize, totalPages: Math.ceil(total / pageSize), latestArchiveDate };
   }
 
   // 兼容模式
@@ -891,7 +922,7 @@ async function getReviews(env, url) {
   if (status) {
     items = items.filter((item) => item.review_status === status);
   }
-  return { items };
+  return { items, latestArchiveDate: await getLatestArchiveDate(env) };
 }
 
 async function buildReviewListItems(env, rows) {
@@ -1346,12 +1377,8 @@ async function getReviewBootstrap(env, archiveDate) {
     .bind(archiveDate)
     .first();
 
-  const currentActionPlans = await listReviewActionPlans(env, archiveDate);
+  const actionPlans = await listReviewActionPlans(env, archiveDate);
   const accountSnapshot = await getReviewAccountSnapshot(env, archiveDate);
-  const carryForwardActionPlans = previousCompletedReview
-    ? await listReviewActionPlans(env, previousCompletedReview.archive_date)
-    : [];
-  const actionPlans = currentActionPlans.length ? currentActionPlans : carryForwardActionPlans;
   const reviewStatus = normalizeReviewStatus(existingDraft?.review_status);
   const accountImpactSummary = reviewStatus === "reviewed"
     ? await buildAccountImpactSummaryForReview(env, archiveDate)
@@ -1377,8 +1404,11 @@ async function getReviewBootstrap(env, archiveDate) {
     bucket.push(item);
   }
 
+  const latestArchiveDate = await getLatestArchiveDate(env);
+
   return {
     archiveDate,
+    latestArchiveDate,
     investmentAccounts,
     newsWindow,
     // 兼容旧版：prices 同时提供扁平数组和分组对象
@@ -1391,7 +1421,6 @@ async function getReviewBootstrap(env, archiveDate) {
     accountSnapshot,
     accountImpactSummary,
     account_impact_summary: accountImpactSummary,
-    carryForward: previousCompletedReview,
     structuredNotes: {
       marketSentiment: marketNoteBlocks,
       sectorRotation: sectorNoteBlocks,
@@ -1493,6 +1522,10 @@ function normalizeActionPlanItem(item, sortOrder = 0) {
   const supportLevels = String(item.supportLevels || item.support_levels || "").trim();
   const resistanceLevels = String(item.resistanceLevels || item.resistance_levels || "").trim();
   const keyLevels = String(item.keyLevels || item.key_levels || "").trim();
+  const rawAmount = item.positionAmount ?? item.position_amount;
+  const positionAmount = rawAmount == null || rawAmount === ""
+    ? null
+    : (Number.isFinite(Number(rawAmount)) ? Number(rawAmount) : null);
   return {
     id: item.id == null ? null : Number(item.id),
     accountId: Number.isFinite(Number(item.accountId ?? item.account_id))
@@ -1508,6 +1541,7 @@ function normalizeActionPlanItem(item, sortOrder = 0) {
     resistanceLevels,
     keyLevels: keyLevels || formatSupportResistanceLevels(supportLevels, resistanceLevels),
     currentPosition: normalizeActionPlanPosition(item.currentPosition || item.current_position || defaultActionPlanPositionForAction(item.actionType || item.action_type)),
+    positionAmount,
     thinking: String(item.thinking || "").trim(),
     marketType: ["美股", "大A"].includes(item.marketType || item.market_type) ? (item.marketType || item.market_type) : "美股",
     sortOrder: Number.isFinite(Number(item.sortOrder ?? item.sort_order))
@@ -1541,6 +1575,7 @@ function dbActionPlanToApi(row) {
     resistanceLevels: row.resistance_levels || "",
     keyLevels: row.key_levels || formatSupportResistanceLevels(row.support_levels || "", row.resistance_levels || ""),
     currentPosition: row.current_position || DEFAULT_ACTION_PLAN_POSITION,
+    positionAmount: row.position_amount == null ? null : Number(row.position_amount),
     thinking: row.thinking || "",
     marketType: row.market_type || "美股",
     sortOrder: Number(row.sort_order || 0),
@@ -1985,6 +2020,15 @@ async function deleteInvestmentAccount(env, id) {
     error.statusCode = 409;
     throw error;
   }
+  const liveUsage = await env.DB.prepare(
+    `SELECT COUNT(*) AS count FROM account_live_action_plans WHERE account_id = ?`,
+  ).bind(id).first();
+  const liveCount = Number(liveUsage?.count || 0);
+  if (liveCount > 0) {
+    const error = new Error(`该账户已有 ${liveCount} 条活态操作计划引用，不能直接删除；请先在账户管理中删除或迁移这些活态计划。`);
+    error.statusCode = 409;
+    throw error;
+  }
   await env.DB.prepare(`DELETE FROM investment_accounts WHERE id = ?`).bind(id).run();
   return { ok: true, deletedId: id };
 }
@@ -2102,6 +2146,315 @@ async function updateLegacyAssetPlanSummaryIfPresent(env, archiveDate, actionPla
   ).bind(formatActionPlansMarkdownSummary(actionPlans), isoNow(), archiveDate).run();
 }
 
+async function getLatestArchiveDate(env) {
+  const row = await env.DB.prepare(
+    `SELECT MAX(archive_date) AS latest FROM daily_review_archive`,
+  ).first();
+  return row?.latest || null;
+}
+
+async function isLatestArchiveDate(env, archiveDate) {
+  if (!archiveDate) return false;
+  const latest = await getLatestArchiveDate(env);
+  return Boolean(latest) && latest === archiveDate;
+}
+
+function dbAccountLiveActionPlanToApi(row) {
+  return {
+    id: Number(row.id),
+    accountId: row.account_id == null ? null : Number(row.account_id),
+    accountName: row.account_name || "",
+    accountCurrency: row.account_currency || "",
+    accountSortOrder: Number(row.account_sort_order ?? 999),
+    accountEnabled: row.account_enabled == null ? 1 : Number(row.account_enabled),
+    symbol: row.symbol,
+    actionType: row.action_type || DEFAULT_ACTION_PLAN_ACTION,
+    entryPlan: row.entry_plan || "",
+    takeProfitPlan: row.take_profit_plan || "",
+    stopLossPlan: row.stop_loss_plan || "",
+    supportLevels: row.support_levels || "",
+    resistanceLevels: row.resistance_levels || "",
+    keyLevels: row.key_levels || formatSupportResistanceLevels(row.support_levels || "", row.resistance_levels || ""),
+    currentPosition: row.current_position || DEFAULT_ACTION_PLAN_POSITION,
+    positionAmount: row.position_amount == null ? null : Number(row.position_amount),
+    thinking: row.thinking || "",
+    marketType: row.market_type || "美股",
+    sortOrder: Number(row.sort_order || 0),
+    createdAt: row.created_at || null,
+    updatedAt: row.updated_at || null,
+  };
+}
+
+async function listAccountLiveActionPlans(env) {
+  const rows = await env.DB.prepare(
+    `SELECT p.*, a.name AS account_name, a.currency AS account_currency,
+        a.sort_order AS account_sort_order, a.enabled AS account_enabled
+     FROM account_live_action_plans p
+     LEFT JOIN investment_accounts a ON a.id = p.account_id
+     ORDER BY COALESCE(a.sort_order, 999) ASC, COALESCE(a.id, 999999) ASC,
+              p.sort_order ASC, p.id ASC`,
+  ).all();
+  return (rows.results || []).map(dbAccountLiveActionPlanToApi);
+}
+
+async function getAccountLiveActionPlanById(env, id) {
+  const row = await env.DB.prepare(
+    `SELECT p.*, a.name AS account_name, a.currency AS account_currency,
+        a.sort_order AS account_sort_order, a.enabled AS account_enabled
+     FROM account_live_action_plans p
+     LEFT JOIN investment_accounts a ON a.id = p.account_id
+     WHERE p.id = ? LIMIT 1`,
+  ).bind(id).first();
+  if (!row) return null;
+  return dbAccountLiveActionPlanToApi(row);
+}
+
+async function assertAccountExistsForLivePlan(env, accountId) {
+  const row = await env.DB.prepare(
+    `SELECT id, enabled FROM investment_accounts WHERE id = ? LIMIT 1`,
+  ).bind(accountId).first();
+  if (!row) {
+    const error = new Error(`账户不存在：accountId=${accountId}`);
+    error.statusCode = 400;
+    throw error;
+  }
+  return row;
+}
+
+async function syncLatestDailyFromLive(env) {
+  const latest = await getLatestArchiveDate(env);
+  if (!latest) return;
+  const livePlans = await listAccountLiveActionPlans(env);
+  await replaceReviewActionPlans(env, latest, livePlans);
+}
+
+async function createAccountLiveActionPlan(env, body = {}) {
+  const accountId = Number(body.accountId ?? body.account_id);
+  if (!Number.isFinite(accountId) || accountId <= 0) {
+    const error = new Error("accountId 必填且必须是正整数");
+    error.statusCode = 400;
+    throw error;
+  }
+  await assertAccountExistsForLivePlan(env, accountId);
+  const normalized = normalizeActionPlanItem({ ...body, accountId });
+  if (!normalized) {
+    const error = new Error("symbol 不能为空");
+    error.statusCode = 400;
+    throw error;
+  }
+  const duplicate = await env.DB.prepare(
+    `SELECT id FROM account_live_action_plans WHERE account_id = ? AND symbol = ? LIMIT 1`,
+  ).bind(accountId, normalized.symbol).first();
+  if (duplicate) {
+    const error = new Error(`该账户已存在 ${normalized.symbol} 的活态计划`);
+    error.statusCode = 409;
+    throw error;
+  }
+  const now = isoNow();
+  const result = await env.DB.prepare(
+    `INSERT INTO account_live_action_plans (
+      account_id, symbol, action_type, entry_plan, take_profit_plan,
+      stop_loss_plan, key_levels, support_levels, resistance_levels,
+      current_position, position_amount, thinking, sort_order, market_type, created_at, updated_at
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+  ).bind(
+    accountId,
+    normalized.symbol,
+    normalized.actionType,
+    normalized.entryPlan,
+    normalized.takeProfitPlan,
+    normalized.stopLossPlan,
+    normalized.keyLevels,
+    normalized.supportLevels,
+    normalized.resistanceLevels,
+    normalized.currentPosition,
+    normalized.positionAmount,
+    normalized.thinking,
+    normalized.sortOrder,
+    normalized.marketType,
+    now,
+    now,
+  ).run();
+  await syncLatestDailyFromLive(env);
+  const item = await getAccountLiveActionPlanById(env, result.meta.last_row_id);
+  return { item };
+}
+
+async function updateAccountLiveActionPlan(env, id, body = {}) {
+  const existing = await env.DB.prepare(
+    `SELECT * FROM account_live_action_plans WHERE id = ? LIMIT 1`,
+  ).bind(id).first();
+  if (!existing) {
+    const error = new Error("活态操作计划不存在");
+    error.statusCode = 404;
+    throw error;
+  }
+  const accountId = Number(body.accountId ?? body.account_id ?? existing.account_id);
+  if (!Number.isFinite(accountId) || accountId <= 0) {
+    const error = new Error("accountId 必须是正整数");
+    error.statusCode = 400;
+    throw error;
+  }
+  if (accountId !== Number(existing.account_id)) {
+    await assertAccountExistsForLivePlan(env, accountId);
+  }
+  const merged = {
+    accountId,
+    symbol: body.symbol ?? existing.symbol,
+    actionType: body.actionType ?? body.action_type ?? existing.action_type,
+    entryPlan: body.entryPlan ?? body.entry_plan ?? existing.entry_plan,
+    takeProfitPlan: body.takeProfitPlan ?? body.take_profit_plan ?? existing.take_profit_plan,
+    stopLossPlan: body.stopLossPlan ?? body.stop_loss_plan ?? existing.stop_loss_plan,
+    keyLevels: body.keyLevels ?? body.key_levels ?? existing.key_levels,
+    supportLevels: body.supportLevels ?? body.support_levels ?? existing.support_levels,
+    resistanceLevels: body.resistanceLevels ?? body.resistance_levels ?? existing.resistance_levels,
+    currentPosition: body.currentPosition ?? body.current_position ?? existing.current_position,
+    positionAmount: body.positionAmount ?? body.position_amount ?? existing.position_amount,
+    thinking: body.thinking ?? existing.thinking,
+    marketType: body.marketType ?? body.market_type ?? existing.market_type,
+    sortOrder: body.sortOrder ?? body.sort_order ?? existing.sort_order,
+  };
+  const normalized = normalizeActionPlanItem(merged, Number(existing.sort_order || 0));
+  if (!normalized) {
+    const error = new Error("symbol 不能为空");
+    error.statusCode = 400;
+    throw error;
+  }
+  if (
+    Number(existing.account_id) !== accountId ||
+    String(existing.symbol) !== normalized.symbol
+  ) {
+    const duplicate = await env.DB.prepare(
+      `SELECT id FROM account_live_action_plans
+       WHERE account_id = ? AND symbol = ? AND id != ? LIMIT 1`,
+    ).bind(accountId, normalized.symbol, id).first();
+    if (duplicate) {
+      const error = new Error(`该账户已存在 ${normalized.symbol} 的活态计划`);
+      error.statusCode = 409;
+      throw error;
+    }
+  }
+  const now = isoNow();
+  await env.DB.prepare(
+    `UPDATE account_live_action_plans SET
+       account_id = ?, symbol = ?, action_type = ?, entry_plan = ?,
+       take_profit_plan = ?, stop_loss_plan = ?, key_levels = ?,
+       support_levels = ?, resistance_levels = ?, current_position = ?,
+       position_amount = ?, thinking = ?, sort_order = ?, market_type = ?, updated_at = ?
+     WHERE id = ?`,
+  ).bind(
+    accountId,
+    normalized.symbol,
+    normalized.actionType,
+    normalized.entryPlan,
+    normalized.takeProfitPlan,
+    normalized.stopLossPlan,
+    normalized.keyLevels,
+    normalized.supportLevels,
+    normalized.resistanceLevels,
+    normalized.currentPosition,
+    normalized.positionAmount,
+    normalized.thinking,
+    normalized.sortOrder,
+    normalized.marketType,
+    now,
+    id,
+  ).run();
+  await syncLatestDailyFromLive(env);
+  const item = await getAccountLiveActionPlanById(env, id);
+  return { item };
+}
+
+async function deleteAccountLiveActionPlan(env, id) {
+  const existing = await env.DB.prepare(
+    `SELECT id FROM account_live_action_plans WHERE id = ? LIMIT 1`,
+  ).bind(id).first();
+  if (!existing) {
+    const error = new Error("活态操作计划不存在");
+    error.statusCode = 404;
+    throw error;
+  }
+  await env.DB.prepare(`DELETE FROM account_live_action_plans WHERE id = ?`).bind(id).run();
+  await syncLatestDailyFromLive(env);
+  return { ok: true, deletedId: id };
+}
+
+async function replaceAccountLiveActionPlans(env, actionPlans) {
+  const normalizedInput = (Array.isArray(actionPlans) ? actionPlans : [])
+    .map((plan, idx) => normalizeActionPlanItem(plan, idx))
+    .filter(Boolean)
+    .filter((plan) => Number.isFinite(Number(plan.accountId)) && Number(plan.accountId) > 0);
+  const seen = new Set();
+  const normalized = [];
+  for (const plan of normalizedInput) {
+    const key = `${plan.accountId}::${plan.symbol}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    normalized.push({ ...plan, sortOrder: normalized.length });
+  }
+  const now = isoNow();
+  for (const plan of normalized) {
+    await env.DB.prepare(
+      `INSERT INTO account_live_action_plans (
+        account_id, symbol, action_type, entry_plan, take_profit_plan,
+        stop_loss_plan, key_levels, support_levels, resistance_levels,
+        current_position, position_amount, thinking, sort_order, market_type, created_at, updated_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ON CONFLICT(account_id, symbol) DO UPDATE SET
+        action_type = excluded.action_type,
+        entry_plan = excluded.entry_plan,
+        take_profit_plan = excluded.take_profit_plan,
+        stop_loss_plan = excluded.stop_loss_plan,
+        key_levels = excluded.key_levels,
+        support_levels = excluded.support_levels,
+        resistance_levels = excluded.resistance_levels,
+        current_position = excluded.current_position,
+        position_amount = excluded.position_amount,
+        thinking = excluded.thinking,
+        market_type = excluded.market_type,
+        sort_order = excluded.sort_order,
+        updated_at = excluded.updated_at`,
+    ).bind(
+      plan.accountId,
+      plan.symbol,
+      plan.actionType,
+      plan.entryPlan,
+      plan.takeProfitPlan,
+      plan.stopLossPlan,
+      plan.keyLevels,
+      plan.supportLevels,
+      plan.resistanceLevels,
+      plan.currentPosition,
+      plan.positionAmount,
+      plan.thinking,
+      plan.sortOrder,
+      plan.marketType,
+      now,
+      now,
+    ).run();
+  }
+  if (normalized.length) {
+    const conditions = normalized.map(() => "(account_id = ? AND symbol = ?)").join(" OR ");
+    const values = normalized.flatMap((plan) => [plan.accountId, plan.symbol]);
+    await env.DB.prepare(
+      `DELETE FROM account_live_action_plans WHERE NOT (${conditions})`,
+    ).bind(...values).run();
+  } else {
+    await env.DB.prepare(`DELETE FROM account_live_action_plans`).run();
+  }
+  return normalized;
+}
+
+async function getAccountLiveActionPlansResponse(env) {
+  const items = await listAccountLiveActionPlans(env);
+  return { items, total: items.length };
+}
+
+async function getAccountLiveActionPlanSymbolCatalog(env) {
+  const latest = await getLatestArchiveDate(env);
+  return getActionPlanSymbolCatalog(env, latest || new Date().toISOString().slice(0, 10));
+}
+
 async function replaceReviewActionPlans(env, archiveDate, actionPlans) {
   const normalized = await resolveActionPlanAccountsForSave(env, normalizeActionPlansForSave(actionPlans));
   const now = isoNow();
@@ -2110,8 +2463,8 @@ async function replaceReviewActionPlans(env, archiveDate, actionPlans) {
       `INSERT INTO daily_review_action_plans (
         archive_date, account_id, symbol, action_type, entry_plan, take_profit_plan,
         stop_loss_plan, key_levels, support_levels, resistance_levels,
-        current_position, thinking, market_type, sort_order, created_at, updated_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        current_position, position_amount, thinking, market_type, sort_order, created_at, updated_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       ON CONFLICT(archive_date, account_id, symbol) DO UPDATE SET
         action_type = excluded.action_type,
         entry_plan = excluded.entry_plan,
@@ -2121,6 +2474,7 @@ async function replaceReviewActionPlans(env, archiveDate, actionPlans) {
         support_levels = excluded.support_levels,
         resistance_levels = excluded.resistance_levels,
         current_position = excluded.current_position,
+        position_amount = excluded.position_amount,
         thinking = excluded.thinking,
         market_type = excluded.market_type,
         sort_order = excluded.sort_order,
@@ -2138,6 +2492,7 @@ async function replaceReviewActionPlans(env, archiveDate, actionPlans) {
         plan.supportLevels,
         plan.resistanceLevels,
         plan.currentPosition,
+        plan.positionAmount,
         plan.thinking,
         plan.marketType,
         plan.sortOrder,
@@ -2283,8 +2638,13 @@ async function saveReviewDraft(env, archiveDate, body) {
     )
     .run();
 
+  let syncedToLive = false;
   if (hasStructuredActionPlans) {
-    await replaceReviewActionPlans(env, archiveDate, resolvedActionPlans);
+    const normalizedFromDaily = await replaceReviewActionPlans(env, archiveDate, resolvedActionPlans);
+    if (await isLatestArchiveDate(env, archiveDate)) {
+      await replaceAccountLiveActionPlans(env, normalizedFromDaily);
+      syncedToLive = true;
+    }
   }
 
   return {
@@ -2294,6 +2654,7 @@ async function saveReviewDraft(env, archiveDate, body) {
     actionPlanCount: resolvedActionPlans.length,
     marketSentimentBlocks: marketBlocks || [],
     sectorRotationBlocks: sectorBlocks || [],
+    syncedToLive,
   };
 }
 
@@ -2494,7 +2855,70 @@ async function initializeReview(env, archiveDate) {
     .bind(newsWindow.start, newsWindow.end)
     .run();
 
-  return { ok: true, archiveDate, reviewStatus: "initialized" };
+  const copyOutcome = await copyLiveActionPlansToDailyIfEmpty(env, archiveDate);
+
+  return {
+    ok: true,
+    archiveDate,
+    reviewStatus: "initialized",
+    liveCopied: copyOutcome.copied,
+    liveSkippedSymbols: copyOutcome.skipped,
+  };
+}
+
+async function copyLiveActionPlansToDailyIfEmpty(env, archiveDate) {
+  const existingPlans = await env.DB.prepare(
+    `SELECT COUNT(*) AS n FROM daily_review_action_plans WHERE archive_date = ?`,
+  ).bind(archiveDate).first();
+  if (Number(existingPlans?.n || 0) > 0) {
+    return { copied: 0, skipped: [] };
+  }
+  const livePlans = await listAccountLiveActionPlans(env);
+  if (!livePlans.length) {
+    return { copied: 0, skipped: [] };
+  }
+  const trackedResult = await env.DB.prepare(
+    `SELECT symbol FROM tracked_symbols WHERE is_active = 1`,
+  ).all();
+  const trackedSet = new Set((trackedResult.results || []).map((row) => row.symbol));
+  const now = isoNow();
+  const skipped = [];
+  let copied = 0;
+  for (const plan of livePlans) {
+    if (!trackedSet.has(plan.symbol)) {
+      skipped.push(plan.symbol);
+      console.warn(`[initializeReview] skip untracked live plan: account=${plan.accountId} symbol=${plan.symbol}`);
+      continue;
+    }
+    await env.DB.prepare(
+      `INSERT INTO daily_review_action_plans (
+        archive_date, account_id, symbol, action_type, entry_plan,
+        take_profit_plan, stop_loss_plan, key_levels, support_levels,
+        resistance_levels, current_position, position_amount, thinking, sort_order,
+        market_type, created_at, updated_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    ).bind(
+      archiveDate,
+      plan.accountId,
+      plan.symbol,
+      plan.actionType,
+      plan.entryPlan,
+      plan.takeProfitPlan,
+      plan.stopLossPlan,
+      plan.keyLevels,
+      plan.supportLevels,
+      plan.resistanceLevels,
+      plan.currentPosition,
+      plan.positionAmount,
+      plan.thinking,
+      plan.sortOrder,
+      plan.marketType,
+      now,
+      now,
+    ).run();
+    copied += 1;
+  }
+  return { copied, skipped };
 }
 
 async function createReviewSnapshots(env, archiveDate, body = {}) {

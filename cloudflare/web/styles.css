@@ -1250,6 +1250,19 @@ textarea {
   font-size: 0.8rem;
 }
 
+.review-row-badge {
+  display: inline-flex;
+  align-items: center;
+  min-height: 24px;
+  padding: 3px 8px;
+  border-radius: 999px;
+  border: 1px solid rgba(100, 116, 139, 0.16);
+  background: rgba(248, 250, 252, 0.9);
+  color: #64748b;
+  font-size: 0.72rem;
+  font-weight: 800;
+}
+
 .review-table {
   width: 100%;
   border-collapse: collapse;
@@ -1337,8 +1350,16 @@ textarea {
 }
 
 .review-date-cell small {
+  display: inline-flex;
+  width: fit-content;
   margin-top: 4px;
   color: #94a3b8;
+}
+
+.review-date-cell.is-pending small {
+  padding: 2px 7px;
+  border-radius: 999px;
+  background: rgba(241, 245, 249, 0.9);
 }
 
 .review-account-impact {
@@ -2469,6 +2490,154 @@ textarea[name="reviewerNewsNotes"] {
   max-width: 100%;
 }
 
+.accounts-summary {
+  margin: 4px 0 14px;
+  font-size: 0.86rem;
+  line-height: 1.5;
+}
+
+.accounts-panel .accounts-list {
+  margin-top: 0;
+}
+
+.account-plan-count-chip {
+  display: inline-flex;
+  align-items: center;
+  margin-left: 8px;
+  padding: 2px 10px;
+  border-radius: 999px;
+  background: rgba(15, 23, 42, 0.06);
+  color: var(--muted);
+  font-size: 0.78rem;
+  font-weight: 500;
+  letter-spacing: 0.02em;
+}
+
+.account-plan-count-chip[data-count="0"] {
+  color: var(--muted);
+  background: rgba(15, 23, 42, 0.04);
+}
+
+.account-card .account-card-broker {
+  display: block;
+  font-size: 0.82rem;
+  color: var(--muted);
+  margin-top: 2px;
+}
+
+.action-plan-account-tools {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-left: auto;
+  padding-left: 10px;
+  border-left: 1px solid rgba(15, 23, 42, 0.12);
+}
+
+.account-edit-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin-left: 8px;
+  padding: 0 8px;
+  height: 24px;
+  border-radius: 8px;
+  border: 1px solid transparent;
+  background: transparent;
+  color: #475569;
+  cursor: pointer;
+  font-size: 0.78rem;
+  vertical-align: middle;
+  transition: background 0.12s ease, color 0.12s ease, border-color 0.12s ease;
+}
+
+.account-edit-btn:hover {
+  background: rgba(15, 23, 42, 0.06);
+  color: #0f172a;
+  border-color: rgba(15, 23, 42, 0.08);
+}
+
+.account-edit-btn:focus-visible {
+  outline: 2px solid rgba(99, 102, 241, 0.6);
+  outline-offset: 2px;
+}
+
+.account-edit-btn svg {
+  width: 13px;
+  height: 13px;
+  display: block;
+}
+
+.account-form-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-top: 4px;
+}
+
+.account-form-actions-primary {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+#accountFormDeleteBtn {
+  margin-left: auto;
+}
+
+.account-form-modal {
+  position: fixed;
+  inset: 0;
+  z-index: 36;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+}
+
+.account-form-modal.hidden {
+  display: none;
+}
+
+.account-form-backdrop {
+  position: absolute;
+  inset: 0;
+  background: rgba(15, 23, 42, 0.32);
+  backdrop-filter: blur(5px);
+}
+
+.account-form-panel {
+  position: relative;
+  z-index: 1;
+  width: min(720px, calc(100vw - 48px));
+  max-height: calc(100vh - 48px);
+  overflow: auto;
+  padding: 22px;
+  border-radius: 20px;
+  border: 1px solid rgba(15, 23, 42, 0.1);
+  background: rgba(255, 255, 255, 0.98);
+  box-shadow: 0 24px 70px rgba(15, 23, 42, 0.22);
+  display: grid;
+  gap: 16px;
+}
+
+.account-form-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 14px;
+}
+
+.account-form-head h3 {
+  margin: 0;
+  font-size: 1.1rem;
+}
+
+.account-form-head .muted {
+  margin: 4px 0 0;
+  font-size: 0.84rem;
+}
+
 .action-plan-group + .action-plan-group {
   margin-top: 0;
 }
@@ -2495,7 +2664,10 @@ textarea[name="reviewerNewsNotes"] {
 }
 
 .action-plan-group-label {
-  display: block;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
   font-size: 1rem;
   font-weight: 900;
   letter-spacing: 0;
@@ -2715,6 +2887,13 @@ textarea[name="reviewerNewsNotes"] {
   line-height: 1.25;
 }
 
+.action-plan-inline-edit {
+  min-height: 24px;
+  padding: 3px 9px;
+  font-size: 0.72rem;
+  box-shadow: none;
+}
+
 .action-plan-status-pill {
   gap: 5px;
   min-height: auto;
@@ -2794,7 +2973,7 @@ textarea[name="reviewerNewsNotes"] {
   z-index: 1;
   display: grid;
   gap: 14px;
-  width: min(980px, calc(100vw - 48px));
+  width: min(1120px, calc(100vw - 48px));
   max-height: calc(100vh - 48px);
   overflow: auto;
   padding: 18px;
@@ -2926,7 +3105,8 @@ textarea[name="reviewerNewsNotes"] {
 .action-plan-editor label.compact-symbol,
 .action-plan-editor label.compact-account,
 .action-plan-editor label.compact-action,
-.action-plan-editor label.compact-position {
+.action-plan-editor label.compact-position,
+.action-plan-editor label.compact-position-amount {
   justify-self: start;
 }
 
@@ -2951,6 +3131,26 @@ textarea[name="reviewerNewsNotes"] {
 
 .action-plan-editor label.compact-position select {
   width: 112px;
+}
+
+.action-plan-editor label.compact-position-amount {
+  min-width: 220px;
+}
+
+.action-plan-editor label.compact-position-amount input {
+  width: 200px;
+}
+
+.action-plan-editor label.compact-position-amount .field-title-row {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.action-plan-editor label.compact-position-amount .field-title-row small {
+  font-size: 0.72rem;
+  color: var(--muted);
 }
 
 .action-plan-editor input,

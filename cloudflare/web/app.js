@@ -101,13 +101,17 @@ const state = {
     sectorRotation: [],
   },
   actionPlans: [],
+  accountLiveActionPlans: [],
   investmentAccounts: [],
   selectedActionPlanIndex: -1,
   actionPlanSymbolCatalog: [],
+  latestArchiveDate: null,
+  actionPlanEditorMode: "review-latest",
   dailyInsight: null,
   homepageInsightSections: [],
   symbolsLoaded: false,
   accountsLoaded: false,
+  accountLivePlansLoaded: false,
   keywordsLoaded: false,
   activeKeywordType: "macro",
   readmeLoaded: false,
@@ -123,6 +127,108 @@ const ACTION_PLAN_POSITIONS = ["0%", "0-5%", "5%-10%", "10%-15%", "15%-20%", "20
 const DEFAULT_ACTION_PLAN_ACTION = "持仓观察";
 const DEFAULT_ACTION_PLAN_POSITION = "0-5%";
 const ZERO_POSITION_ACTIONS = new Set(["准备开仓", "已清仓复盘"]);
+
+function pickActionPlanEditorMode(archiveDate, latestArchiveDate) {
+  if (!archiveDate) return "live";
+  if (!latestArchiveDate) return "review-latest";
+  return archiveDate === latestArchiveDate ? "review-latest" : "review-historical";
+}
+
+function applyActionPlanEditorModeHint(labelEl, mode, archiveDate) {
+  if (!labelEl) return;
+  if (mode === "review-historical") {
+    labelEl.textContent = `历史草稿（仅修改 ${archiveDate} 当日数据，不同步账户管理）`;
+    labelEl.style.display = "";
+    labelEl.classList.add("historical-draft-hint");
+  } else if (mode === "review-latest") {
+    labelEl.textContent = "此编辑会同步到账户管理";
+    labelEl.style.display = "";
+    labelEl.classList.remove("historical-draft-hint");
+  } else {
+    labelEl.textContent = "";
+    labelEl.style.display = "none";
+    labelEl.classList.remove("historical-draft-hint");
+  }
+}
+
+let activeActionPlanEditorContext = null;
+
+function mountActionPlanEditor(rootEl, context = {}) {
+  const ctx = {
+    mode: context.mode || "review-latest",
+    plans: Array.isArray(context.plans) ? context.plans : [],
+    symbolCatalog: Array.isArray(context.symbolCatalog) ? context.symbolCatalog : [],
+    accounts: Array.isArray(context.accounts) ? context.accounts : [],
+    archiveDate: context.archiveDate || null,
+    callbacks: {
+      onSave: typeof context.callbacks?.onSave === "function" ? context.callbacks.onSave : null,
+      onDelete: typeof context.callbacks?.onDelete === "function" ? context.callbacks.onDelete : null,
+      onReorder: typeof context.callbacks?.onReorder === "function" ? context.callbacks.onReorder : null,
+      onLocalChange: typeof context.callbacks?.onLocalChange === "function" ? context.callbacks.onLocalChange : null,
+    },
+    ui: {
+      showSyncHint: Boolean(context.ui?.showSyncHint),
+      historicalDraftHint: Boolean(context.ui?.historicalDraftHint),
+    },
+    rootEl: rootEl || null,
+  };
+  activeActionPlanEditorContext = ctx;
+  if (state.activeActionPlanEditor?.destroy && state.activeActionPlanEditor.context !== ctx) {
+    state.activeActionPlanEditor.destroy();
+  }
+  state.actionPlanEditorMode = ctx.mode;
+  state.actionPlans = ctx.plans.slice();
+  state.selectedActionPlanIndex = state.actionPlans.length ? 0 : -1;
+  state.actionPlanSymbolCatalog = ctx.symbolCatalog.slice();
+  if (ctx.accounts.length) {
+    state.investmentAccounts = ctx.accounts.slice();
+  }
+  renderActionPlans();
+  applyActionPlanEditorModeHint(carryForwardLabel, ctx.mode, ctx.archiveDate);
+
+  return {
+    refresh(nextPlans) {
+      if (Array.isArray(nextPlans)) {
+        ctx.plans = nextPlans;
+        state.actionPlans = nextPlans.slice();
+        if (state.selectedActionPlanIndex >= state.actionPlans.length) {
+          state.selectedActionPlanIndex = state.actionPlans.length ? 0 : -1;
+        }
+      }
+      renderActionPlans();
+    },
+    destroy() {
+      closeActionPlanDetail();
+      if (activeActionPlanEditorContext === ctx) {
+        activeActionPlanEditorContext = null;
+      }
+    },
+    get context() {
+      return ctx;
+    },
+  };
+}
+
+function getActiveActionPlanEditorContext() {
+  return activeActionPlanEditorContext;
+}
+
+function getActionPlanRenderRoot() {
+  return activeActionPlanEditorContext?.rootEl || actionPlanAccountGroups;
+}
+
+function isLiveActionPlanMode() {
+  return activeActionPlanEditorContext?.mode === "live";
+}
+
+function isActionPlanEditorReadOnly() {
+  return !isLiveActionPlanMode() && state.reviewStatus === "reviewed" && !state.editMode;
+}
+
+function notifyActionPlanLocalChange() {
+  const ctx = getActiveActionPlanEditorContext();
+  if (ctx?.callbacks?.onLocalChange) ctx.callbacks.onLocalChange(state.actionPlans.slice());
+}
 
 const REVIEW_STEPS = [
   { key: "news", label: "新闻总结", field: "reviewerNewsNotes", optional: false, hint: "先看 AI 日总结和重点新闻，再写下你自己的主线判断与点评。" },
@@ -287,6 +393,24 @@ const prevStepBtn = document.querySelector("#prevStepBtn");
 const nextStepBtn = document.querySelector("#nextStepBtn");
 const reviewModalFooter = document.querySelector(".review-modal-footer");
 const actionPlanAccountGroups = document.querySelector("#actionPlanAccountGroups");
+const accountLivePlans = document.querySelector("#accountLivePlans");
+const accountsSummary = document.querySelector("#accountsSummary");
+const accountFormModal = document.querySelector("#accountFormModal");
+const accountFormBody = document.querySelector("#accountFormBody");
+const accountFormTitle = document.querySelector("#accountFormTitle");
+const accountFormBackdrop = document.querySelector("#accountFormBackdrop");
+const closeAccountFormBtn = document.querySelector("#closeAccountFormBtn");
+
+function closeAccountForm() {
+  if (accountFormModal) accountFormModal.classList.add("hidden");
+}
+accountFormBackdrop?.addEventListener("click", closeAccountForm);
+closeAccountFormBtn?.addEventListener("click", closeAccountForm);
+document.addEventListener("keydown", (e) => {
+  if (e.key === "Escape" && accountFormModal && !accountFormModal.classList.contains("hidden")) {
+    closeAccountForm();
+  }
+});
 const actionPlanDetailModal = document.querySelector("#actionPlanDetailModal");
 const actionPlanDetailBackdrop = document.querySelector("#actionPlanDetailBackdrop");
 const actionPlanDetailTitle = document.querySelector("#actionPlanDetailTitle");
@@ -302,6 +426,8 @@ const actionPlanAccountSelect = document.querySelector("#actionPlanAccountSelect
 const actionPlanMetrics = document.querySelector("#actionPlanMetrics");
 const actionPlanActionSelect = document.querySelector("#actionPlanActionSelect");
 const actionPlanPositionSelect = document.querySelector("#actionPlanPositionSelect");
+const actionPlanPositionAmountInput = document.querySelector("#actionPlanPositionAmountInput");
+const actionPlanAccountTotalHint = document.querySelector("#actionPlanAccountTotalHint");
 const actionPlanSupportLevelsInput = document.querySelector("#actionPlanSupportLevelsInput");
 const actionPlanResistanceLevelsInput = document.querySelector("#actionPlanResistanceLevelsInput");
 const actionPlanEntryInput = document.querySelector("#actionPlanEntryInput");
@@ -350,12 +476,29 @@ cancelActionPlanDetailBtn?.addEventListener("click", () => closeActionPlanDetail
 actionPlanDetailBackdrop?.addEventListener("click", () => closeActionPlanDetail());
 saveActionPlanDetailBtn?.addEventListener("click", () => saveActionPlanDetailAndClose());
 actionPlanActionSelect?.addEventListener("change", syncZeroPositionForAction);
-actionPlanAccountSelect?.addEventListener("change", updateActionPlanDetailHeading);
+actionPlanAccountSelect?.addEventListener("change", () => {
+  updateActionPlanDetailHeading();
+  updateActionPlanAccountTotalHint();
+  syncPositionBucketFromAmount();
+});
 actionPlanSymbolSelect?.addEventListener("change", () => {
   if (actionPlanSymbolInput) actionPlanSymbolInput.value = actionPlanSymbolSelect.value;
   updateActionPlanDetailHeading();
   renderActionPlanMetrics(actionPlanSymbolSelect.value);
 });
+actionPlanPositionAmountInput?.addEventListener("input", syncPositionBucketFromAmount);
+
+function syncPositionBucketFromAmount() {
+  if (!actionPlanPositionAmountInput || !actionPlanPositionSelect) return;
+  const raw = actionPlanPositionAmountInput.value;
+  if (raw === "" || raw == null) return;
+  const accountId = Number(actionPlanAccountSelect?.value || 0);
+  const account = findAccountById(accountId);
+  const bucket = mapAmountToPositionBucket(raw, account?.totalAssets);
+  if (!bucket) return;
+  if (ZERO_POSITION_ACTIONS.has(actionPlanActionSelect?.value)) return;
+  actionPlanPositionSelect.value = bucket;
+}
 
 [
   actionPlanEntryInput,
@@ -448,7 +591,10 @@ function switchView(view) {
   if (keywordsView) keywordsView.classList.toggle("active", view === "keywords");
   if (readmeView) readmeView.classList.toggle("active", view === "readme");
   if (view === "symbols" && !state.symbolsLoaded) loadSymbols();
-  if (view === "accounts" && !state.accountsLoaded) loadAccounts();
+  if (view === "accounts") {
+    if (state.accountsLoaded) renderAccountLiveActionPlans();
+    else loadAccounts();
+  }
   if (view === "keywords" && !state.keywordsLoaded) loadKeywords();
   if (view === "readme" && !state.readmeLoaded) renderReadme();
 }
@@ -706,6 +852,7 @@ async function loadReviews(formData = null, resetPage = false) {
   const query = `?${params.toString()}`;
   try {
     const data = await fetchJson(`/api/reviews${query}`);
+    state.latestArchiveDate = data.latestArchiveDate || state.latestArchiveDate || null;
     reviewsList.innerHTML = "";
     if (!data.items.length) {
       reviewsList.innerHTML = `<tr><td colspan="4" class="table-empty">还没有复盘记录</td></tr>`;
@@ -751,8 +898,9 @@ async function openReviewDrawer(archiveDate, options = {}) {
   archiveDateLabel.textContent = `${archiveDate} · 美股交易日`;
   document.querySelector("#priceSnapshotLabel").textContent = `${archiveDate} 核心标的与指数`;
   drawerSubtitle.textContent = `${cycle.beijingLabel} ｜ 新闻窗口（北京时间） ${formatNewsWindowBoundaryBeijing(data.newsWindow.start)} → ${formatNewsWindowBoundaryBeijing(data.newsWindow.end)}`;
-  carryForwardLabel.textContent = "";
-  carryForwardLabel.style.display = "none";
+  state.latestArchiveDate = data.latestArchiveDate || null;
+  state.actionPlanEditorMode = pickActionPlanEditorMode(archiveDate, state.latestArchiveDate);
+  applyActionPlanEditorModeHint(carryForwardLabel, state.actionPlanEditorMode, archiveDate);
 
   const reviewStatus = data.draft?.review_status || "initialized";
   state.editMode = editPlan || reviewStatus !== "reviewed";
@@ -776,8 +924,6 @@ async function openReviewDrawer(archiveDate, options = {}) {
   }
   renderAnalysis(effectiveAnalysis, data.news);
   renderNewsPicker(data.news);
-  state.actionPlans = normalizeActionPlans(data.actionPlans || []);
-  state.selectedActionPlanIndex = state.actionPlans.length ? 0 : -1;
   state.accountImpactSummary = normalizeAccountImpactSummary(data.accountImpactSummary || data.account_impact_summary || []);
   state.reviewNoteBlocks = {
     marketSentiment: resolveBootstrapNoteBlocks(data, "marketSentiment"),
@@ -789,7 +935,22 @@ async function openReviewDrawer(archiveDate, options = {}) {
     tradingSummary: data.draft?.trading_summary || "",
   });
   renderStructuredNoteEditors();
-  renderActionPlans();
+  state.activeActionPlanEditor = mountActionPlanEditor(actionPlanAccountGroups, {
+    mode: state.actionPlanEditorMode,
+    plans: normalizeActionPlans(data.actionPlans || []),
+    symbolCatalog: state.actionPlanSymbolCatalog,
+    accounts: state.investmentAccounts,
+    archiveDate,
+    callbacks: {
+      onLocalChange: (plans) => {
+        state.actionPlans = plans;
+      },
+    },
+    ui: {
+      showSyncHint: state.actionPlanEditorMode === "review-latest",
+      historicalDraftHint: state.actionPlanEditorMode === "review-historical",
+    },
+  });
   if (state.editMode) scheduleAccountImpactPreview(0);
 
   initMdTabs();
@@ -802,7 +963,12 @@ async function openReviewDrawer(archiveDate, options = {}) {
 }
 
 function closeDrawer() {
-  closeActionPlanDetail();
+  if (state.activeActionPlanEditor?.destroy) {
+    state.activeActionPlanEditor.destroy();
+    state.activeActionPlanEditor = null;
+  } else {
+    closeActionPlanDetail();
+  }
   reviewDrawer.classList.add("hidden");
 }
 
@@ -925,12 +1091,13 @@ function renderMdCell(text, maxLen) {
 
 function buildReviewRow(item) {
   const isReviewed = normalizeReviewStatusValue(item.review_status) === "reviewed";
+  const isHistoricalDraft = !isReviewed && state.latestArchiveDate && item.archive_date !== state.latestArchiveDate;
   const row = document.createElement("tr");
   row.innerHTML = `
     <td>
       <div class="review-date-cell ${isReviewed ? "" : "is-pending"}">
         <strong>${escapeHtml(item.archive_date)}</strong>
-        ${isReviewed ? "" : "<small>未复盘</small>"}
+        ${isReviewed ? "" : `<small>${isHistoricalDraft ? "历史草稿" : "未复盘"}</small>`}
       </div>
     </td>
     <td></td>
@@ -959,8 +1126,14 @@ function buildReviewRow(item) {
   } else {
     const startButton = document.createElement("button");
     startButton.className = "compact-button";
-    startButton.textContent = "开始复盘";
+    startButton.textContent = isHistoricalDraft ? "编辑草稿" : "开始复盘";
     startButton.addEventListener("click", () => openReviewDrawer(item.archive_date));
+    if (isHistoricalDraft) {
+      const badge = document.createElement("span");
+      badge.className = "review-row-badge historical-draft";
+      badge.textContent = "不同步账户管理";
+      actionGroup.appendChild(badge);
+    }
     actionGroup.append(startButton);
   }
 
@@ -1569,6 +1742,10 @@ function normalizeActionPlan(item = {}, sortOrder = 0) {
   const marketType = ["美股", "大A"].includes(item.marketType || item.market_type) ? (item.marketType || item.market_type) : "美股";
   const fallbackAccount = getDefaultAccountForMarket(marketType);
   const accountId = Number(item.accountId ?? item.account_id ?? fallbackAccount?.id ?? 0) || null;
+  const rawAmount = item.positionAmount ?? item.position_amount;
+  const positionAmount = rawAmount == null || rawAmount === ""
+    ? null
+    : (Number.isFinite(Number(rawAmount)) ? Number(rawAmount) : null);
   return {
     id: item.id ?? null,
     accountId,
@@ -1576,6 +1753,7 @@ function normalizeActionPlan(item = {}, sortOrder = 0) {
     symbol: String(item.symbol || "").trim().toUpperCase(),
     actionType: normalizeActionPlanAction(item.actionType || item.action_type),
     currentPosition: normalizeActionPlanPosition(item.currentPosition || item.current_position || defaultActionPlanPositionForAction(item.actionType || item.action_type)),
+    positionAmount,
     entryPlan: String(item.entryPlan || item.entry_plan || "").trim(),
     takeProfitPlan: String(item.takeProfitPlan || item.take_profit_plan || "").trim(),
     stopLossPlan: String(item.stopLossPlan || item.stop_loss_plan || "").trim(),
@@ -1586,6 +1764,37 @@ function normalizeActionPlan(item = {}, sortOrder = 0) {
     marketType,
     sortOrder,
   };
+}
+
+function mapAmountToPositionBucket(amount, totalAssets) {
+  const num = Number(amount);
+  const total = Number(totalAssets);
+  if (!Number.isFinite(num) || num <= 0) return "0%";
+  if (!Number.isFinite(total) || total <= 0) return null;
+  const ratio = (num / total) * 100;
+  if (ratio <= 0.0001) return "0%";
+  if (ratio <= 5) return "0-5%";
+  if (ratio <= 10) return "5%-10%";
+  if (ratio <= 15) return "10%-15%";
+  if (ratio <= 20) return "15%-20%";
+  if (ratio <= 25) return "20%-25%";
+  if (ratio <= 30) return "25%-30%";
+  return ">30%";
+}
+
+function updateActionPlanAccountTotalHint() {
+  if (!actionPlanAccountTotalHint) return;
+  const accountId = Number(actionPlanAccountSelect?.value || 0);
+  const account = findAccountById(accountId);
+  if (!account) {
+    actionPlanAccountTotalHint.textContent = "";
+    return;
+  }
+  if (account.totalAssets == null) {
+    actionPlanAccountTotalHint.textContent = `${account.currency} · 未设置总资产`;
+    return;
+  }
+  actionPlanAccountTotalHint.textContent = `${account.currency} · 总资产 ${formatAccountMoney(account.totalAssets, account.currency)}`;
 }
 
 function formatSupportResistanceLevels(supportLevels, resistanceLevels) {
@@ -1781,9 +1990,10 @@ function actionPlanTableHtml(tbodyId) {
 }
 
 function actionPlanTbodyId(account) {
-  if (account?.name === "老虎-美股") return "actionPlanRowsUs";
-  if (account?.name === "东方财富-国内") return "actionPlanRowsCn";
-  return `actionPlanRowsAccount${account.id}`;
+  const prefix = isLiveActionPlanMode() ? "live" : "";
+  if (account?.name === "老虎-美股") return `${prefix}actionPlanRowsUs`;
+  if (account?.name === "东方财富-国内") return `${prefix}actionPlanRowsCn`;
+  return `${prefix}ActionPlanRowsAccount${account.id}`;
 }
 
 function getActionPlanAccountAnchor(account) {
@@ -1795,6 +2005,7 @@ function getActionPlanRowAnchor(index) {
 }
 
 function legacyActionPlanControlIds(account) {
+  if (isLiveActionPlanMode()) return { add: "", sort: "", empty: "" };
   if (account?.name === "老虎-美股") {
     return { add: "addActionPlanUsBtn", sort: "sortActionPlansUsBtn", empty: "emptyActionPlanStateUs" };
   }
@@ -1816,6 +2027,7 @@ function renderActionPlanGroup(tbody, account) {
         <div class="action-plan-target-stack">
           <strong class="action-plan-symbol">${escapeHtml(actionPlanSymbolLabel(plan.symbol))}</strong>
           <span class="action-plan-status-pill ${actionPlanStatusClass(plan.actionType)}">${escapeHtml(plan.actionType)}</span>
+          ${isLiveActionPlanMode() ? `<button type="button" class="ghost compact-button action-plan-inline-edit" data-action="edit-row" data-index="${escapeAttribute(String(index))}">编辑</button>` : ""}
         </div>
       </td>
       <td><span class="action-plan-position ${positionColorClass(plan.currentPosition)}">${escapeHtml(plan.currentPosition)}</span></td>
@@ -1829,6 +2041,12 @@ function renderActionPlanGroup(tbody, account) {
   `).join("");
   tbody.querySelectorAll("tr").forEach((row) => {
     row.addEventListener("click", () => selectActionPlan(Number(row.dataset.index)));
+  });
+  tbody.querySelectorAll("[data-action='edit-row']").forEach((button) => {
+    button.addEventListener("click", (event) => {
+      event.stopPropagation();
+      selectActionPlan(Number(button.dataset.index));
+    });
   });
   tbody.querySelectorAll("[data-full-text]").forEach((cell) => {
     cell.addEventListener("mouseenter", showActionPlanCellTooltip);
@@ -1880,7 +2098,8 @@ function renderActionPlanAccountImpact(account, summary) {
 
 function renderActionPlans(options = {}) {
   syncLegacyAssetPlanField();
-  const readOnly = state.reviewStatus === "reviewed" && !state.editMode;
+  const rootEl = getActionPlanRenderRoot();
+  const readOnly = isActionPlanEditorReadOnly();
   const snapshot = normalizeAccountSnapshot(state.accountSnapshot, state.investmentAccounts);
   state.accountSnapshot = snapshot;
   const impactByAccountId = new Map(accountImpactItemsForDisplay(snapshot, readOnly)
@@ -1890,77 +2109,100 @@ function renderActionPlans(options = {}) {
     ? state.actionPlans.filter((p) => Number(p.accountId || 0) === Number(selectedPlan.accountId || 0))
     : [];
   const posInGroup = selectedPlan ? groupItems.indexOf(selectedPlan) : -1;
-  if (actionPlanAccountGroups) {
+  if (rootEl) {
     const visibleAccounts = getActionPlanVisibleAccounts();
-    actionPlanAccountGroups.innerHTML = visibleAccounts.map((account) => `
-      <div id="${escapeAttribute(getActionPlanAccountAnchor(account))}" class="action-plan-group" data-account-id="${escapeAttribute(String(account.id))}">
+    const liveMode = isLiveActionPlanMode();
+    rootEl.innerHTML = visibleAccounts.map((account) => {
+      const accountIdStr = escapeAttribute(String(account.id));
+      const fundsLine = `${escapeHtml(account.currency)} · 总资产 ${escapeHtml(formatAccountMoney(account.totalAssets, account.currency))} · 可用 ${escapeHtml(formatAccountMoney(account.availableCash, account.currency))}`;
+      const editButtonHtml = `<button type="button" class="account-edit-btn" data-action="edit-account" data-account-id="${accountIdStr}" title="编辑账户">
+           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M17 3a2.85 2.85 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5L17 3Z"/></svg>
+           <span>编辑</span>
+         </button>`;
+      const impactHtml = renderActionPlanAccountImpact(account, impactByAccountId.get(Number(account.id)));
+      return `
+      <div id="${escapeAttribute(getActionPlanAccountAnchor(account))}" class="action-plan-group${liveMode ? " account-card" : ""}" data-account-id="${accountIdStr}">
         <div class="action-plan-group-head">
           <div class="action-plan-account-info">
             ${renderAccountLogoHtml(account)}
             <div class="action-plan-account-text">
-              <span class="action-plan-group-label">${escapeHtml(account.name)}</span>
-              <span class="action-plan-account-funds">
-                ${escapeHtml(account.currency)} · 总资产 ${escapeHtml(formatAccountMoney(account.totalAssets, account.currency))} · 可用 ${escapeHtml(formatAccountMoney(account.availableCash, account.currency))}
-              </span>
+              <span class="action-plan-group-label">${escapeHtml(account.name)}${account.enabled ? "" : ` <span class="symbol-visibility-badge status-hidden">已停用</span>`}${editButtonHtml}</span>
+              <span class="action-plan-account-funds">${fundsLine}</span>
             </div>
           </div>
-          ${renderActionPlanAccountImpact(account, impactByAccountId.get(Number(account.id)))}
+          ${impactHtml}
           <div class="action-row">
-            <button ${legacyActionPlanControlIds(account).add ? `id="${legacyActionPlanControlIds(account).add}"` : ""} type="button" class="ghost compact-button" data-action="add-plan" data-account-id="${escapeAttribute(String(account.id))}">添加标的</button>
-            <button ${legacyActionPlanControlIds(account).sort ? `id="${legacyActionPlanControlIds(account).sort}"` : ""} type="button" class="ghost compact-button" data-action="sort-plan" data-account-id="${escapeAttribute(String(account.id))}">自动排序</button>
+            <button ${legacyActionPlanControlIds(account).add ? `id="${legacyActionPlanControlIds(account).add}"` : ""} type="button" class="ghost compact-button" data-action="add-plan" data-account-id="${accountIdStr}">添加标的</button>
+            <button ${legacyActionPlanControlIds(account).sort ? `id="${legacyActionPlanControlIds(account).sort}"` : ""} type="button" class="ghost compact-button" data-action="sort-plan" data-account-id="${accountIdStr}">自动排序</button>
             <span class="action-plan-row-tools">
-              <button type="button" class="ghost compact-button" data-action="move-up" data-account-id="${escapeAttribute(String(account.id))}">上移</button>
-              <button type="button" class="ghost compact-button" data-action="move-down" data-account-id="${escapeAttribute(String(account.id))}">下移</button>
-              <button type="button" class="ghost compact-button danger" data-action="delete-selected" data-account-id="${escapeAttribute(String(account.id))}">删除</button>
+              <button type="button" class="ghost compact-button" data-action="move-up" data-account-id="${accountIdStr}">上移</button>
+              <button type="button" class="ghost compact-button" data-action="move-down" data-account-id="${accountIdStr}">下移</button>
+              <button type="button" class="ghost compact-button danger" data-action="delete-selected" data-account-id="${accountIdStr}">删除</button>
             </span>
           </div>
         </div>
         ${actionPlanTableHtml(actionPlanTbodyId(account))}
-        <div ${legacyActionPlanControlIds(account).empty ? `id="${legacyActionPlanControlIds(account).empty}"` : ""} class="empty-state hidden">这个账户还没有操作计划，点击“添加标的”开始填写。</div>
+        <div ${legacyActionPlanControlIds(account).empty ? `id="${legacyActionPlanControlIds(account).empty}"` : ""} class="empty-state hidden">${liveMode ? "这个账户暂无标的，点击「添加标的」开始维护。" : "这个账户还没有操作计划，点击“添加标的”开始填写。"}</div>
       </div>
-    `).join("");
-    actionPlanAccountGroups.querySelectorAll("[data-action='add-plan']").forEach((button) => {
-      button.disabled = readOnly;
+    `;
+    }).join("");
+    rootEl.querySelectorAll("[data-action='add-plan']").forEach((button) => {
+      const account = findAccountById(button.dataset.accountId);
+      button.disabled = readOnly || (isLiveActionPlanMode() && account && !account.enabled);
+      if (button.disabled && isLiveActionPlanMode() && account && !account.enabled) {
+        button.title = "账户已停用，无法新增标的";
+      }
       button.addEventListener("click", () => addActionPlanForAccount(Number(button.dataset.accountId)));
     });
-    actionPlanAccountGroups.querySelectorAll("[data-action='sort-plan']").forEach((button) => {
+    rootEl.querySelectorAll("[data-action='sort-plan']").forEach((button) => {
       const accountId = Number(button.dataset.accountId);
       const count = state.actionPlans.filter((plan) => Number(plan.accountId) === accountId).length;
       button.disabled = readOnly || count < 2;
       button.addEventListener("click", () => sortActionPlansByAccountPosition(accountId));
     });
-    actionPlanAccountGroups.querySelectorAll("[data-action='move-up']").forEach((button) => {
+    rootEl.querySelectorAll("[data-action='move-up']").forEach((button) => {
       button.addEventListener("click", () => moveActionPlan(-1));
     });
-    actionPlanAccountGroups.querySelectorAll("[data-action='move-down']").forEach((button) => {
+    rootEl.querySelectorAll("[data-action='move-down']").forEach((button) => {
       button.addEventListener("click", () => moveActionPlan(1));
     });
-    actionPlanAccountGroups.querySelectorAll("[data-action='delete-selected']").forEach((button) => {
+    rootEl.querySelectorAll("[data-action='delete-selected']").forEach((button) => {
       button.addEventListener("click", () => deleteSelectedActionPlan());
     });
+    rootEl.querySelectorAll("[data-action='edit-account']").forEach((button) => {
+      const accountId = Number(button.dataset.accountId);
+      const account = findAccountById(accountId);
+      if (!account) {
+        button.disabled = true;
+        return;
+      }
+      button.addEventListener("click", () => showAccountForm(account));
+    });
     visibleAccounts.forEach((account) => {
-      const tbody = actionPlanAccountGroups.querySelector(`#${CSS.escape(actionPlanTbodyId(account))}`);
+      const tbody = rootEl.querySelector(`#${CSS.escape(actionPlanTbodyId(account))}`);
       const count = renderActionPlanGroup(tbody, account);
       tbody?.closest(".action-plan-group")?.querySelector(".empty-state")?.classList.toggle("hidden", count > 0);
     });
   }
   const hasPlans = state.actionPlans.length > 0;
-  actionPlanAccountGroups?.querySelectorAll("[data-action='move-up']").forEach((button) => {
+  rootEl?.querySelectorAll("[data-action='move-up']").forEach((button) => {
     const sameAccount = Number(button.dataset.accountId || 0) === Number(selectedPlan?.accountId || 0);
     button.disabled = readOnly || !sameAccount || posInGroup <= 0;
   });
-  actionPlanAccountGroups?.querySelectorAll("[data-action='move-down']").forEach((button) => {
+  rootEl?.querySelectorAll("[data-action='move-down']").forEach((button) => {
     const sameAccount = Number(button.dataset.accountId || 0) === Number(selectedPlan?.accountId || 0);
     button.disabled = readOnly || !sameAccount || posInGroup < 0 || posInGroup >= groupItems.length - 1;
   });
-  actionPlanAccountGroups?.querySelectorAll("[data-action='delete-selected']").forEach((button) => {
+  rootEl?.querySelectorAll("[data-action='delete-selected']").forEach((button) => {
     const sameAccount = Number(button.dataset.accountId || 0) === Number(selectedPlan?.accountId || 0);
     button.disabled = readOnly || !sameAccount || state.selectedActionPlanIndex < 0;
   });
   if (!hasPlans) closeActionPlanDetail();
   applyActionPlanReadOnly(readOnly);
-  if (!readOnly && options.refreshImpact !== false) scheduleAccountImpactPreview();
-  renderReviewOutline();
+  if (!isLiveActionPlanMode()) {
+    if (!readOnly && options.refreshImpact !== false) scheduleAccountImpactPreview();
+    renderReviewOutline();
+  }
 }
 
 function renderActionPlanSymbolOptions(selectedSymbol = "") {
@@ -1983,12 +2225,18 @@ function renderActionPlanAccountOptions(selectedAccountId = null) {
   if (!actionPlanAccountSelect) return;
   const selected = Number(selectedAccountId || 0);
   const accounts = getActionPlanVisibleAccounts();
-  actionPlanAccountSelect.innerHTML = accounts.map((account) =>
-    `<option value="${escapeAttribute(String(account.id))}" ${Number(account.id) === selected ? "selected" : ""}>${escapeHtml(account.name)}</option>`
-  ).join("");
+  actionPlanAccountSelect.innerHTML = accounts.map((account) => {
+    const isSelected = Number(account.id) === selected;
+    const isDisabled = isLiveActionPlanMode() && !account.enabled && !isSelected;
+    const suffix = account.enabled ? "" : "（已停用）";
+    return `<option value="${escapeAttribute(String(account.id))}" ${isSelected ? "selected" : ""} ${isDisabled ? "disabled" : ""}>${escapeHtml(account.name + suffix)}</option>`;
+  }).join("");
 }
 
 function getActionPlanVisibleAccounts() {
+  if (isLiveActionPlanMode()) {
+    return state.investmentAccounts.slice();
+  }
   const referenced = new Set(state.actionPlans.map((plan) => Number(plan.accountId || 0)).filter(Boolean));
   const accounts = state.investmentAccounts.filter((account) => account.enabled || referenced.has(Number(account.id)));
   if (accounts.length) return accounts;
@@ -2045,6 +2293,8 @@ function fillActionPlanEditor(plan) {
   renderActionPlanMetrics(plan.symbol || "");
   if (actionPlanActionSelect) actionPlanActionSelect.value = normalizeActionPlanAction(plan.actionType);
   if (actionPlanPositionSelect) actionPlanPositionSelect.value = normalizeActionPlanPosition(plan.currentPosition);
+  if (actionPlanPositionAmountInput) actionPlanPositionAmountInput.value = plan.positionAmount != null ? plan.positionAmount : "";
+  updateActionPlanAccountTotalHint();
   if (actionPlanSupportLevelsInput) actionPlanSupportLevelsInput.value = plan.supportLevels || "";
   if (actionPlanResistanceLevelsInput) actionPlanResistanceLevelsInput.value = plan.resistanceLevels || "";
   if (actionPlanEntryInput) actionPlanEntryInput.value = plan.entryPlan || "";
@@ -2086,6 +2336,10 @@ function syncSelectedActionPlanFromEditor() {
   }
   if (actionPlanSymbolInput) actionPlanSymbolInput.value = selectedSymbol;
   const account = findAccountById(selectedAccountId);
+  const positionAmountRaw = actionPlanPositionAmountInput?.value;
+  const positionAmount = positionAmountRaw == null || positionAmountRaw === ""
+    ? null
+    : (Number.isFinite(Number(positionAmountRaw)) ? Number(positionAmountRaw) : null);
   state.actionPlans[index] = normalizeActionPlan({
     ...state.actionPlans[index],
     accountId: selectedAccountId,
@@ -2093,6 +2347,7 @@ function syncSelectedActionPlanFromEditor() {
     symbol: selectedSymbol,
     actionType,
     currentPosition,
+    positionAmount,
     marketType: marketTypeForAccount(account),
     supportLevels: actionPlanSupportLevelsInput.value,
     resistanceLevels: actionPlanResistanceLevelsInput.value,
@@ -2102,6 +2357,7 @@ function syncSelectedActionPlanFromEditor() {
     thinking: actionPlanThinkingInput.value,
   }, index);
   syncLegacyAssetPlanField();
+  notifyActionPlanLocalChange();
   renderActionPlanRowsOnly();
   updateActionPlanDetailHeading();
   return true;
@@ -2121,7 +2377,7 @@ function openActionPlanDetail(index) {
   renderActionPlanRowsOnly();
   fillActionPlanEditor(state.actionPlans[index]);
   updateActionPlanDetailHeading();
-  const readOnly = state.reviewStatus === "reviewed" && !state.editMode;
+  const readOnly = isActionPlanEditorReadOnly();
   applyActionPlanReadOnly(readOnly);
   actionPlanEditor?.classList.remove("hidden");
   actionPlanDetailModal?.classList.remove("hidden");
@@ -2138,9 +2394,18 @@ function closeActionPlanDetail() {
   actionPlanEditor?.classList.add("hidden");
 }
 
-function saveActionPlanDetailAndClose() {
+async function saveActionPlanDetailAndClose() {
   if (syncSelectedActionPlanFromEditor() === false) return;
-  closeActionPlanDetail();
+  const ctx = getActiveActionPlanEditorContext();
+  const plan = state.actionPlans[state.selectedActionPlanIndex] || null;
+  try {
+    if (ctx?.callbacks?.onSave && plan) {
+      await ctx.callbacks.onSave(plan);
+    }
+    closeActionPlanDetail();
+  } catch (error) {
+    window.alert(`保存失败: ${error.message}`);
+  }
 }
 
 function appendDailyRecordDate() {
@@ -2172,9 +2437,13 @@ function addActionPlan(marketType = "美股") {
 }
 
 function addActionPlanForAccount(accountId, marketType = null) {
-  const readOnly = state.reviewStatus === "reviewed" && !state.editMode;
+  const readOnly = isActionPlanEditorReadOnly();
   if (readOnly) return;
   const account = findAccountById(accountId) || getDefaultAccountForMarket(marketType || "美股");
+  if (isLiveActionPlanMode() && account && !account.enabled) {
+    window.alert("已停用账户不能新增标的。");
+    return;
+  }
   const resolvedAccountId = Number(account?.id || accountId || 0);
   const used = new Set(state.actionPlans
     .filter((item) => Number(item.accountId || 0) === resolvedAccountId)
@@ -2194,11 +2463,12 @@ function addActionPlanForAccount(accountId, marketType = null) {
     marketType: marketType || marketTypeForAccount(account),
   }, state.actionPlans.length));
   state.selectedActionPlanIndex = state.actionPlans.length - 1;
+  notifyActionPlanLocalChange();
   renderActionPlans();
   openActionPlanDetail(state.selectedActionPlanIndex);
 }
 
-function moveActionPlan(delta) {
+async function moveActionPlan(delta) {
   const index = state.selectedActionPlanIndex;
   if (index < 0) return;
   const plan = state.actionPlans[index];
@@ -2213,7 +2483,16 @@ function moveActionPlan(delta) {
   [state.actionPlans[index], state.actionPlans[targetIndex]] = [state.actionPlans[targetIndex], state.actionPlans[index]];
   state.actionPlans = state.actionPlans.map((p, sortOrder) => ({ ...p, sortOrder }));
   state.selectedActionPlanIndex = targetIndex;
+  notifyActionPlanLocalChange();
   renderActionPlans();
+  const ctx = getActiveActionPlanEditorContext();
+  if (ctx?.callbacks?.onReorder) {
+    try {
+      await ctx.callbacks.onReorder(state.actionPlans.slice());
+    } catch (error) {
+      window.alert(`排序保存失败: ${error.message}`);
+    }
+  }
 }
 
 function actionPlanPositionScore(plan) {
@@ -2230,8 +2509,8 @@ function sortActionPlansByPosition(marketType) {
   sortActionPlansByAccountPosition(account?.id || 0);
 }
 
-function sortActionPlansByAccountPosition(accountId) {
-  const readOnly = state.reviewStatus === "reviewed" && !state.editMode;
+async function sortActionPlansByAccountPosition(accountId) {
+  const readOnly = isActionPlanEditorReadOnly();
   if (readOnly) return;
   const selected = state.actionPlans[state.selectedActionPlanIndex] || null;
   const groupIndices = state.actionPlans
@@ -2251,17 +2530,37 @@ function sortActionPlansByAccountPosition(accountId) {
   if (selected) {
     state.selectedActionPlanIndex = state.actionPlans.indexOf(selected);
   }
+  notifyActionPlanLocalChange();
   renderActionPlans();
+  const ctx = getActiveActionPlanEditorContext();
+  if (ctx?.callbacks?.onReorder) {
+    try {
+      await ctx.callbacks.onReorder(state.actionPlans.slice());
+    } catch (error) {
+      window.alert(`排序保存失败: ${error.message}`);
+    }
+  }
 }
 
-function deleteSelectedActionPlan() {
+async function deleteSelectedActionPlan() {
   const index = state.selectedActionPlanIndex;
   if (index < 0 || index >= state.actionPlans.length) return;
+  const removed = state.actionPlans[index];
+  const ctx = getActiveActionPlanEditorContext();
+  if (ctx?.mode === "live" && !window.confirm(`确认删除标的「${removed.symbol || "未命名"}」？`)) return;
   state.actionPlans.splice(index, 1);
   state.actionPlans = state.actionPlans.map((plan, sortOrder) => ({ ...plan, sortOrder }));
   state.selectedActionPlanIndex = state.actionPlans.length ? Math.min(index, state.actionPlans.length - 1) : -1;
   closeActionPlanDetail();
+  notifyActionPlanLocalChange();
   renderActionPlans();
+  if (ctx?.callbacks?.onDelete) {
+    try {
+      await ctx.callbacks.onDelete(removed);
+    } catch (error) {
+      window.alert(`删除失败: ${error.message}`);
+    }
+  }
 }
 
 function syncLegacyAssetPlanField() {
@@ -3438,7 +3737,7 @@ function getDefaultAccountForMarket(marketType = "美股") {
 }
 
 function marketTypeForAccount(account) {
-  return String(account?.region || "").toUpperCase() === "CN" ? "大A" : "美股";
+  return String(account?.currency || "").toUpperCase() === "CNY" ? "大A" : "美股";
 }
 
 function accountNameForPlan(plan) {
@@ -3446,125 +3745,113 @@ function accountNameForPlan(plan) {
 }
 
 async function loadAccounts(forceRefresh = false) {
-  const list = document.querySelector("#accountsList");
-  if (!list) return;
-  list.innerHTML = `<tr><td colspan="7" class="empty-state">加载中...</td></tr>`;
+  if (!accountLivePlans) return;
+  if (accountsSummary) accountsSummary.textContent = "正在加载账户与标的...";
+  accountLivePlans.innerHTML = `<div class="empty-state">加载中...</div>`;
   try {
-    const data = await fetchJson("/api/investment-accounts");
+    const [data, liveData, symbolData] = await Promise.all([
+      fetchJson("/api/investment-accounts"),
+      fetchJson("/api/account-live-action-plans"),
+      fetchJson("/api/account-live-action-plans/symbols"),
+    ]);
     state.investmentAccounts = normalizeInvestmentAccounts(data.items || []);
+    state.accountLiveActionPlans = normalizeActionPlans(liveData.items || []);
+    state.actionPlanSymbolCatalog = symbolData.items || [];
     state.accountsLoaded = true;
-    renderAccountsList();
+    state.accountLivePlansLoaded = true;
+    renderAccountLiveActionPlans();
   } catch (error) {
-    list.innerHTML = `<tr><td colspan="7" class="empty-state">加载失败: ${escapeHtml(error.message)}</td></tr>`;
+    accountLivePlans.innerHTML = `<div class="empty-state">加载失败: ${escapeHtml(error.message)}</div>`;
+    if (accountsSummary) accountsSummary.textContent = `加载失败: ${error.message}`;
   }
 }
 
-function renderAccountsList() {
-  const list = document.querySelector("#accountsList");
-  if (!list) return;
-  if (!state.investmentAccounts.length) {
-    list.innerHTML = `<tr><td colspan="7" class="empty-state">暂无账户</td></tr>`;
-    return;
+async function loadAccountLivePlans(forceRefresh = false) {
+  if (!accountLivePlans) return;
+  try {
+    const [liveData, symbolData] = await Promise.all([
+      fetchJson("/api/account-live-action-plans"),
+      fetchJson("/api/account-live-action-plans/symbols"),
+    ]);
+    state.accountLiveActionPlans = normalizeActionPlans(liveData.items || []);
+    state.actionPlanSymbolCatalog = symbolData.items || state.actionPlanSymbolCatalog || [];
+    state.accountLivePlansLoaded = true;
+    renderAccountLiveActionPlans();
+  } catch (error) {
+    if (accountsSummary) accountsSummary.textContent = `标的加载失败: ${error.message}`;
   }
-  list.innerHTML = "";
-  state.investmentAccounts.forEach((account) => list.appendChild(buildAccountRow(account)));
-}
-
-function buildAccountRow(account) {
-  const row = document.createElement("tr");
-  row.className = account.enabled ? "" : "symbol-row-inactive";
-  row.innerHTML = `
-    <td>
-      <div class="symbol-name-stack">
-        <strong>${escapeHtml(account.name)}</strong>
-        <span>${escapeHtml(account.broker || account.region || "手动账户")}</span>
-      </div>
-    </td>
-    <td><span class="symbol-type-badge type-stock">${escapeHtml(accountTypeLabel(account.accountType))}</span></td>
-    <td><code class="sym-code">${escapeHtml(account.currency)}</code></td>
-    <td>${escapeHtml(formatAccountMoney(account.totalAssets, account.currency))}</td>
-    <td>${escapeHtml(formatAccountMoney(account.availableCash, account.currency))}</td>
-    <td><span class="symbol-visibility-badge ${account.enabled ? "status-active" : "status-hidden"}">${account.enabled ? "启用" : "停用"}</span></td>
-    <td class="symbol-col-actions">
-      <button type="button" data-action="edit">编辑</button>
-      <button type="button" class="danger" data-action="delete">删除</button>
-    </td>
-  `;
-  row.querySelector("[data-action='edit']").addEventListener("click", () => showAccountForm(account));
-  row.querySelector("[data-action='delete']").addEventListener("click", () => deleteAccount(account));
-  return row;
 }
 
 function showAccountForm(prefill = {}) {
-  const preview = document.querySelector("#accountFormPreview");
-  if (!preview) return;
+  if (!accountFormModal || !accountFormBody) return;
   const account = normalizeInvestmentAccount(prefill);
   const isEdit = Boolean(account.id);
-  preview.classList.remove("hidden");
-  preview.innerHTML = `
-    <div class="symbol-resolve-card">
-      <form id="accountForm" class="symbol-manual-form" autocomplete="off">
-        <div class="symbol-manual-grid">
-          <label>
-            <small>账户名称</small>
-            <input type="text" name="name" value="${escapeAttribute(account.name)}" required placeholder="如 老虎-美股" />
-          </label>
-          <label>
-            <small>机构</small>
-            <input type="text" name="broker" value="${escapeAttribute(account.broker)}" placeholder="如 老虎、东方财富" />
-          </label>
-          <label>
-            <small>类型</small>
-            <select name="accountType">
-              <option value="stock" ${account.accountType === "stock" ? "selected" : ""}>股票</option>
-              <option value="fund" ${account.accountType === "fund" ? "selected" : ""}>基金</option>
-              <option value="mixed" ${account.accountType === "mixed" ? "selected" : ""}>综合</option>
-            </select>
-          </label>
-          <label>
-            <small>区域</small>
-            <input type="text" name="region" value="${escapeAttribute(account.region)}" placeholder="US / CN" />
-          </label>
-          <label>
-            <small>币种</small>
-            <input type="text" name="currency" value="${escapeAttribute(account.currency)}" required placeholder="USD / CNY" />
-          </label>
-          <label>
-            <small>总资产</small>
-            <input type="number" step="0.01" name="totalAssets" value="${account.totalAssets ?? ""}" placeholder="账户整体规模" />
-          </label>
-          <label>
-            <small>可用资金</small>
-            <input type="number" step="0.01" name="availableCash" value="${account.availableCash ?? ""}" placeholder="可立即交易的现金" />
-          </label>
-          <label>
-            <small>排序</small>
-            <input type="number" step="1" name="sortOrder" value="${account.sortOrder || 0}" />
-          </label>
-          <label>
-            <small>状态</small>
-            <select name="enabled">
-              <option value="1" ${account.enabled ? "selected" : ""}>启用</option>
-              <option value="0" ${!account.enabled ? "selected" : ""}>停用</option>
-            </select>
-          </label>
-          <label class="symbol-manual-aliases-label">
-            <small>备注</small>
-            <input type="text" name="notes" value="${escapeAttribute(account.notes)}" />
-          </label>
-        </div>
-        <div class="action-row">
+  if (accountFormTitle) accountFormTitle.textContent = isEdit ? `编辑账户 · ${account.name || ""}`.trim() : "新增账户";
+  accountFormBody.innerHTML = `
+    <form id="accountForm" class="symbol-manual-form" autocomplete="off">
+      <div class="symbol-manual-grid">
+        <label>
+          <small>账户名称</small>
+          <input type="text" name="name" value="${escapeAttribute(account.name)}" required placeholder="如 老虎-美股" />
+        </label>
+        <label>
+          <small>机构</small>
+          <input type="text" name="broker" value="${escapeAttribute(account.broker)}" placeholder="如 老虎、东方财富" />
+        </label>
+        <label>
+          <small>类型</small>
+          <select name="accountType">
+            <option value="stock" ${account.accountType === "stock" ? "selected" : ""}>股票</option>
+            <option value="fund" ${account.accountType === "fund" ? "selected" : ""}>基金</option>
+            <option value="mixed" ${account.accountType === "mixed" ? "selected" : ""}>综合</option>
+          </select>
+        </label>
+        <label>
+          <small>币种</small>
+          <input type="text" name="currency" value="${escapeAttribute(account.currency)}" required placeholder="USD / CNY" />
+        </label>
+        <label>
+          <small>总资产</small>
+          <input type="number" step="0.01" name="totalAssets" value="${account.totalAssets ?? ""}" placeholder="账户整体规模" />
+        </label>
+        <label>
+          <small>排序</small>
+          <input type="number" step="1" name="sortOrder" value="${account.sortOrder || 0}" />
+        </label>
+        <label>
+          <small>状态</small>
+          <select name="enabled">
+            <option value="1" ${account.enabled ? "selected" : ""}>启用</option>
+            <option value="0" ${!account.enabled ? "selected" : ""}>停用</option>
+          </select>
+        </label>
+        <label class="symbol-manual-aliases-label">
+          <small>备注</small>
+          <input type="text" name="notes" value="${escapeAttribute(account.notes)}" />
+        </label>
+      </div>
+      <div class="account-form-actions">
+        <div class="account-form-actions-primary">
           <button type="submit">${isEdit ? "保存账户" : "新增账户"}</button>
           <button type="button" id="accountFormCancelBtn" class="ghost">取消</button>
         </div>
-      </form>
-    </div>
+        ${isEdit ? `<button type="button" id="accountFormDeleteBtn" class="ghost danger">删除账户</button>` : ""}
+      </div>
+    </form>
   `;
-  preview.querySelector("#accountFormCancelBtn").addEventListener("click", () => preview.classList.add("hidden"));
-  preview.querySelector("#accountForm").addEventListener("submit", async (event) => {
+  accountFormModal.classList.remove("hidden");
+  accountFormBody.querySelector("#accountFormCancelBtn").addEventListener("click", closeAccountForm);
+  accountFormBody.querySelector("#accountForm").addEventListener("submit", async (event) => {
     event.preventDefault();
     await submitAccountForm(new FormData(event.target), account.id || null);
   });
+  if (isEdit) {
+    accountFormBody.querySelector("#accountFormDeleteBtn")?.addEventListener("click", async () => {
+      const ok = await deleteAccount(account);
+      if (ok) closeAccountForm();
+    });
+  }
+  requestAnimationFrame(() => accountFormBody.querySelector("[name='name']")?.focus());
 }
 
 async function submitAccountForm(formData, id = null) {
@@ -3572,10 +3859,8 @@ async function submitAccountForm(formData, id = null) {
     name: String(formData.get("name") || "").trim(),
     broker: String(formData.get("broker") || "").trim(),
     accountType: formData.get("accountType"),
-    region: String(formData.get("region") || "").trim(),
     currency: String(formData.get("currency") || "").trim().toUpperCase(),
     totalAssets: formData.get("totalAssets") === "" ? null : Number(formData.get("totalAssets")),
-    availableCash: formData.get("availableCash") === "" ? null : Number(formData.get("availableCash")),
     enabled: formData.get("enabled") === "1",
     sortOrder: Number(formData.get("sortOrder") || 0),
     notes: String(formData.get("notes") || "").trim(),
@@ -3590,22 +3875,164 @@ async function submitAccountForm(formData, id = null) {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(payload),
     });
-    document.querySelector("#accountFormPreview")?.classList.add("hidden");
-    await loadAccounts(true);
+    closeAccountForm();
+    await refreshAfterAccountChange();
   } catch (error) {
     window.alert(`账户保存失败: ${error.message}`);
   }
 }
 
 async function deleteAccount(account) {
-  if (!account?.id) return;
-  const confirmed = window.confirm(`确认删除账户「${account.name}」？如果这个账户已经被历史操作计划使用，系统会阻止删除。`);
-  if (!confirmed) return;
+  if (!account?.id) return false;
+  const confirmed = window.confirm(`确认删除账户「${account.name}」？若该账户被复盘历史或当前标的引用，系统会阻止删除。`);
+  if (!confirmed) return false;
   try {
     await fetchJson(`/api/investment-accounts/${account.id}`, { method: "DELETE" });
-    await loadAccounts(true);
+    await refreshAfterAccountChange();
+    return true;
   } catch (error) {
     window.alert(`账户删除失败: ${error.message}`);
+    return false;
+  }
+}
+
+async function refreshAfterAccountChange() {
+  try {
+    const data = await fetchJson("/api/investment-accounts");
+    state.investmentAccounts = normalizeInvestmentAccounts(data.items || []);
+  } catch (error) {
+    // 静默：保留旧 state，下面继续按已有数据渲染
+  }
+  const activeCtx = getActiveActionPlanEditorContext();
+  if (activeCtx?.mode === "live") {
+    await loadAccountLivePlans(true);
+    return;
+  }
+  if (activeCtx) {
+    // 复盘抽屉编辑中：state.actionPlans 不动，刷新 DOM 让账户信息更新
+    renderActionPlans();
+    return;
+  }
+  // 没有挂载的编辑器：可能用户在账户页但编辑器没起来，走完整 loadAccounts
+  if (accountsView?.classList.contains("active")) {
+    await loadAccounts(true);
+  }
+}
+
+function renderAccountLiveActionPlans() {
+  if (!accountLivePlans) return;
+  const enabledCount = state.investmentAccounts.filter((account) => account.enabled).length;
+  if (!state.investmentAccounts.length) {
+    accountLivePlans.innerHTML = `<div class="empty-state">暂无账户，点击「新增账户」开始。</div>`;
+    updateAccountsSummaryText(0, 0, 0);
+    return;
+  }
+  state.activeAccountLivePlanEditor = mountActionPlanEditor(accountLivePlans, {
+    mode: "live",
+    plans: state.accountLiveActionPlans,
+    symbolCatalog: state.actionPlanSymbolCatalog,
+    accounts: state.investmentAccounts,
+    callbacks: {
+      onSave: saveAccountLivePlan,
+      onDelete: deleteAccountLivePlan,
+      onReorder: persistAccountLivePlanOrder,
+      onLocalChange: (plans) => {
+        state.accountLiveActionPlans = plans;
+      },
+    },
+    ui: {
+      showSyncHint: true,
+      historicalDraftHint: false,
+    },
+  });
+  updateAccountsSummaryText(
+    state.investmentAccounts.length,
+    enabledCount,
+    state.accountLiveActionPlans.length,
+  );
+}
+
+function updateAccountsSummaryText(accountCount, enabledCount, planCount) {
+  if (!accountsSummary) return;
+  if (!accountCount) {
+    accountsSummary.textContent = "暂无账户，点击「新增账户」开始。";
+    return;
+  }
+  const parts = [`共 ${accountCount} 个账户`];
+  if (enabledCount !== accountCount) parts.push(`${enabledCount} 个启用`);
+  parts.push(`${planCount} 个标的`);
+  accountsSummary.textContent = `${parts.join(" · ")}。保存后会同步到最新复盘日。`;
+}
+
+function accountLivePlanPayload(plan) {
+  return {
+    accountId: Number(plan.accountId || 0),
+    symbol: plan.symbol,
+    actionType: plan.actionType,
+    entryPlan: plan.entryPlan,
+    takeProfitPlan: plan.takeProfitPlan,
+    stopLossPlan: plan.stopLossPlan,
+    supportLevels: plan.supportLevels,
+    resistanceLevels: plan.resistanceLevels,
+    keyLevels: plan.keyLevels,
+    currentPosition: plan.currentPosition,
+    positionAmount: plan.positionAmount ?? null,
+    thinking: plan.thinking,
+    marketType: plan.marketType,
+    sortOrder: Number(plan.sortOrder || 0),
+  };
+}
+
+async function saveAccountLivePlan(plan) {
+  const payload = accountLivePlanPayload(plan);
+  if (!payload.accountId || !payload.symbol) {
+    throw new Error("账户和标的不能为空");
+  }
+  const isExisting = Number(plan.id || 0) > 0;
+  await fetchJson(isExisting ? `/api/account-live-action-plans/${plan.id}` : "/api/account-live-action-plans", {
+    method: isExisting ? "PUT" : "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  await loadAccountLivePlans(true);
+  await refreshOpenLatestReviewActionPlans();
+}
+
+async function deleteAccountLivePlan(plan) {
+  if (!plan?.id) {
+    await loadAccountLivePlans(true);
+    return;
+  }
+  await fetchJson(`/api/account-live-action-plans/${plan.id}`, { method: "DELETE" });
+  await loadAccountLivePlans(true);
+  await refreshOpenLatestReviewActionPlans();
+}
+
+async function persistAccountLivePlanOrder(plans) {
+  const persisted = plans.filter((plan) => Number(plan.id || 0) > 0);
+  for (const plan of persisted) {
+    await fetchJson(`/api/account-live-action-plans/${plan.id}`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(accountLivePlanPayload(plan)),
+    });
+  }
+  await loadAccountLivePlans(true);
+  await refreshOpenLatestReviewActionPlans();
+}
+
+async function refreshOpenLatestReviewActionPlans() {
+  if (!state.activeDate || reviewDrawer?.classList.contains("hidden")) return;
+  if (!state.latestArchiveDate || state.activeDate !== state.latestArchiveDate) return;
+  if (getActiveActionPlanEditorContext()?.mode === "live") return;
+  try {
+    const data = await fetchJson(`/api/reviews/${state.activeDate}/bootstrap`);
+    state.activeBootstrap = data;
+    state.actionPlans = normalizeActionPlans(data.actionPlans || []);
+    state.activeActionPlanEditor?.refresh?.(state.actionPlans);
+    scheduleAccountImpactPreview(0);
+  } catch (error) {
+    console.warn("Failed to refresh latest review action plans", error);
   }
 }
 
