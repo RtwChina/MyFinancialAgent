@@ -283,12 +283,30 @@
                 <p class="toolbar-caption">维护每个账户的资金状态，以及该账户下追踪的标的。保存后会同步到最新复盘日。</p>
               </div>
               <div class="panel-header-meta">
+                <a id="showFundSummaryBtn" class="ghost panel-link-button" href="/?view=fundSummary" target="_blank" rel="noopener noreferrer">统计汇总</a>
                 <button id="newAccountBtn" class="ghost">新增账户</button>
                 <button id="refreshAccountsBtn" class="ghost">刷新</button>
               </div>
             </div>
             <div id="accountsSummary" class="accounts-summary muted"></div>
             <div id="accountLivePlans" class="action-plan-account-groups accounts-list"></div>
+          </section>
+        </section>
+
+        <section id="fundSummaryView" class="view">
+          <section class="panel fund-summary-panel">
+            <div class="panel-header">
+              <div>
+                <h2>资金分布汇总</h2>
+                <p class="toolbar-caption">按币种拆分账户资产，汇总每个标的的金额与账户内占比。带 * 的金额按仓位区间中位数估算。</p>
+              </div>
+              <div class="panel-header-meta">
+                <button id="refreshFundSummaryBtn" class="ghost">刷新</button>
+              </div>
+            </div>
+            <div id="fundSummaryContent" class="fund-summary-content">
+              <div class="empty-state">加载中...</div>
+            </div>
           </section>
         </section>
 

@@ -1,0 +1,323 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>资金分布 - 横条配色比选</title>
+  <style>
+    :root {
+      --page: #f2f4f7;
+      --ink: #152033;
+      --body: #3e4b5f;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      background: var(--page);
+      color: var(--ink);
+      font-family: "Avenir Next", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
+      -webkit-font-smoothing: antialiased;
+    }
+    .page {
+      max-width: 1440px;
+      margin: 0 auto;
+      padding: 20px 22px 42px;
+    }
+    .page-head { margin-bottom: 18px; }
+    .page-head h1 { margin: 0 0 6px; font-size: 24px; font-weight: 760; }
+    .page-head p { margin: 0; color: #6b7788; font-size: 13px; }
+    .options { display: grid; gap: 18px; }
+    .option-name {
+      display: flex; align-items: center; gap: 10px;
+      margin: 0 0 7px;
+      color: #4b596d; font-size: 13px; font-weight: 700; flex-wrap: wrap;
+    }
+    .option-name b {
+      display: inline-flex; justify-content: center;
+      min-width: 29px; padding: 3px 8px;
+      border-radius: 5px;
+      background: #182335; color: #fff; font-size: 12px;
+    }
+    .option-name code {
+      padding: 2px 6px;
+      border-radius: 4px;
+      background: #eef2f7;
+      color: #2d3a4f;
+      font-size: 11px;
+      font-weight: 600;
+    }
+    .surface {
+      min-width: 0; overflow: hidden;
+      border: 1px solid #d3e2f2;
+      border-radius: 8px;
+      background: #fff;
+    }
+    .summary-head {
+      display: flex; align-items: center; justify-content: space-between;
+      flex-wrap: wrap; gap: 10px 22px;
+      padding: 11px 14px;
+      border-bottom: 1px solid #d3e2f2;
+      background: #fff;
+    }
+    .currency-block { min-width: 265px; }
+    .currency-title { display: flex; align-items: center; gap: 8px; margin-bottom: 4px; }
+    .code {
+      display: inline-flex; align-items: center; justify-content: center;
+      height: 26px; min-width: 45px; padding: 0 8px;
+      border-radius: 5px;
+      background: #d6e8fb; color: #2e669b;
+      font-size: 12px; font-weight: 800;
+    }
+    .currency-title h2 { margin: 0; color: #122640; font-size: 15px; font-weight: 750; }
+    .tip {
+      display: inline-flex; align-items: center; justify-content: center;
+      width: 17px; height: 17px;
+      border: 1px solid #b9d2ea;
+      border-radius: 999px;
+      color: #477aa9; font-size: 10px; font-weight: 800;
+    }
+    .note { color: #5f7e9c; font-size: 11px; }
+    .metrics { display: flex; align-items: stretch; flex-wrap: wrap; }
+    .metric {
+      min-width: 118px; padding: 0 13px;
+      border-left: 1px solid #d1e1f1;
+    }
+    .metric:first-child { border-left: 0; }
+    .metric label {
+      display: block; margin-bottom: 3px;
+      color: #5f7e9c; font-size: 11px; font-weight: 650;
+    }
+    .metric strong {
+      display: block;
+      color: #122640; font-size: 15px; font-weight: 750;
+      font-variant-numeric: tabular-nums;
+    }
+    .metric.focus strong { color: #2f6fa9; }
+    .ref { color: #7e9bb6; font-size: 10px; font-variant-numeric: tabular-nums; }
+    .account-band {
+      display: flex; align-items: flex-start; gap: 12px;
+      padding: 9px 14px;
+      border-bottom: 1px solid #d3e2f2;
+      background: #fff;
+    }
+    .band-label {
+      flex: none; margin-top: 8px;
+      color: #5f7e9c; font-size: 11px; font-weight: 650;
+    }
+    .accounts {
+      display: flex; gap: 8px;
+      min-width: 0; overflow-x: auto;
+    }
+    .account {
+      min-width: 218px; padding: 7px 9px;
+      border: 1px solid #c8dff4;
+      border-radius: 6px;
+      background: #edf5ff;
+    }
+    .account-top, .account-foot {
+      display: flex; align-items: center; justify-content: space-between; gap: 9px;
+    }
+    .account-top b { color: #122640; font-size: 12px; font-weight: 700; }
+    .account-top span, .account-foot {
+      color: #5f7e9c; font-size: 10.5px;
+      font-variant-numeric: tabular-nums;
+    }
+
+    /* === 横条本体 === */
+    .track {
+      position: relative;
+      overflow: hidden;
+      height: var(--track-h, 4px);
+      margin: 6px 0 5px;
+      border-radius: 999px;
+      background: var(--track);
+      box-shadow: var(--track-shadow, none);
+    }
+    .track i {
+      display: block;
+      width: var(--fill);
+      height: 100%;
+      border-radius: inherit;
+      background: var(--bar);
+      box-shadow: var(--bar-shadow, none);
+    }
+    .tiny-track {
+      height: var(--mini-h, 4px);
+      margin: 0;
+    }
+
+    table {
+      width: 100%;
+      min-width: 760px;
+      border-collapse: collapse;
+      table-layout: fixed;
+      font-size: 12px;
+    }
+    .matrix { min-width: 0; overflow-x: auto; }
+    th {
+      height: 33px; padding: 0 12px;
+      background: #eef5fc;
+      color: #5f7e9c; font-size: 11px; font-weight: 650;
+      text-align: left; white-space: nowrap;
+    }
+    td {
+      height: 43px; padding: 0 12px;
+      border-top: 1px solid #e3edf7;
+      color: #334c66; vertical-align: middle;
+      font-variant-numeric: tabular-nums;
+    }
+    th:first-child, td:first-child { width: 122px; }
+    th:last-child, td:last-child { width: 92px; }
+    .symbol {
+      display: inline-flex; align-items: center; gap: 7px;
+      color: #122640; font-weight: 750;
+    }
+    .symbol i {
+      display: inline-block;
+      width: 6px; height: 6px;
+      border-radius: 999px;
+      background: var(--bar);
+    }
+    .cell-main {
+      display: flex; justify-content: space-between; gap: 9px;
+      margin-bottom: 5px;
+    }
+    .money { color: #122640; font-weight: 720; }
+    .star { margin-left: 2px; color: #2f70ac; font-weight: 800; }
+    .pct { color: #5f7e9c; font-size: 10.5px; font-weight: 650; }
+    .total .money { font-weight: 770; }
+    .legend {
+      padding: 7px 12px;
+      border-top: 1px solid #d3e2f2;
+      background: #f7faff;
+      color: #5f7e9c; font-size: 10.5px;
+    }
+
+    /* ===== 配色方案 =====
+       命名约定：track + bar，必要时加 bar-shadow / track-shadow 加深层级 */
+
+    /* 当前线上 */
+    .t0 { --track: #e2edf8; --bar: #5a95cd; }
+
+    /* A 同蓝色族，加深 bar 并稍微提亮 track，对比更强但不出戏 */
+    .t1 { --track: #d6e3f0; --bar: #2f70ac; }
+
+    /* B 经典海军蓝重锤，最直观 */
+    .t2 { --track: #d9e4ef; --bar: #154e85; }
+
+    /* C 凉感青蓝，呼应汇总区头部色调 */
+    .t3 { --track: #d8e7e9; --bar: #2f7e93; }
+
+    /* D 灰底冷蓝，弱化 track 喧宾夺主感 */
+    .t4 { --track: #dfe5ec; --bar: #2563a8; }
+
+    /* E 渐变 fill：浅蓝 → 深蓝，颜色过渡感更强 */
+    .t5 { --track: #e3edf7; --bar: linear-gradient(90deg, #4f92cb 0%, #1a5896 100%); }
+
+    /* F 加内阴影 + 中蓝 fill，4px 也能"凹"出来 */
+    .t6 {
+      --track: #d6e1ee; --bar: #2f6fa9;
+      --track-shadow: inset 0 0 0 1px rgba(20, 50, 90, 0.06);
+    }
+
+    /* G 偏暖的钢蓝，气质稳，bar 略哑光 */
+    .t7 { --track: #dde2ea; --bar: #355d8a; }
+
+    /* H 6px 高度 + 中蓝 fill，纯靠厚度刷存在感（结构最干净） */
+    .t8 {
+      --track: #dde8f4; --bar: #2f70ac;
+      --track-h: 6px; --mini-h: 6px;
+    }
+  </style>
+</head>
+<body>
+  <main class="page">
+    <header class="page-head">
+      <h1>资金分布 · 横条 (track + bar) 对比</h1>
+      <p>右上角账户卡内 4px 横条 + 表格内 mini 横条共用同一组色。第一行为当前线上配色，下面是几组替换方案。</p>
+    </header>
+    <div id="options" class="options"></div>
+  </main>
+
+  <script>
+    const variants = [
+      ["t0", "0", "当前线上",        "#e2edf8 / #5a95cd",                       "baseline，对比偏弱"],
+      ["t1", "A", "同色族加深",       "#d6e3f0 / #2f70ac",                       "保留蓝色气质，bar 深一档、track 略降饱和"],
+      ["t2", "B", "海军蓝重锤",       "#d9e4ef / #154e85",                       "对比最强，账户卡里横条几乎自带焦点"],
+      ["t3", "C", "凉感青蓝",         "#d8e7e9 / #2f7e93",                       "呼应顶部 USD 标签的蓝调，气质更轻"],
+      ["t4", "D", "冷灰底 + 蓝 bar",  "#dfe5ec / #2563a8",                       "track 偏中性灰，让 bar 颜色脱出"],
+      ["t5", "E", "渐变 fill",        "#e3edf7 / linear-gradient(浅蓝→深蓝)",   "fill 自带方向感，长 bar 更明显"],
+      ["t6", "F", "track 描内阴影",   "#d6e1ee / #2f6fa9 + inset shadow",        "在 4px 高度下额外凹一条边，立体感更强"],
+      ["t7", "G", "暖钢蓝",           "#dde2ea / #355d8a",                       "稳重，偏深色商务感"],
+      ["t8", "H", "6px 加厚",         "#dde8f4 / #2f70ac (6px)",                 "靠物理厚度提升识别，最不依赖颜色冲突"],
+    ];
+
+    const content = `
+      <section class="surface">
+        <header class="summary-head">
+          <div class="currency-block">
+            <div class="currency-title"><span class="code">USD</span><h2>美元账户</h2><span class="tip">!</span></div>
+            <div class="note">金额单位统一按"万"展示；括号内为人民币参考金额。</div>
+          </div>
+          <div class="metrics">
+            <div class="metric"><label>总资产</label><strong>$3.2万</strong><span class="ref">(约 ¥21.76万)</span></div>
+            <div class="metric focus"><label>估算持仓</label><strong>$0.96万</strong><span class="ref">(约 ¥6.53万)</span></div>
+            <div class="metric"><label>未分配</label><strong>$2.24万</strong><span class="ref">(约 ¥15.23万)</span></div>
+          </div>
+        </header>
+        <div class="account-band">
+          <span class="band-label">账户覆盖</span>
+          <div class="accounts">
+            <article class="account">
+              <div class="account-top"><b>老虎-美股</b><span>$3.2万<br>(约 ¥21.76万)</span></div>
+              <div class="track" style="--fill:30%"><i></i></div>
+              <div class="account-foot"><span>估算持仓 $0.96万</span><span>30%</span></div>
+            </article>
+            <article class="account">
+              <div class="account-top"><b>富途-港美</b><span>$1.8万<br>(约 ¥12.24万)</span></div>
+              <div class="track" style="--fill:64%"><i></i></div>
+              <div class="account-foot"><span>估算持仓 $1.15万</span><span>64%</span></div>
+            </article>
+          </div>
+        </div>
+        <div class="matrix">
+          <table>
+            <thead><tr><th>标的</th><th>老虎-美股</th><th>总金额</th><th>占总资产</th></tr></thead>
+            <tbody>
+              <tr>
+                <td><span class="symbol"><i></i>MSFT</span></td>
+                <td><div class="cell-main"><span class="money">$0.56万<span class="star">*</span></span><span class="pct">17.5%</span></div><div class="track tiny-track" style="--fill:17.5%"><i></i></div></td>
+                <td class="total"><span class="money">$0.56万<span class="star">*</span></span><div class="ref">(约 ¥3.81万)</div></td>
+                <td><span class="money">17.5%</span></td>
+              </tr>
+              <tr>
+                <td><span class="symbol"><i></i>NVDA</span></td>
+                <td><div class="cell-main"><span class="money">$0.4万</span><span class="pct">12.5%</span></div><div class="track tiny-track" style="--fill:12.5%"><i></i></div></td>
+                <td class="total"><span class="money">$0.4万</span><div class="ref">(约 ¥2.72万)</div></td>
+                <td><span class="money">12.5%</span></td>
+              </tr>
+              <tr>
+                <td><span class="symbol"><i></i>GOOGL</span></td>
+                <td><div class="cell-main"><span class="money">$0.84万</span><span class="pct">26.3%</span></div><div class="track tiny-track" style="--fill:26.3%"><i></i></div></td>
+                <td class="total"><span class="money">$0.84万</span><div class="ref">(约 ¥5.71万)</div></td>
+                <td><span class="money">26.3%</span></td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+        <footer class="legend">* 按仓位区间中位数估算，鼠标悬停查看规则</footer>
+      </section>`;
+
+    document.querySelector("#options").innerHTML = variants.map(([tone, key, title, spec, description]) => `
+      <section class="option">
+        <p class="option-name">
+          <b>${key}</b>${title}
+          <code>${spec}</code>
+          <span>${description}</span>
+        </p>
+        <div class="${tone}">${content}</div>
+      </section>
+    `).join("");
+  </script>
+</body>
+</html>

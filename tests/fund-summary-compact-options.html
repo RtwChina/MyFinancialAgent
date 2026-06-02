@@ -1,0 +1,421 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>资金分布汇总 - 紧凑样式方案</title>
+  <style>
+    :root {
+      --page: #f3f5f7;
+      --ink: #17212f;
+      --muted: #697588;
+      --line: #dfe4ea;
+      --green: #246d54;
+      --green-soft: #e5f1ec;
+      --red: #9a4b4b;
+      --blue: #416a8d;
+      --usd: #42627d;
+      --cny: #746347;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      background: var(--page);
+      color: var(--ink);
+      font-family: "Avenir Next", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
+      letter-spacing: 0;
+      -webkit-font-smoothing: antialiased;
+    }
+    .page {
+      max-width: 1500px;
+      margin: 0 auto;
+      padding: 22px 22px 44px;
+    }
+    .page-head {
+      display: flex;
+      align-items: baseline;
+      justify-content: space-between;
+      gap: 20px;
+      margin-bottom: 18px;
+    }
+    .page-head h1 {
+      margin: 0;
+      font-size: 24px;
+      font-weight: 760;
+    }
+    .page-head p {
+      margin: 0;
+      color: var(--muted);
+      font-size: 13px;
+    }
+    .option {
+      margin-bottom: 22px;
+    }
+    .option-name {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      margin: 0 0 8px;
+      color: #465466;
+      font-size: 13px;
+      font-weight: 700;
+    }
+    .option-name strong {
+      padding: 3px 8px;
+      border-radius: 5px;
+      background: #17212f;
+      color: white;
+    }
+    .surface {
+      overflow: hidden;
+      background: #fff;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+    }
+    .appbar {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 18px;
+      min-height: 50px;
+      padding: 0 18px;
+      border-bottom: 1px solid var(--line);
+    }
+    .appbar h2 {
+      margin: 0;
+      font-size: 17px;
+      font-weight: 720;
+    }
+    .actions { display: flex; align-items: center; gap: 8px; }
+    .btn {
+      height: 31px;
+      padding: 0 13px;
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      background: white;
+      color: #354253;
+      font-size: 12px;
+      font-weight: 650;
+    }
+    .btn.primary {
+      background: #17212f;
+      border-color: #17212f;
+      color: #fff;
+    }
+    .currency {
+      display: grid;
+      grid-template-columns: 246px minmax(0, 1fr);
+      border-bottom: 1px solid var(--line);
+    }
+    .currency:last-child { border-bottom: 0; }
+    .rail {
+      border-right: 1px solid var(--line);
+      padding: 13px 14px;
+      background: #fafbfc;
+    }
+    .currency-name {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      margin-bottom: 11px;
+    }
+    .currency-name b {
+      display: inline-flex;
+      height: 25px;
+      align-items: center;
+      padding: 0 7px;
+      border-radius: 4px;
+      color: var(--usd);
+      background: #edf2f6;
+      font-size: 12px;
+    }
+    .cny .currency-name b { color: var(--cny); background: #f4f1ea; }
+    .currency-name h3 {
+      margin: 0;
+      font-size: 15px;
+      font-weight: 730;
+    }
+    .tip {
+      position: relative;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      width: 17px;
+      height: 17px;
+      border: 1px solid #bcc5d0;
+      border-radius: 50%;
+      color: #657386;
+      font-size: 11px;
+      font-weight: 800;
+    }
+    .tip:hover::after {
+      position: absolute;
+      left: -12px;
+      top: 24px;
+      z-index: 2;
+      padding: 7px 9px;
+      border: 1px solid var(--line);
+      border-radius: 5px;
+      background: #fff;
+      color: #526173;
+      content: "人民币参考金额按固定汇率 1 USD = 6.80 CNY 折算";
+      font-size: 11px;
+      font-weight: 500;
+      white-space: nowrap;
+      box-shadow: 0 10px 24px rgba(20, 30, 45, .09);
+    }
+    .metric-row {
+      display: grid;
+      gap: 6px;
+      margin-bottom: 13px;
+    }
+    .metric {
+      display: flex;
+      justify-content: space-between;
+      gap: 9px;
+      color: var(--muted);
+      font-size: 11.5px;
+    }
+    .metric strong {
+      color: var(--ink);
+      font-variant-numeric: tabular-nums;
+      font-size: 12px;
+      font-weight: 690;
+    }
+    .metric em, .cny-ref {
+      display: inline;
+      color: #8a94a2;
+      font-size: 10px;
+      font-style: normal;
+      font-weight: 500;
+      white-space: nowrap;
+    }
+    .accounts {
+      display: grid;
+      gap: 6px;
+    }
+    .account {
+      padding: 7px 8px;
+      border: 1px solid #e8ecf1;
+      border-radius: 5px;
+      background: #fff;
+    }
+    .account-head, .account-foot {
+      display: flex;
+      justify-content: space-between;
+      gap: 6px;
+      font-size: 11px;
+    }
+    .account-head { font-weight: 650; }
+    .account-foot {
+      margin-top: 4px;
+      color: var(--muted);
+    }
+    .main {
+      min-width: 0;
+      padding: 0;
+    }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      table-layout: fixed;
+      font-size: 12px;
+    }
+    thead th {
+      height: 35px;
+      padding: 0 11px;
+      border-bottom: 1px solid var(--line);
+      color: #728094;
+      font-size: 11px;
+      font-weight: 650;
+      text-align: left;
+      white-space: nowrap;
+    }
+    tbody td {
+      height: 38px;
+      padding: 0 11px;
+      border-bottom: 1px solid #eef1f5;
+      vertical-align: middle;
+      white-space: nowrap;
+      font-variant-numeric: tabular-nums;
+    }
+    tbody tr:last-child td { border-bottom: 0; }
+    th:first-child, td:first-child { width: 112px; }
+    th.last-money, td.last-money { width: 138px; }
+    th.percent, td.percent { width: 82px; }
+    .ticker {
+      font-size: 12.5px;
+      font-weight: 740;
+    }
+    .number { color: #202d3d; font-weight: 620; }
+    .muted { color: #8994a3; }
+    .total { color: #111b28; font-weight: 740; }
+    .share { color: var(--green); font-weight: 740; }
+    .estimate { color: #9d7239; font-weight: 800; }
+    .currency-note {
+      padding: 8px 11px;
+      border-top: 1px solid #eef1f5;
+      color: #8792a1;
+      font-size: 10.5px;
+    }
+
+    /* B: more compact horizontal ledger */
+    .b .currency { grid-template-columns: 1fr; }
+    .b .rail {
+      display: grid;
+      grid-template-columns: 180px 1fr;
+      gap: 18px;
+      padding: 10px 14px;
+      border-right: 0;
+      border-bottom: 1px solid var(--line);
+      background: #fff;
+    }
+    .b .currency-name { margin: 0 0 5px; }
+    .b .metric-row {
+      display: flex;
+      gap: 20px;
+      margin: 0;
+      align-items: center;
+    }
+    .b .metric { display: block; }
+    .b .metric strong { display: block; margin-top: 3px; font-size: 13px; }
+    .b .accounts {
+      grid-column: 1 / -1;
+      display: flex;
+      gap: 8px;
+    }
+    .b .account {
+      flex: 0 1 230px;
+      background: #f8fafb;
+    }
+    .b tbody td { height: 35px; }
+
+    /* C: paper report */
+    .c.surface { border-color: #d6d0c8; background: #fffefa; }
+    .c .appbar, .c .currency { border-color: #ddd8d0; }
+    .c .appbar { background: #fffefa; }
+    .c .rail { background: #faf8f3; border-color: #ddd8d0; }
+    .c .account { border: 0; border-top: 1px solid #e5dfd5; border-radius: 0; background: transparent; padding-inline: 0; }
+    .c .currency-name b { background: #ebe6dc; color: #554c40; }
+    .c thead th { background: #f7f3ec; border-color: #ddd8d0; color: #71675c; }
+    .c tbody td { border-color: #ece7df; }
+    .c .share { color: #466451; }
+
+    /* D: muted terminal */
+    .d.surface { background: #111923; border-color: #273444; color: #e6ebf1; }
+    .d .appbar { border-color: #273444; }
+    .d .appbar h2 { color: #f3f6fa; }
+    .d .btn { border-color: #324153; background: transparent; color: #bdc7d4; }
+    .d .btn.primary { background: #d7dde5; color: #101720; }
+    .d .currency { border-color: #273444; }
+    .d .rail { background: #141e2a; border-color: #273444; }
+    .d .currency-name b { background: #213142; color: #bdcfdf; }
+    .d .cny .currency-name b { background: #302b22; color: #dfd0b0; }
+    .d .tip { border-color: #49586a; color: #c3cdda; }
+    .d .metric, .d .account-foot, .d .muted, .d .currency-note { color: #8694a6; }
+    .d .metric strong, .d .account-head, .d .ticker, .d .number, .d .total { color: #e5eaf1; }
+    .d .account { border-color: #293746; background: #172331; }
+    .d thead th { background: #16222e; border-color: #273444; color: #92a1b5; }
+    .d tbody td { border-color: #22303e; }
+    .d .share { color: #71b79a; }
+    .d .cny-ref { color: #8d9aac; }
+    .d .currency-note { border-color: #273444; }
+
+    @media (max-width: 720px) {
+      .page { padding: 14px 10px 30px; }
+      .page-head { display: block; }
+      .page-head p { margin-top: 6px; }
+      .currency { grid-template-columns: 1fr; }
+      .rail { border-right: 0; border-bottom: 1px solid var(--line); }
+      .main { overflow-x: auto; }
+      table { min-width: 690px; }
+      .b .rail { grid-template-columns: 1fr; }
+    }
+  </style>
+</head>
+<body>
+  <main class="page">
+    <header class="page-head">
+      <h1>资金分布汇总</h1>
+      <p>紧凑布局候选 / 相同数据对照</p>
+    </header>
+    <section class="option">
+      <p class="option-name"><strong>A</strong> 紧凑交易表</p>
+      <div class="surface a" data-demo></div>
+    </section>
+    <section class="option">
+      <p class="option-name"><strong>B</strong> 横向账户带</p>
+      <div class="surface b" data-demo></div>
+    </section>
+    <section class="option">
+      <p class="option-name"><strong>C</strong> 纸面资产簿</p>
+      <div class="surface c" data-demo></div>
+    </section>
+    <section class="option">
+      <p class="option-name"><strong>D</strong> 深色交易终端</p>
+      <div class="surface d" data-demo></div>
+    </section>
+  </main>
+  <script>
+    const groups = [
+      {
+        code: "USD", title: "美元账户", total: "$3.2万", totalCny: "约 ¥21.76万",
+        held: "$2.17万", heldCny: "约 ¥14.76万", free: "$1.03万", freeCny: "约 ¥7万",
+        accounts: [
+          { name: "老虎-美股", total: "$3.2万", totalCny: "约 ¥21.76万", held: "$2.17万", heldCny: "约 ¥14.76万", share: "67.8%" }
+        ],
+        rows: [
+          ["MSFT", "$0.64万*", "20%", "$0.64万*", "20%"],
+          ["NVDA", "$0.56万*", "17.5%", "$0.56万*", "17.5%"],
+          ["LITE", "$0.4万*", "12.5%", "$0.4万*", "12.5%"],
+          ["SNDK", "$0.32万", "10%", "$0.32万", "10%"]
+        ]
+      },
+      {
+        code: "CNY", title: "人民币账户", total: "¥43万", held: "¥17.44万", free: "¥25.56万",
+        accounts: [
+          { name: "东方财富-国内", total: "¥26万", held: "¥10.2万", share: "39.2%" },
+          { name: "天天基金-国内", total: "¥17万", held: "¥7.24万", share: "42.6%" }
+        ],
+        rows: [
+          ["黄金 ETF", "¥6.2万", "14.42%", "¥4.5万", "¥1.7万", "¥6.2万", "14.42%"],
+          ["胜宏科技", "¥5.2万", "12.09%", "¥5.2万", "-", "¥5.2万", "12.09%"],
+          ["半导体 ETF", "¥3.4万*", "7.91%", "-", "¥3.4万*", "¥3.4万*", "7.91%"]
+        ]
+      }
+    ];
+    function ref(text) { return text ? `<em class="cny-ref">(${text})</em>` : ""; }
+    function accountHtml(a) {
+      return `<div class="account"><div class="account-head"><span>${a.name}</span><span>${a.total}${ref(a.totalCny)}</span></div><div class="account-foot"><span>持仓 ${a.held}${ref(a.heldCny)}</span><span>${a.share}</span></div></div>`;
+    }
+    function tableHtml(group) {
+      const accountHeads = group.accounts.map(a => `<th>${a.name}</th>`).join("");
+      const body = group.rows.map((r) => {
+        if (group.code === "USD") {
+          const converted = r[0] === "MSFT" ? "约 ¥4.35万" : r[0] === "NVDA" ? "约 ¥3.81万" : r[0] === "LITE" ? "约 ¥2.72万" : "约 ¥2.18万";
+          return `<tr><td class="ticker">${r[0]}</td><td class="number">${r[1]}</td><td class="total">${r[3]} ${ref(converted)}</td><td class="share">${r[4]}</td></tr>`;
+        }
+        return `<tr><td class="ticker">${r[0]}</td><td class="number">${r[3]}</td><td class="number">${r[4]}</td><td class="total">${r[5]}</td><td class="share">${r[6]}</td></tr>`;
+      }).join("");
+      return `<table><thead><tr><th>标的</th>${accountHeads}<th class="last-money">总金额</th><th class="percent">占总资产</th></tr></thead><tbody>${body}</tbody></table>`;
+    }
+    function groupHtml(group) {
+      return `<section class="currency ${group.code === "CNY" ? "cny" : ""}">
+        <aside class="rail">
+          <div class="currency-name"><b>${group.code}</b><h3>${group.title}</h3>${group.code === "USD" ? `<span class="tip">!</span>` : ""}</div>
+          <div class="metric-row">
+            <div class="metric"><span>总资产</span><strong>${group.total} ${ref(group.totalCny)}</strong></div>
+            <div class="metric"><span>持仓</span><strong>${group.held} ${ref(group.heldCny)}</strong></div>
+            <div class="metric"><span>未分配</span><strong>${group.free} ${ref(group.freeCny)}</strong></div>
+          </div>
+          <div class="accounts">${group.accounts.map(accountHtml).join("")}</div>
+        </aside>
+        <div class="main">${tableHtml(group)}</div>
+      </section>`;
+    }
+    document.querySelectorAll("[data-demo]").forEach((surface) => {
+      surface.innerHTML = `<header class="appbar"><h2>资金分布汇总</h2><div class="actions"><button class="btn">刷新</button><button class="btn primary">账户管理</button></div></header>${groups.map(groupHtml).join("")}`;
+    });
+  </script>
+</body>
+</html>

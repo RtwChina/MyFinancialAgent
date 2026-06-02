@@ -102,6 +102,7 @@ const state = {
   },
   actionPlans: [],
   accountLiveActionPlans: [],
+  fundSummary: null,
   investmentAccounts: [],
   selectedActionPlanIndex: -1,
   actionPlanSymbolCatalog: [],
@@ -112,6 +113,7 @@ const state = {
   symbolsLoaded: false,
   accountsLoaded: false,
   accountLivePlansLoaded: false,
+  fundSummaryLoaded: false,
   keywordsLoaded: false,
   activeKeywordType: "macro",
   readmeLoaded: false,
@@ -321,6 +323,7 @@ const newsView = document.querySelector("#newsView");
 const reviewsView = document.querySelector("#reviewsView");
 const symbolsView = document.querySelector("#symbolsView");
 const accountsView = document.querySelector("#accountsView");
+const fundSummaryView = document.querySelector("#fundSummaryView");
 const keywordsView = document.querySelector("#keywordsView");
 const readmeView = document.querySelector("#readmeView");
 const navButtons = document.querySelectorAll(".nav-chip");
@@ -395,6 +398,8 @@ const reviewModalFooter = document.querySelector(".review-modal-footer");
 const actionPlanAccountGroups = document.querySelector("#actionPlanAccountGroups");
 const accountLivePlans = document.querySelector("#accountLivePlans");
 const accountsSummary = document.querySelector("#accountsSummary");
+const fundSummaryContent = document.querySelector("#fundSummaryContent");
+const refreshFundSummaryBtn = document.querySelector("#refreshFundSummaryBtn");
 const accountFormModal = document.querySelector("#accountFormModal");
 const accountFormBody = document.querySelector("#accountFormBody");
 const accountFormTitle = document.querySelector("#accountFormTitle");
@@ -560,8 +565,10 @@ document.querySelector("#symbolResolveInput")?.addEventListener("keydown", (e) =
 });
 document.querySelector("#refreshAccountsBtn")?.addEventListener("click", () => loadAccounts(true));
 document.querySelector("#newAccountBtn")?.addEventListener("click", () => showAccountForm());
+refreshFundSummaryBtn?.addEventListener("click", () => loadFundSummary(true));
 
-switchView("reviews");
+const initialView = new URLSearchParams(window.location.search).get("view") === "fundSummary" ? "fundSummary" : "reviews";
+switchView(initialView);
 loadHeroEnvironment();
 decorateAiHeaders();
 initializeHomepageInsights();
@@ -585,11 +592,13 @@ function initRichTooltips() {
 
 function switchView(view) {
   state.activeView = view;
-  navButtons.forEach((button) => button.classList.toggle("active", button.dataset.view === view));
+  const navigationView = view === "fundSummary" ? "accounts" : view;
+  navButtons.forEach((button) => button.classList.toggle("active", button.dataset.view === navigationView));
   newsView.classList.toggle("active", view === "news");
   reviewsView.classList.toggle("active", view === "reviews");
   if (symbolsView) symbolsView.classList.toggle("active", view === "symbols");
   if (accountsView) accountsView.classList.toggle("active", view === "accounts");
+  if (fundSummaryView) fundSummaryView.classList.toggle("active", view === "fundSummary");
   if (keywordsView) keywordsView.classList.toggle("active", view === "keywords");
   if (readmeView) readmeView.classList.toggle("active", view === "readme");
   if (view === "symbols" && !state.symbolsLoaded) loadSymbols();
@@ -597,6 +606,7 @@ function switchView(view) {
     if (state.accountsLoaded) renderAccountLiveActionPlans();
     else loadAccounts();
   }
+  if (view === "fundSummary") loadFundSummary(!state.fundSummaryLoaded);
   if (view === "keywords" && !state.keywordsLoaded) loadKeywords();
   if (view === "readme" && !state.readmeLoaded) renderReadme();
 }
@@ -3608,6 +3618,20 @@ function formatAccountMoney(value, currency = "CNY") {
   return `${prefix}${(number / 10000).toLocaleString("zh-CN", { maximumFractionDigits: 2 })}万`;
 }
 
+function rawMoneyToWanInput(value) {
+  if (value == null || value === "") return "";
+  const number = Number(value);
+  if (!Number.isFinite(number)) return "";
+  return String(Number((number / 10000).toFixed(4)));
+}
+
+function wanInputToRawMoney(value) {
+  if (value == null || value === "") return null;
+  const number = Number(value);
+  if (!Number.isFinite(number)) return null;
+  return Math.round(number * 10000 * 100) / 100;
+}
+
 function normalizeSnapshotNumber(value) {
   if (value == null || value === "") return "";
   const number = Number(value);
@@ -3746,6 +3770,154 @@ function accountNameForPlan(plan) {
   return findAccountById(plan.accountId)?.name || plan.accountName || "未分配账户";
 }
 
+function formatFundSummaryPercent(value) {
+  if (value == null || value === "") return "-";
+  const number = Number(value);
+  if (!Number.isFinite(number)) return "-";
+  return `${Number(number.toFixed(2)).toLocaleString("zh-CN", { maximumFractionDigits: 2 })}%`;
+}
+
+const USD_CNY_REFERENCE_RATE = 6.8;
+
+function fundSummaryCnyReferenceHtml(amount, currency) {
+  if (currency !== "USD" || amount == null || !Number.isFinite(Number(amount))) return "";
+  return `<small class="fund-summary-cny-reference">(约 ${escapeHtml(formatAccountMoney(Number(amount) * USD_CNY_REFERENCE_RATE, "CNY"))})</small>`;
+}
+
+function fundSummaryAmountHtml(amount, currency, source = "", estimateLabel = "", showCnyReference = false) {
+  if (amount == null) return `<span class="fund-summary-empty">-</span>`;
+  const marker = source === "estimated"
+    ? `<span class="fund-summary-estimate-mark" tabindex="0" aria-label="按仓位区间中位数估算">*</span><span class="fund-summary-tooltip">按仓位区间中位数估算：${escapeHtml(estimateLabel || "")}</span>`
+    : "";
+  const cnyReference = showCnyReference ? fundSummaryCnyReferenceHtml(amount, currency) : "";
+  return `<span class="fund-summary-money">${escapeHtml(formatAccountMoney(amount, currency))}</span>${marker}${cnyReference}`;
+}
+
+async function loadFundSummary(forceRefresh = false) {
+  if (!fundSummaryContent) return;
+  if (state.fundSummaryLoaded && !forceRefresh) {
+    renderFundSummary();
+    return;
+  }
+  fundSummaryContent.innerHTML = `<div class="empty-state">加载中...</div>`;
+  try {
+    state.fundSummary = await fetchJson("/api/account-fund-summary");
+    state.fundSummaryLoaded = true;
+    renderFundSummary();
+  } catch (error) {
+    fundSummaryContent.innerHTML = `<div class="empty-state">加载失败: ${escapeHtml(error.message)}</div>`;
+  }
+}
+
+function renderFundSummary() {
+  if (!fundSummaryContent) return;
+  const groups = Array.isArray(state.fundSummary?.groups) ? state.fundSummary.groups : [];
+  if (!groups.length) {
+    fundSummaryContent.innerHTML = `<div class="empty-state">暂无账户资金数据。</div>`;
+    return;
+  }
+  fundSummaryContent.innerHTML = groups.map(renderFundSummaryGroup).join("");
+}
+
+function renderFundSummaryGroup(group) {
+  const currency = String(group.currency || "CNY").toUpperCase();
+  const accounts = Array.isArray(group.accounts) ? group.accounts : [];
+  const symbols = Array.isArray(group.symbols) ? group.symbols : [];
+  const accountHeaders = accounts.map((account) => `<th>${escapeHtml(account.accountName || "账户")}</th>`).join("");
+  const rows = symbols.length
+    ? symbols.map((symbol) => renderFundSummarySymbolRow(symbol, accounts, currency)).join("")
+    : `<tr><td colspan="${3 + accounts.length}" class="empty-state">暂无标的资金数据。</td></tr>`;
+  return `
+    <section class="fund-summary-section" aria-label="${escapeAttribute(currency)} 资金分布">
+      <div class="fund-summary-head">
+        <div>
+          <div class="fund-summary-title-row">
+            <span class="fund-summary-currency">${escapeHtml(currency)}</span>
+            <h3>${currency === "USD" ? "美元账户" : currency === "CNY" ? "人民币账户" : `${escapeHtml(currency)} 账户`}</h3>
+            ${currency === "USD" ? `<span class="fund-summary-rate-mark" tabindex="0" aria-label="查看人民币参考汇率">!</span><span class="fund-summary-rate-tooltip">人民币参考金额按固定汇率 1 USD = 6.80 CNY 折算</span>` : ""}
+          </div>
+          <p class="muted">${currency === "USD" ? "金额单位统一按“万”展示；括号内为人民币参考金额。" : "同币种账户合并汇总，不做跨币种折算。"}</p>
+        </div>
+        <div class="fund-summary-metrics">
+          <div><span>总资产</span><strong>${escapeHtml(formatAccountMoney(group.totalAssets, currency))}</strong>${fundSummaryCnyReferenceHtml(group.totalAssets, currency)}</div>
+          <div><span>估算持仓</span><strong class="positive">${escapeHtml(formatAccountMoney(group.positionAmount, currency))}</strong>${fundSummaryCnyReferenceHtml(group.positionAmount, currency)}</div>
+          <div><span>未分配</span><strong>${escapeHtml(formatAccountMoney(group.unallocatedAmount, currency))}</strong>${fundSummaryCnyReferenceHtml(group.unallocatedAmount, currency)}</div>
+        </div>
+      </div>
+      <div class="fund-summary-accounts">
+        <h4>账户覆盖</h4>
+        <div class="fund-summary-account-strip">
+          ${accounts.map((account) => renderFundSummaryAccount(account, currency)).join("")}
+        </div>
+      </div>
+      <div class="fund-summary-matrix-wrap">
+        <table class="fund-summary-matrix">
+          <thead>
+            <tr>
+              <th>标的</th>
+              ${accountHeaders}
+              <th>总金额</th>
+              <th>占总资产</th>
+            </tr>
+          </thead>
+          <tbody>${rows}</tbody>
+        </table>
+      </div>
+      <div class="fund-summary-legend">
+        <span>* 按仓位区间中位数估算，鼠标悬停查看规则</span>
+      </div>
+    </section>
+  `;
+}
+
+function renderFundSummaryAccount(account, currency) {
+  const allocation = Number(account.allocationPercent || 0);
+  const width = Math.max(0, Math.min(allocation, 100));
+  return `
+    <article class="fund-summary-account-card">
+      <div class="fund-summary-account-line">
+        <strong>${escapeHtml(account.accountName || "账户")}</strong>
+        <span>${escapeHtml(formatAccountMoney(account.totalAssets, currency))}${fundSummaryCnyReferenceHtml(account.totalAssets, currency)}</span>
+      </div>
+      <div class="fund-summary-track" aria-hidden="true"><i style="width: ${width}%"></i></div>
+      <div class="fund-summary-account-meta">
+        <span>估算持仓 ${escapeHtml(formatAccountMoney(account.positionAmount, currency))}${fundSummaryCnyReferenceHtml(account.positionAmount, currency)}</span>
+        <span>${escapeHtml(formatFundSummaryPercent(account.allocationPercent))}</span>
+      </div>
+    </article>
+  `;
+}
+
+function renderFundSummarySymbolRow(symbol, accounts, currency) {
+  const cells = new Map((Array.isArray(symbol.accountCells) ? symbol.accountCells : []).map((cell) => [Number(cell.accountId), cell]));
+  const accountCells = accounts.map((account) => {
+    const cell = cells.get(Number(account.accountId));
+    if (!cell) return `<td><span class="fund-summary-empty">-</span></td>`;
+    const fill = cell.accountSharePercent == null ? 0 : Math.max(0, Math.min(Number(cell.accountSharePercent), 100));
+    return `
+      <td>
+        <div class="fund-summary-cell">
+          <div>
+            ${fundSummaryAmountHtml(cell.amount, currency)}
+            <span>${escapeHtml(formatFundSummaryPercent(cell.accountSharePercent))}</span>
+          </div>
+          <div class="fund-summary-mini-track" aria-hidden="true"><i style="width: ${fill}%"></i></div>
+        </div>
+      </td>
+    `;
+  }).join("");
+  const hasEstimated = (symbol.accountCells || []).some((cell) => cell.source === "estimated");
+  const firstEstimated = (symbol.accountCells || []).find((cell) => cell.source === "estimated");
+  return `
+    <tr class="fund-summary-symbol-row">
+      <td><span class="fund-summary-symbol"><i></i>${escapeHtml(symbol.symbol || "")}</span></td>
+      ${accountCells}
+      <td>${fundSummaryAmountHtml(symbol.totalAmount, currency, hasEstimated ? "estimated" : "", firstEstimated?.estimateLabel || "", true)}</td>
+      <td><span class="fund-summary-share">${escapeHtml(formatFundSummaryPercent(symbol.currencyAssetPercent))}</span></td>
+    </tr>
+  `;
+}
+
 async function loadAccounts(forceRefresh = false) {
   if (!accountLivePlans) return;
   if (accountsSummary) accountsSummary.textContent = "正在加载账户与标的...";
@@ -3814,7 +3986,17 @@ function showAccountForm(prefill = {}) {
         </label>
         <label>
           <small>总资产</small>
-          <input type="number" step="0.01" name="totalAssets" value="${account.totalAssets ?? ""}" placeholder="账户整体规模" />
+          <div class="amount-input-wrap">
+            <input type="number" step="0.01" min="0" name="totalAssets" value="${rawMoneyToWanInput(account.totalAssets)}" placeholder="账户整体规模" />
+            <span class="amount-input-suffix">万</span>
+          </div>
+        </label>
+        <label>
+          <small>可用资金</small>
+          <div class="amount-input-wrap">
+            <input type="number" step="0.01" min="0" name="availableCash" value="${rawMoneyToWanInput(account.availableCash)}" placeholder="可调仓现金" />
+            <span class="amount-input-suffix">万</span>
+          </div>
         </label>
         <label>
           <small>排序</small>
@@ -3862,7 +4044,8 @@ async function submitAccountForm(formData, id = null) {
     broker: String(formData.get("broker") || "").trim(),
     accountType: formData.get("accountType"),
     currency: String(formData.get("currency") || "").trim().toUpperCase(),
-    totalAssets: formData.get("totalAssets") === "" ? null : Number(formData.get("totalAssets")),
+    totalAssets: wanInputToRawMoney(formData.get("totalAssets")),
+    availableCash: wanInputToRawMoney(formData.get("availableCash")),
     enabled: formData.get("enabled") === "1",
     sortOrder: Number(formData.get("sortOrder") || 0),
     notes: String(formData.get("notes") || "").trim(),

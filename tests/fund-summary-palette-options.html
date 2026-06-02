@@ -1,0 +1,419 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>资金分布汇总 - 配色方案</title>
+  <style>
+    :root {
+      --page: #f2f4f7;
+      --ink: #152033;
+      --body: #3e4b5f;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      background: var(--page);
+      color: var(--ink);
+      font-family: "Avenir Next", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
+      letter-spacing: 0;
+      -webkit-font-smoothing: antialiased;
+    }
+    .page {
+      max-width: 1440px;
+      margin: 0 auto;
+      padding: 20px 22px 42px;
+    }
+    .page-head {
+      margin-bottom: 18px;
+    }
+    .page-head h1 {
+      margin: 0 0 6px;
+      font-size: 24px;
+      font-weight: 760;
+    }
+    .page-head p {
+      margin: 0;
+      color: #6b7788;
+      font-size: 13px;
+    }
+    .options {
+      display: grid;
+      gap: 18px;
+    }
+    .option-name {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      margin: 0 0 7px;
+      color: #4b596d;
+      font-size: 13px;
+      font-weight: 700;
+      flex-wrap: wrap;
+    }
+    .option-name b {
+      display: inline-flex;
+      justify-content: center;
+      min-width: 29px;
+      padding: 3px 8px;
+      border-radius: 5px;
+      background: #182335;
+      color: #fff;
+      font-size: 12px;
+    }
+    .surface {
+      min-width: 0;
+      overflow: hidden;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      background: var(--surface);
+      color: var(--text);
+    }
+    .summary-head {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      flex-wrap: wrap;
+      gap: 10px 22px;
+      padding: 11px 14px;
+      border-bottom: 1px solid var(--border);
+      background: var(--head);
+    }
+    .currency-block {
+      min-width: 265px;
+    }
+    .currency-title {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      margin-bottom: 4px;
+    }
+    .code {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      height: 26px;
+      min-width: 45px;
+      padding: 0 8px;
+      border-radius: 5px;
+      background: var(--code-bg);
+      color: var(--code-text);
+      font-size: 12px;
+      font-weight: 800;
+    }
+    .currency-title h2 {
+      margin: 0;
+      color: var(--title);
+      font-size: 15px;
+      font-weight: 750;
+    }
+    .tip {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      width: 17px;
+      height: 17px;
+      border: 1px solid var(--tip-border);
+      border-radius: 999px;
+      color: var(--tip);
+      font-size: 10px;
+      font-weight: 800;
+    }
+    .note {
+      color: var(--muted);
+      font-size: 11px;
+    }
+    .metrics {
+      display: flex;
+      align-items: stretch;
+      flex-wrap: wrap;
+    }
+    .metric {
+      min-width: 118px;
+      padding: 0 13px;
+      border-left: 1px solid var(--metric-border);
+    }
+    .metric:first-child { border-left: 0; }
+    .metric label {
+      display: block;
+      margin-bottom: 3px;
+      color: var(--muted);
+      font-size: 11px;
+      font-weight: 650;
+    }
+    .metric strong {
+      display: block;
+      color: var(--title);
+      font-size: 15px;
+      font-weight: 750;
+      font-variant-numeric: tabular-nums;
+    }
+    .metric.focus strong { color: var(--focus); }
+    .ref {
+      color: var(--faint);
+      font-size: 10px;
+      font-variant-numeric: tabular-nums;
+    }
+    .account-band {
+      display: flex;
+      align-items: flex-start;
+      gap: 12px;
+      padding: 9px 14px;
+      border-bottom: 1px solid var(--border);
+      background: var(--band);
+    }
+    .band-label {
+      flex: none;
+      margin-top: 8px;
+      color: var(--muted);
+      font-size: 11px;
+      font-weight: 650;
+    }
+    .accounts {
+      display: flex;
+      gap: 8px;
+      min-width: 0;
+      overflow-x: auto;
+    }
+    .account {
+      min-width: 218px;
+      padding: 7px 9px;
+      border: 1px solid var(--account-border);
+      border-radius: 6px;
+      background: var(--account);
+    }
+    .account-top, .account-foot {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 9px;
+    }
+    .account-top b {
+      color: var(--title);
+      font-size: 12px;
+      font-weight: 700;
+    }
+    .account-top span, .account-foot {
+      color: var(--muted);
+      font-size: 10.5px;
+      font-variant-numeric: tabular-nums;
+    }
+    .track {
+      overflow: hidden;
+      height: 4px;
+      margin: 6px 0 5px;
+      border-radius: 999px;
+      background: var(--track);
+    }
+    .track i {
+      display: block;
+      width: var(--fill);
+      height: 100%;
+      border-radius: inherit;
+      background: var(--bar);
+    }
+    table {
+      width: 100%;
+      min-width: 760px;
+      border-collapse: collapse;
+      table-layout: fixed;
+      font-size: 12px;
+    }
+    .matrix {
+      min-width: 0;
+      overflow-x: auto;
+    }
+    th {
+      height: 33px;
+      padding: 0 12px;
+      background: var(--table-head);
+      color: var(--muted);
+      font-size: 11px;
+      font-weight: 650;
+      text-align: left;
+      white-space: nowrap;
+    }
+    td {
+      height: 43px;
+      padding: 0 12px;
+      border-top: 1px solid var(--row-line);
+      color: var(--text);
+      vertical-align: middle;
+      font-variant-numeric: tabular-nums;
+    }
+    th:first-child, td:first-child { width: 122px; }
+    th:last-child, td:last-child { width: 92px; }
+    .symbol {
+      display: inline-flex;
+      align-items: center;
+      gap: 7px;
+      color: var(--title);
+      font-weight: 750;
+    }
+    .symbol i {
+      display: inline-block;
+      width: 6px;
+      height: 6px;
+      border-radius: 999px;
+      background: var(--dot);
+    }
+    .cell-main {
+      display: flex;
+      justify-content: space-between;
+      gap: 9px;
+      margin-bottom: 5px;
+    }
+    .money {
+      color: var(--title);
+      font-weight: 720;
+    }
+    .star {
+      margin-left: 2px;
+      color: var(--star);
+      font-weight: 800;
+    }
+    .pct {
+      color: var(--muted);
+      font-size: 10.5px;
+      font-weight: 650;
+    }
+    .tiny-track {
+      height: 4px;
+      margin: 0;
+    }
+    .total .money { font-weight: 770; }
+    .legend {
+      padding: 7px 12px;
+      border-top: 1px solid var(--border);
+      background: var(--foot);
+      color: var(--muted);
+      font-size: 10.5px;
+    }
+    .p1 {
+      --surface: #fff; --head: #fff; --band: #fff; --table-head: #f5f9fd; --foot: #fff;
+      --border: #dae5ef; --metric-border: #deE8f2; --account-border: #d7e6f4; --account: #f4f9fe;
+      --title: #142438; --text: #364a61; --muted: #647c94; --faint: #8ea3b8;
+      --code-bg: #e8f1fa; --code-text: #37678f; --tip-border: #c9d9e8; --tip: #527999;
+      --track: #e9f0f7; --bar: #75a7d1; --focus: #376f9f; --dot: #75a7d1; --star: #427aa9; --row-line: #e9eff5;
+    }
+    .p2 {
+      --surface: #fff; --head: #fff; --band: #fff; --table-head: #eef5fc; --foot: #f7faff;
+      --border: #d3e2f2; --metric-border: #d1e1f1; --account-border: #c8dff4; --account: #edf5ff;
+      --title: #122640; --text: #334c66; --muted: #5f7e9c; --faint: #7e9bb6;
+      --code-bg: #d6e8fb; --code-text: #2e669b; --tip-border: #b9d2ea; --tip: #477aa9;
+      --track: #e2edf8; --bar: #5a95cd; --focus: #2f6fa9; --dot: #669bd0; --star: #2f70ac; --row-line: #e3edf7;
+    }
+    .p3 {
+      --surface: #fff; --head: #f1f8f9; --band: #fff; --table-head: #f2f8fa; --foot: #f7fbfb;
+      --border: #d8e7e9; --metric-border: #d6e6e8; --account-border: #cbe3e8; --account: #eff8fa;
+      --title: #17313c; --text: #385462; --muted: #64818b; --faint: #89a3aa;
+      --code-bg: #def0f3; --code-text: #307083; --tip-border: #c6dee3; --tip: #4b7d8b;
+      --track: #e3f0f2; --bar: #68a9ba; --focus: #347f95; --dot: #68a9ba; --star: #3b8598; --row-line: #e4eff1;
+    }
+    .p4 {
+      --surface: #fff; --head: #eaf3fe; --band: #fff; --table-head: #e9f3ff; --foot: #f3f8ff;
+      --border: #cbddec; --metric-border: #c7dbed; --account-border: #b9d5ef; --account: #e8f3fe;
+      --title: #11263d; --text: #314b65; --muted: #547493; --faint: #7897b4;
+      --code-bg: #cfe4fb; --code-text: #205f9b; --tip-border: #abcbe7; --tip: #326eaa;
+      --track: #deebf8; --bar: #4187c7; --focus: #1960a1; --dot: #4f8ec9; --star: #1664a9; --row-line: #dfebf6;
+    }
+    .p5 {
+      --surface: #fff; --head: #f2f5f9; --band: #fff; --table-head: #eff3f8; --foot: #f6f8fb;
+      --border: #d8e0e9; --metric-border: #d9e1e9; --account-border: #cedae6; --account: #f0f5fa;
+      --title: #18293c; --text: #3c5066; --muted: #667c92; --faint: #8a9dae;
+      --code-bg: #e3ebf4; --code-text: #486987; --tip-border: #c6d4e0; --tip: #58748d;
+      --track: #e6edf4; --bar: #7595b5; --focus: #506f90; --dot: #7898b8; --star: #587b9b; --row-line: #e7ecf2;
+    }
+    .p6 {
+      --surface: #fffefa; --head: #f7f9fc; --band: #fffefa; --table-head: #f4f7fb; --foot: #fbfcfe;
+      --border: #dee5ec; --metric-border: #e0e6ed; --account-border: #d4e0ec; --account: #f2f7fc;
+      --title: #19293b; --text: #40536a; --muted: #6b7f95; --faint: #90a1b2;
+      --code-bg: #e7eff8; --code-text: #426785; --tip-border: #cdd9e5; --tip: #587995;
+      --track: #e8eef4; --bar: #81a9cf; --focus: #426f98; --dot: #81a9cf; --star: #537ca2; --row-line: #e9edf3;
+    }
+    .option, .p1, .p2, .p3, .p4, .p5, .p6 {
+      min-width: 0;
+    }
+    @media (max-width: 760px) {
+      .page { padding: 16px 10px 30px; }
+      .summary-head { align-items: flex-start; flex-direction: column; }
+      .metrics { width: 100%; }
+      .metric { flex: 1; min-width: 92px; padding: 0 8px; }
+      .account-band { display: block; }
+      .band-label { margin: 0 0 7px; }
+      .account { flex: 0 0 218px; }
+    }
+  </style>
+</head>
+<body>
+  <main class="page">
+    <header class="page-head">
+      <h1>资金分布汇总 - 配色比选</h1>
+      <p>账户覆盖区域保持白底，轻蓝只落在账户卡片上；其余仅比较表头、标签与持仓横条气质。`*` 是唯一的估算标识。</p>
+    </header>
+    <div id="options" class="options"></div>
+  </main>
+  <script>
+    const variants = [
+      ["p1", "A", "白底 / 极浅账户蓝", "其余区域最克制，只让账户卡轻轻浮出来"],
+      ["p2", "B", "白色摘要 / 浅蓝账户卡", "顶部摘要恢复白底，仅账户与表格保留淡蓝层级"],
+      ["p3", "C", "青调冷蓝账户卡", "账户的强调色略偏青，气质更轻"],
+      ["p4", "D", "交易蓝账户卡", "账户卡与横条更清晰，识别最直接"],
+      ["p5", "E", "钢蓝账户卡", "偏稳重，层级清楚但不亮"],
+      ["p6", "F", "暖白底 / 柔蓝账户卡", "页面更柔和，只在账户上留蓝色提示"]
+    ];
+
+    const content = `
+      <section class="surface">
+        <header class="summary-head">
+          <div class="currency-block">
+            <div class="currency-title"><span class="code">USD</span><h2>美元账户</h2><span class="tip">!</span></div>
+            <div class="note">金额单位统一按“万”展示；括号内为人民币参考金额。</div>
+          </div>
+          <div class="metrics">
+            <div class="metric"><label>总资产</label><strong>$3.2万</strong><span class="ref">(约 ¥21.76万)</span></div>
+            <div class="metric focus"><label>估算持仓</label><strong>$0.96万</strong><span class="ref">(约 ¥6.53万)</span></div>
+            <div class="metric"><label>未分配</label><strong>$2.24万</strong><span class="ref">(约 ¥15.23万)</span></div>
+          </div>
+        </header>
+        <div class="account-band">
+          <span class="band-label">账户覆盖</span>
+          <div class="accounts">
+            <article class="account">
+              <div class="account-top"><b>老虎-美股</b><span>$3.2万<br>(约 ¥21.76万)</span></div>
+              <div class="track" style="--fill:30%"><i></i></div>
+              <div class="account-foot"><span>估算持仓 $0.96万</span><span>30%</span></div>
+            </article>
+          </div>
+        </div>
+        <div class="matrix">
+          <table>
+            <thead><tr><th>标的</th><th>老虎-美股</th><th>总金额</th><th>占总资产</th></tr></thead>
+            <tbody>
+              <tr>
+                <td><span class="symbol"><i></i>MSFT</span></td>
+                <td><div class="cell-main"><span class="money">$0.56万<span class="star">*</span></span><span class="pct">17.5%</span></div><div class="track tiny-track" style="--fill:17.5%"><i></i></div></td>
+                <td class="total"><span class="money">$0.56万<span class="star">*</span></span><div class="ref">(约 ¥3.81万)</div></td>
+                <td><span class="money">17.5%</span></td>
+              </tr>
+              <tr>
+                <td><span class="symbol"><i></i>NVDA</span></td>
+                <td><div class="cell-main"><span class="money">$0.4万</span><span class="pct">12.5%</span></div><div class="track tiny-track" style="--fill:12.5%"><i></i></div></td>
+                <td class="total"><span class="money">$0.4万</span><div class="ref">(约 ¥2.72万)</div></td>
+                <td><span class="money">12.5%</span></td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+        <footer class="legend">* 按仓位区间中位数估算，鼠标悬停查看规则</footer>
+      </section>`;
+
+    document.querySelector("#options").innerHTML = variants.map(([tone, key, title, description]) => `
+      <section class="option">
+        <p class="option-name"><b>${key}</b>${title}<span>${description}</span></p>
+        <div class="${tone}">${content}</div>
+      </section>
+    `).join("");
+  </script>
+</body>
+</html>

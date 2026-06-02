@@ -159,6 +159,9 @@ async function handleApi(request, env, url, appEnv) {
     if (url.pathname === "/api/investment-accounts" && request.method === "GET") {
       return json(await getInvestmentAccounts(env, url), 200, request);
     }
+    if (url.pathname === "/api/account-fund-summary" && request.method === "GET") {
+      return json(await getAccountFundSummary(env), 200, request);
+    }
     if (url.pathname === "/api/investment-accounts" && request.method === "POST") {
       const body = await request.json();
       return json(await createInvestmentAccount(env, body), 200, request);
@@ -1064,6 +1067,28 @@ function parsePositionWeight(value) {
   return null;
 }
 
+function positionBucketMidpoint(value) {
+  const text = String(value || "").trim();
+  if (!text) return null;
+  if (text === "0%") return { weight: 0, label: "0% → 0%" };
+  const normalized = text.replace(/^0-5%$/, "0%-5%");
+  if (normalized === ">30%") return { weight: 0.3, label: ">30% → 30%" };
+  const rangeMatch = normalized.match(/^(\d+(?:\.\d+)?)%\s*-\s*(\d+(?:\.\d+)?)%$/);
+  if (!rangeMatch) return null;
+  const low = Number(rangeMatch[1]);
+  const high = Number(rangeMatch[2]);
+  if (!Number.isFinite(low) || !Number.isFinite(high)) return null;
+  const midpoint = (low + high) / 2;
+  const sourceLabel = text === "0-5%" ? "0-5%" : normalized;
+  return { weight: midpoint / 100, label: `${sourceLabel} → ${formatPercentLabel(midpoint)}` };
+}
+
+function formatPercentLabel(value) {
+  const number = Number(value);
+  if (!Number.isFinite(number)) return "";
+  return `${Number(number.toFixed(2)).toLocaleString("zh-CN", { maximumFractionDigits: 2 })}%`;
+}
+
 function bucketEstimatedImpactPercent(value) {
   const number = Number(value);
   if (!Number.isFinite(number)) return "";
@@ -1879,6 +1904,161 @@ async function getInvestmentAccounts(env, url) {
   const includeDisabled = url.searchParams.get("active") !== "1";
   const items = await listInvestmentAccounts(env, { includeDisabled });
   return { items, total: items.length };
+}
+
+function roundMoney(value) {
+  const number = Number(value);
+  if (!Number.isFinite(number)) return null;
+  return Math.round(number * 100) / 100;
+}
+
+function roundPercent(value) {
+  const number = Number(value);
+  if (!Number.isFinite(number)) return null;
+  return Math.round(number * 10000) / 10000;
+}
+
+function computeFundSummaryAmount(plan, account) {
+  const manual = plan.positionAmount == null || plan.positionAmount === "" ? null : Number(plan.positionAmount);
+  if (Number.isFinite(manual) && manual >= 0) {
+    return { amount: roundMoney(manual), source: "exact", estimateLabel: "" };
+  }
+  const action = normalizeActionPlanAction(plan.actionType);
+  const position = normalizeActionPlanPosition(plan.currentPosition || defaultActionPlanPositionForAction(action));
+  if (ZERO_POSITION_ACTIONS.has(action) || position === "0%") {
+    return { amount: 0, source: "zero", estimateLabel: "" };
+  }
+  const totalAssets = account?.totalAssets == null ? null : Number(account.totalAssets);
+  const midpoint = positionBucketMidpoint(position);
+  if (!Number.isFinite(totalAssets) || totalAssets <= 0 || !midpoint) {
+    return { amount: null, source: "unavailable", estimateLabel: midpoint?.label || "" };
+  }
+  return {
+    amount: roundMoney(totalAssets * midpoint.weight),
+    source: "estimated",
+    estimateLabel: midpoint.label,
+  };
+}
+
+async function getAccountFundSummary(env) {
+  const accounts = (await listInvestmentAccounts(env, { includeDisabled: false }))
+    .filter((account) => account.name !== "未分配账户");
+  const plans = await listAccountLiveActionPlans(env);
+  const accountMap = new Map(accounts.map((account) => [Number(account.id), account]));
+  const groupMap = new Map();
+
+  for (const account of accounts) {
+    const currency = String(account.currency || "CNY").toUpperCase();
+    if (!groupMap.has(currency)) {
+      groupMap.set(currency, {
+        currency,
+        totalAssets: 0,
+        positionAmount: 0,
+        unallocatedAmount: 0,
+        accounts: [],
+        symbols: [],
+        _symbolMap: new Map(),
+      });
+    }
+    const group = groupMap.get(currency);
+    const totalAssets = account.totalAssets == null ? null : Number(account.totalAssets);
+    const safeTotalAssets = Number.isFinite(totalAssets) && totalAssets > 0 ? totalAssets : null;
+    if (safeTotalAssets != null) group.totalAssets += safeTotalAssets;
+    group.accounts.push({
+      accountId: Number(account.id),
+      accountName: account.name,
+      broker: account.broker,
+      currency,
+      totalAssets: safeTotalAssets,
+      positionAmount: 0,
+      unallocatedAmount: safeTotalAssets,
+      allocationPercent: 0,
+      sortOrder: account.sortOrder,
+    });
+  }
+
+  const summaryAccounts = new Map();
+  for (const group of groupMap.values()) {
+    for (const account of group.accounts) summaryAccounts.set(account.accountId, account);
+  }
+
+  for (const plan of plans) {
+    const account = accountMap.get(Number(plan.accountId));
+    if (!account) continue;
+    const currency = String(account.currency || "CNY").toUpperCase();
+    const group = groupMap.get(currency);
+    if (!group) continue;
+    const amountResult = computeFundSummaryAmount(plan, account);
+    if (amountResult.amount === 0) continue;
+    const accountSummary = summaryAccounts.get(Number(account.id));
+    const accountSharePercent = amountResult.amount == null || !account.totalAssets
+      ? null
+      : roundPercent((amountResult.amount / Number(account.totalAssets)) * 100);
+
+    if (!group._symbolMap.has(plan.symbol)) {
+      const symbolRow = {
+        symbol: plan.symbol,
+        totalAmount: 0,
+        accountCells: [],
+      };
+      group._symbolMap.set(plan.symbol, symbolRow);
+      group.symbols.push(symbolRow);
+    }
+    const symbolRow = group._symbolMap.get(plan.symbol);
+    symbolRow.accountCells.push({
+      accountId: Number(account.id),
+      accountName: account.name,
+      amount: amountResult.amount,
+      accountSharePercent,
+      source: amountResult.source,
+      estimateLabel: amountResult.estimateLabel,
+      currentPosition: plan.currentPosition,
+      actionType: plan.actionType,
+    });
+
+    if (amountResult.amount != null) {
+      symbolRow.totalAmount = roundMoney(Number(symbolRow.totalAmount || 0) + amountResult.amount);
+      group.positionAmount = roundMoney(Number(group.positionAmount || 0) + amountResult.amount);
+      if (accountSummary) {
+        accountSummary.positionAmount = roundMoney(Number(accountSummary.positionAmount || 0) + amountResult.amount);
+      }
+    } else if (!symbolRow.accountCells.some((cell) => cell.amount != null)) {
+      symbolRow.totalAmount = null;
+    }
+  }
+
+  const groups = Array.from(groupMap.values()).map((group) => {
+    group.accounts = group.accounts.map((account) => {
+      const total = Number(account.totalAssets);
+      const position = Number(account.positionAmount || 0);
+      return {
+        ...account,
+        positionAmount: roundMoney(position),
+        unallocatedAmount: Number.isFinite(total) ? roundMoney(total - position) : null,
+        allocationPercent: Number.isFinite(total) && total > 0 ? roundPercent((position / total) * 100) : null,
+      };
+    });
+    group.unallocatedAmount = roundMoney(Number(group.totalAssets || 0) - Number(group.positionAmount || 0));
+    group.symbols = group.symbols.map((symbol) => ({
+      ...symbol,
+      currencyAssetPercent: symbol.totalAmount == null || !Number(group.totalAssets)
+        ? null
+        : roundPercent((Number(symbol.totalAmount) / Number(group.totalAssets)) * 100),
+    }));
+    group.symbols.sort((a, b) => {
+      const amountA = a.totalAmount == null ? -1 : Number(a.totalAmount);
+      const amountB = b.totalAmount == null ? -1 : Number(b.totalAmount);
+      return amountB - amountA || String(a.symbol).localeCompare(String(b.symbol));
+    });
+    const { _symbolMap, ...apiGroup } = group;
+    return apiGroup;
+  }).sort((a, b) => {
+    if (a.currency === "USD" && b.currency !== "USD") return -1;
+    if (a.currency !== "USD" && b.currency === "USD") return 1;
+    return a.currency.localeCompare(b.currency);
+  });
+
+  return { scope: "current", groups, generatedAt: isoNow() };
 }
 
 async function getInvestmentAccountById(env, id) {

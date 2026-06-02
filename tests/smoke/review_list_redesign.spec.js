@@ -1,7 +1,7 @@
 import { test, expect } from '@playwright/test';
 import { execFileSync } from 'node:child_process';
 
-const BASE_URL = process.env.BASE_URL || 'http://127.0.0.1:8788';
+const BASE_URL = process.env.BASE_URL || 'http://127.0.0.1:8787';
 const REVIEWED_DATE = '2026-05-08';
 const PENDING_DATE = '2026-05-10';
 const IMPACT_PREVIOUS_DATE = '2026-05-11';
@@ -69,7 +69,10 @@ test('review list uses trading-desk columns and primary edit action', async ({ p
   await page.setViewportSize({ width: 1360, height: 900 });
   await page.goto(BASE_URL, { waitUntil: 'load' });
 
-  await expect(page.locator('.review-table th')).toHaveText(['复盘日', '账户估算影响', '当日主线', '操作']);
+  await expect(page.locator('.review-table th .review-date-head')).toHaveText('复盘日');
+  await expect(page.locator('.review-table th').filter({ hasText: '账户估算影响' })).toBeVisible();
+  await expect(page.locator('.review-table th').filter({ hasText: '当日主线' })).toBeVisible();
+  await expect(page.locator('.review-table th').filter({ hasText: '操作' })).toBeVisible();
   await expect(page.locator('.review-table')).not.toContainText('北京时间 05/15 21:30 - 05/16 04:00');
   await expect(page.locator('.review-table th', { hasText: '状态' })).toHaveCount(0);
 
@@ -196,11 +199,11 @@ test('review detail previews account impact and completed review reads frozen sn
 
   await page.goto(BASE_URL, { waitUntil: 'load' });
   await page.locator('#reviewsList tr', { hasText: IMPACT_DATE }).getByRole('button', { name: '查看' }).click();
-  await page.getByText('4. 操作计划', { exact: true }).click();
+  await page.getByText('个股操作', { exact: true }).click();
   const tigerGroup = page.locator('.action-plan-group', { hasText: '老虎-美股' });
   await expect(tigerGroup.locator('.action-plan-account-impact')).toContainText('账户影响');
   await expect(tigerGroup.locator('.action-plan-account-impact .impact-meter-cut')).toBeVisible();
   await expect(tigerGroup.locator('.action-plan-account-impact')).not.toContainText('0~1%');
-  await page.getByText('5. 深度总结', { exact: true }).click();
+  await page.getByText('新闻总结', { exact: true }).click();
   await expect(page.locator('#reviewDrawer')).not.toContainText('账户每日快照');
 });

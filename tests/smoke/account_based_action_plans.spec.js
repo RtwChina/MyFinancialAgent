@@ -55,19 +55,20 @@ test('account API and account-grouped action plans support same symbol across ac
 });
 
 test('account page and review drawer render account groups', async ({ page }) => {
-  await page.goto(BASE_URL, { waitUntil: 'networkidle' });
+  await page.goto(BASE_URL, { waitUntil: 'load' });
   await page.locator('.nav-chip[data-view="accounts"]').click();
   await expect(page.locator('#accountsView')).toHaveClass(/active/);
-  await expect(page.locator('#accountsList')).toContainText('老虎-美股');
-  await expect(page.locator('#accountsList')).toContainText('USD');
+  await expect(page.locator('#accountLivePlans')).toContainText('老虎-美股');
+  await expect(page.locator('#accountLivePlans')).toContainText('USD');
 
   await page.locator('.nav-chip[data-view="reviews"]').click();
   const row = page.locator('#reviewsList tr', { hasText: ACCOUNT_PLAN_DATE }).first();
   await expect(row).toBeVisible();
-  await row.getByRole('button', { name: /开始复盘|继续复盘|进入复盘|查看/ }).click();
-  await page.getByText('4. 操作计划', { exact: true }).click();
-  await expect(page.locator('.action-plan-group-label', { hasText: '老虎-美股' })).toBeVisible();
-  await expect(page.locator('.action-plan-account-funds').first()).toContainText('可用');
+  await row.getByRole('button', { name: /开始复盘|继续复盘|进入复盘|查看|编辑草稿/ }).click();
+  await page.getByText('个股操作', { exact: true }).click();
+  const drawerPlans = page.locator('#actionPlanAccountGroups');
+  await expect(drawerPlans.locator('.action-plan-group-label', { hasText: '老虎-美股' })).toBeVisible();
+  await expect(drawerPlans.locator('.action-plan-account-funds').first()).toContainText('可用');
   await expect(page.locator('#actionPlanRowsUs tr', { hasText: 'ACCT' })).toBeVisible();
   await page.locator('#actionPlanRowsUs tr', { hasText: 'ACCT' }).click();
   await expect(page.locator('#actionPlanAccountSelect')).toBeVisible();
@@ -90,16 +91,51 @@ test('custom accounts can be deleted when unused', async ({ page, request }) => 
   });
   expect(createResponse.ok()).toBeTruthy();
 
-  await page.goto(BASE_URL, { waitUntil: 'networkidle' });
+  await page.goto(BASE_URL, { waitUntil: 'load' });
   await page.locator('.nav-chip[data-view="accounts"]').click();
-  const accountRow = page.locator('#accountsList tr', { hasText: name }).first();
+  const accountRow = page.locator('#accountLivePlans .action-plan-group', { hasText: name }).first();
   await expect(accountRow).toBeVisible();
-  await expect(accountRow.getByRole('button', { name: '删除' })).toBeVisible();
+  await accountRow.getByRole('button', { name: '编辑' }).click();
+  await expect(page.locator('#accountForm')).toBeVisible();
+  await expect(page.locator('#accountFormDeleteBtn')).toBeVisible();
   page.once('dialog', (dialog) => dialog.accept());
-  await accountRow.getByRole('button', { name: '删除' }).click();
-  await expect(page.locator('#accountsList tr', { hasText: name })).toHaveCount(0);
+  await page.locator('#accountFormDeleteBtn').click();
+  await expect(page.locator('#accountLivePlans .action-plan-group', { hasText: name })).toHaveCount(0);
 
   const accountsResponse = await request.get(`${BASE_URL}/api/investment-accounts`);
   const accountsJson = await accountsResponse.json();
   expect(accountsJson.items.some((item) => item.name === name)).toBeFalsy();
+});
+
+test('account asset inputs are entered in ten-thousand units', async ({ page, request }) => {
+  const name = `万元单位账户-${Date.now()}`;
+
+  await page.goto(BASE_URL, { waitUntil: 'load' });
+  await page.locator('.nav-chip[data-view="accounts"]').click();
+  await page.getByRole('button', { name: '新增账户' }).click();
+
+  const form = page.locator('#accountForm');
+  await form.locator('[name="name"]').fill(name);
+  await form.locator('[name="broker"]').fill('测试');
+  await form.locator('[name="currency"]').fill('USD');
+  await form.locator('[name="totalAssets"]').fill('2');
+  await form.locator('[name="availableCash"]').fill('0.5');
+  await form.locator('[name="sortOrder"]').fill('9901');
+  await form.getByRole('button', { name: '新增账户' }).click();
+
+  const accountRow = page.locator('#accountLivePlans .action-plan-group', { hasText: name }).first();
+  await expect(accountRow).toBeVisible();
+  await expect(accountRow).toContainText('$2万');
+  await expect(accountRow).toContainText('可用 $0.5万');
+  await expect(accountRow).not.toContainText('$0万');
+
+  const accountsResponse = await request.get(`${BASE_URL}/api/investment-accounts`);
+  const accountsJson = await accountsResponse.json();
+  const created = accountsJson.items.find((item) => item.name === name);
+  expect(created?.totalAssets).toBe(20000);
+  expect(created?.availableCash).toBe(5000);
+
+  if (created?.id) {
+    await request.delete(`${BASE_URL}/api/investment-accounts/${created.id}`);
+  }
 });
