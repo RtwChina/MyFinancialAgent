@@ -106,6 +106,7 @@ const state = {
   investmentAccounts: [],
   selectedActionPlanIndex: -1,
   actionPlanSymbolCatalog: [],
+  actionPlanSymbolPickerFilter: "all",
   latestArchiveDate: null,
   actionPlanEditorMode: "review-latest",
   dailyInsight: null,
@@ -427,6 +428,13 @@ const actionPlanCellTooltip = document.querySelector("#actionPlanCellTooltip");
 const actionPlanEditor = document.querySelector("#actionPlanEditor");
 const actionPlanSymbolInput = document.querySelector("#actionPlanSymbolInput");
 const actionPlanSymbolSelect = document.querySelector("#actionPlanSymbolSelect");
+const actionPlanSymbolPicker = document.querySelector("#actionPlanSymbolPicker");
+const actionPlanSymbolPickerTrigger = document.querySelector("#actionPlanSymbolPickerTrigger");
+const actionPlanSymbolPickerLabel = document.querySelector("#actionPlanSymbolPickerLabel");
+const actionPlanSymbolPickerPopover = document.querySelector("#actionPlanSymbolPickerPopover");
+const actionPlanSymbolSearchInput = document.querySelector("#actionPlanSymbolSearchInput");
+const actionPlanSymbolFilterRow = document.querySelector("#actionPlanSymbolFilterRow");
+const actionPlanSymbolResultList = document.querySelector("#actionPlanSymbolResultList");
 const actionPlanAccountSelect = document.querySelector("#actionPlanAccountSelect");
 const actionPlanMetrics = document.querySelector("#actionPlanMetrics");
 const actionPlanActionSelect = document.querySelector("#actionPlanActionSelect");
@@ -485,9 +493,33 @@ actionPlanAccountSelect?.addEventListener("change", () => {
   syncPositionBucketFromAmount();
 });
 actionPlanSymbolSelect?.addEventListener("change", () => {
-  if (actionPlanSymbolInput) actionPlanSymbolInput.value = actionPlanSymbolSelect.value;
-  updateActionPlanDetailHeading();
-  renderActionPlanMetrics(actionPlanSymbolSelect.value);
+  setActionPlanSymbolValue(actionPlanSymbolSelect.value, { notify: false });
+});
+actionPlanSymbolPickerTrigger?.addEventListener("click", () => toggleActionPlanSymbolPicker());
+actionPlanSymbolPicker?.addEventListener("click", (event) => {
+  event.stopPropagation();
+});
+actionPlanSymbolSearchInput?.addEventListener("input", () => renderActionPlanSymbolPickerResults());
+actionPlanSymbolSearchInput?.addEventListener("keydown", (event) => {
+  if (event.key === "Escape") closeActionPlanSymbolPicker();
+});
+actionPlanSymbolFilterRow?.addEventListener("click", (event) => {
+  event.stopPropagation();
+  const button = event.target.closest("[data-symbol-filter]");
+  if (!button) return;
+  state.actionPlanSymbolPickerFilter = button.dataset.symbolFilter || "all";
+  renderActionPlanSymbolFilterRow();
+  renderActionPlanSymbolPickerResults();
+});
+actionPlanSymbolResultList?.addEventListener("click", (event) => {
+  event.stopPropagation();
+  const button = event.target.closest("[data-symbol-picker-value]");
+  if (!button || button.disabled) return;
+  setActionPlanSymbolValue(button.dataset.symbolPickerValue || "");
+  closeActionPlanSymbolPicker();
+});
+document.addEventListener("click", (event) => {
+  if (!actionPlanSymbolPicker?.contains(event.target)) closeActionPlanSymbolPicker();
 });
 actionPlanPositionAmountInput?.addEventListener("input", syncPositionBucketFromAmount);
 
@@ -500,9 +532,9 @@ function syncPositionBucketFromAmount() {
   const amountRaw = wan * 10000;
   const accountId = Number(actionPlanAccountSelect?.value || 0);
   const account = findAccountById(accountId);
-  const total = Number(account?.totalAssets);
-  if (!Number.isFinite(total) || total <= 0) return;
-  const bucket = mapAmountToPositionBucket(amountRaw, total);
+  const totalThousands = Number(account?.totalAssets);
+  if (!Number.isFinite(totalThousands) || totalThousands <= 0) return;
+  const bucket = mapAmountToPositionBucket(amountRaw, totalThousands * 1000);
   if (!bucket) return;
   actionPlanPositionSelect.value = bucket;
 }
@@ -1956,7 +1988,8 @@ function hideActionPlanCellTooltip() {
   actionPlanCellTooltip.textContent = "";
 }
 
-function actionPlanTableHtml(tbodyId) {
+function actionPlanTableHtml(tbodyId, options = {}) {
+  const showHeader = options.showHeader !== false;
   return `
     <div class="action-plan-table-wrap">
       <table class="action-plan-table">
@@ -1970,9 +2003,9 @@ function actionPlanTableHtml(tbodyId) {
           <col class="col-resistance">
           <col class="col-thinking">
         </colgroup>
-        <thead>
+        ${showHeader ? `<thead>
           <tr>
-            <th>标的 / 动作</th>
+            <th>标的</th>
             <th>当前仓位</th>
             <th>每日记录</th>
             <th>止盈计划</th>
@@ -1981,7 +2014,7 @@ function actionPlanTableHtml(tbodyId) {
             <th>压力位</th>
             <th>思考</th>
           </tr>
-        </thead>
+        </thead>` : ""}
         <tbody id="${escapeAttribute(tbodyId)}"></tbody>
       </table>
     </div>`;
@@ -1992,6 +2025,10 @@ function actionPlanTbodyId(account) {
   if (account?.name === "老虎-美股") return `${prefix}actionPlanRowsUs`;
   if (account?.name === "东方财富-国内") return `${prefix}actionPlanRowsCn`;
   return `${prefix}ActionPlanRowsAccount${account.id}`;
+}
+
+function actionPlanClosedTbodyId(account) {
+  return `${actionPlanTbodyId(account)}Closed`;
 }
 
 function getActionPlanAccountAnchor(account) {
@@ -2013,22 +2050,34 @@ function legacyActionPlanControlIds(account) {
   return { add: "", sort: "", empty: "" };
 }
 
-function renderActionPlanGroup(tbody, account) {
-  if (!tbody || !account) return 0;
-  const selected = state.selectedActionPlanIndex;
-  const rows = state.actionPlans
-    .map((plan, index) => ({ plan, index }))
-    .filter(({ plan }) => Number(plan.accountId || 0) === Number(account.id));
-  tbody.innerHTML = rows.map(({ plan, index }) => `
+function isClosedReviewActionPlan(plan) {
+  return normalizeActionPlanAction(plan?.actionType) === "已清仓复盘";
+}
+
+function actionPlanStatusDisplayText(actionType) {
+  const normalized = normalizeActionPlanAction(actionType);
+  return normalized === "已清仓复盘" ? "清仓复盘" : normalized;
+}
+
+function renderActionPlanPositionStatus(plan) {
+  const actionType = normalizeActionPlanAction(plan?.actionType);
+  const position = normalizeActionPlanPosition(plan?.currentPosition);
+  if (position === "0%" && actionType !== "持仓观察") {
+    return `<span class="action-plan-status-pill ${actionPlanStatusClass(actionType)}">${escapeHtml(actionPlanStatusDisplayText(actionType))}</span>`;
+  }
+  return `<span class="action-plan-position ${positionColorClass(position)}">${escapeHtml(position)}</span>`;
+}
+
+function actionPlanRowHtml(plan, index, selected) {
+  return `
     <tr id="${escapeAttribute(getActionPlanRowAnchor(index))}" class="${index === selected ? "selected" : ""}" data-index="${index}">
       <td class="action-plan-target-cell">
         <div class="action-plan-target-stack">
           <strong class="action-plan-symbol">${escapeHtml(actionPlanSymbolLabel(plan.symbol))}</strong>
-          <span class="action-plan-status-pill ${actionPlanStatusClass(plan.actionType)}">${escapeHtml(plan.actionType)}</span>
           ${isLiveActionPlanMode() ? `<button type="button" class="ghost compact-button action-plan-inline-edit" data-action="edit-row" data-index="${escapeAttribute(String(index))}">编辑</button>` : ""}
         </div>
       </td>
-      <td><span class="action-plan-position ${positionColorClass(plan.currentPosition)}">${escapeHtml(plan.currentPosition)}</span></td>
+      <td>${renderActionPlanPositionStatus(plan)}</td>
       <td>${renderActionPlanTextCell(plan.entryPlan)}</td>
       <td>${renderActionPlanTextCell(plan.takeProfitPlan)}</td>
       <td>${renderActionPlanTextCell(plan.stopLossPlan)}</td>
@@ -2036,24 +2085,51 @@ function renderActionPlanGroup(tbody, account) {
       <td>${renderActionPlanTextCell(plan.resistanceLevels, "action-plan-levels")}</td>
       <td>${renderActionPlanTextCell(plan.thinking)}</td>
     </tr>
-  `).join("");
-  tbody.querySelectorAll("tr").forEach((row) => {
+  `;
+}
+
+function bindActionPlanRows(tbody) {
+  tbody?.querySelectorAll("tr").forEach((row) => {
     row.addEventListener("click", () => selectActionPlan(Number(row.dataset.index)));
   });
-  tbody.querySelectorAll("[data-action='edit-row']").forEach((button) => {
+  tbody?.querySelectorAll("[data-action='edit-row']").forEach((button) => {
     button.addEventListener("click", (event) => {
       event.stopPropagation();
       selectActionPlan(Number(button.dataset.index));
     });
   });
-  tbody.querySelectorAll("[data-full-text]").forEach((cell) => {
+  tbody?.querySelectorAll("[data-full-text]").forEach((cell) => {
     cell.addEventListener("mouseenter", showActionPlanCellTooltip);
     cell.addEventListener("mousemove", positionActionPlanCellTooltip);
     cell.addEventListener("mouseleave", hideActionPlanCellTooltip);
   });
+  bindHorizontalWheelScroll(tbody?.closest(".action-plan-table-wrap"));
+}
+
+function renderActionPlanGroup(tbody, account) {
+  if (!tbody || !account) return 0;
+  const selected = state.selectedActionPlanIndex;
+  const rows = state.actionPlans
+    .map((plan, index) => ({ plan, index }))
+    .filter(({ plan }) => Number(plan.accountId || 0) === Number(account.id));
+  const activeRows = rows.filter(({ plan }) => !isClosedReviewActionPlan(plan));
+  const closedRows = rows.filter(({ plan }) => isClosedReviewActionPlan(plan));
+  tbody.innerHTML = activeRows.map(({ plan, index }) => actionPlanRowHtml(plan, index, selected)).join("");
+  bindActionPlanRows(tbody);
   const tableWrap = tbody.closest(".action-plan-table-wrap");
-  if (tableWrap) tableWrap.classList.toggle("hidden", rows.length === 0);
-  bindHorizontalWheelScroll(tableWrap);
+  if (tableWrap) tableWrap.classList.toggle("hidden", activeRows.length === 0);
+
+  const groupEl = tbody.closest(".action-plan-group");
+  const closedSection = groupEl?.querySelector("[data-action-plan-closed-section]");
+  const closedTbody = groupEl?.querySelector(`#${CSS.escape(actionPlanClosedTbodyId(account))}`);
+  if (closedSection && closedTbody) {
+    closedTbody.innerHTML = closedRows.map(({ plan, index }) => actionPlanRowHtml(plan, index, selected)).join("");
+    closedSection.classList.toggle("hidden", closedRows.length === 0);
+    closedSection.open = closedRows.some(({ index }) => index === selected);
+    const countEl = closedSection.querySelector("[data-closed-count]");
+    if (countEl) countEl.textContent = String(closedRows.length);
+    bindActionPlanRows(closedTbody);
+  }
   return rows.length;
 }
 
@@ -2117,7 +2193,7 @@ function renderActionPlans(options = {}) {
            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M17 3a2.85 2.85 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5L17 3Z"/></svg>
            <span>编辑</span>
          </button>`;
-      const impactHtml = renderActionPlanAccountImpact(account, impactByAccountId.get(Number(account.id)));
+      const impactHtml = liveMode ? "" : renderActionPlanAccountImpact(account, impactByAccountId.get(Number(account.id)));
       return `
       <div id="${escapeAttribute(getActionPlanAccountAnchor(account))}" class="action-plan-group${liveMode ? " account-card" : ""}" data-account-id="${accountIdStr}">
         <div class="action-plan-group-head">
@@ -2140,6 +2216,13 @@ function renderActionPlans(options = {}) {
           </div>
         </div>
         ${actionPlanTableHtml(actionPlanTbodyId(account))}
+        <details class="action-plan-closed-section hidden" data-action-plan-closed-section>
+          <summary>
+            <span>已清仓复盘</span>
+            <small><span data-closed-count>0</span> 个，点击展开</small>
+          </summary>
+          ${actionPlanTableHtml(actionPlanClosedTbodyId(account), { showHeader: false })}
+        </details>
         <div ${legacyActionPlanControlIds(account).empty ? `id="${legacyActionPlanControlIds(account).empty}"` : ""} class="empty-state hidden">${liveMode ? "这个账户暂无标的，点击「添加标的」开始维护。" : "这个账户还没有操作计划，点击“添加标的”开始填写。"}</div>
       </div>
     `;
@@ -2203,13 +2286,81 @@ function renderActionPlans(options = {}) {
   }
 }
 
-function renderActionPlanSymbolOptions(selectedSymbol = "") {
-  if (!actionPlanSymbolSelect) return;
+const ACTION_PLAN_SYMBOL_GROUPS = [
+  { key: "us-stock", label: "美股个股" },
+  { key: "cn-stock", label: "大A个股" },
+  { key: "sector", label: "板块 / ETF" },
+  { key: "index", label: "大盘 / 指数" },
+  { key: "other", label: "其他" },
+];
+
+function normalizeActionPlanSymbolItem(item = {}) {
+  const symbol = String(item.symbol || "").trim().toUpperCase();
+  const symbolType = String(item.symbolType || item.symbol_type || "stock").trim();
+  const marketType = String(item.marketType || item.market_type || "美股").trim();
+  return {
+    ...item,
+    symbol,
+    displayName: String(item.displayName || item.display_name || symbol).trim(),
+    symbolType,
+    marketType,
+    aliases: item.aliases || "",
+  };
+}
+
+function actionPlanSymbolGroupKey(item = {}) {
+  const normalized = normalizeActionPlanSymbolItem(item);
+  if (normalized.symbolType === "stock") {
+    return normalized.marketType === "大A" ? "cn-stock" : "us-stock";
+  }
+  if (normalized.symbolType === "sector") return "sector";
+  if (normalized.symbolType === "index") return "index";
+  return "other";
+}
+
+function actionPlanSymbolGroup(item = {}) {
+  const key = actionPlanSymbolGroupKey(item);
+  return ACTION_PLAN_SYMBOL_GROUPS.find((group) => group.key === key) || ACTION_PLAN_SYMBOL_GROUPS[ACTION_PLAN_SYMBOL_GROUPS.length - 1];
+}
+
+function getActionPlanSymbolOptions(selectedSymbol = "") {
   const selected = String(selectedSymbol || "").trim().toUpperCase();
   const existing = selected && !state.actionPlanSymbolCatalog.some((item) => item.symbol === selected)
     ? [{ symbol: selected, displayName: selected, symbolType: "stock", unmanaged: true }]
     : [];
-  const options = [...existing, ...state.actionPlanSymbolCatalog];
+  return [...existing, ...state.actionPlanSymbolCatalog].map(normalizeActionPlanSymbolItem);
+}
+
+function actionPlanSymbolSearchText(item = {}) {
+  const normalized = normalizeActionPlanSymbolItem(item);
+  return [
+    normalized.symbol,
+    normalized.displayName,
+    normalized.symbolType,
+    normalized.marketType,
+    actionPlanSymbolGroup(normalized).label,
+    Array.isArray(normalized.aliases) ? normalized.aliases.join(" ") : normalized.aliases,
+  ].join(" ").toLowerCase();
+}
+
+function actionPlanSymbolPickerLabelHtml(symbol) {
+  const selected = String(symbol || "").trim().toUpperCase();
+  const item = findActionPlanSymbol(selected) || getActionPlanSymbolOptions(selected).find((option) => option.symbol === selected);
+  if (!selected) return `<span class="action-plan-symbol-placeholder">选择标的</span>`;
+  const normalized = normalizeActionPlanSymbolItem(item || { symbol: selected, displayName: selected, unmanaged: true });
+  const showName = normalized.displayName && normalized.displayName !== normalized.symbol;
+  const suffix = normalized.unmanaged ? "（未在标的管理）" : "";
+  return `
+    <span class="action-plan-symbol-picked-code">${escapeHtml(normalized.symbol)}</span>
+    ${showName ? `<span class="action-plan-symbol-picked-name">${escapeHtml(normalized.displayName + suffix)}</span>` : ""}
+    ${!showName && suffix ? `<span class="action-plan-symbol-picked-name">${escapeHtml(suffix)}</span>` : ""}
+  `;
+}
+
+function renderActionPlanSymbolOptions(selectedSymbol = "") {
+  if (!actionPlanSymbolSelect) return;
+  const selected = String(selectedSymbol || "").trim().toUpperCase();
+  const options = getActionPlanSymbolOptions(selected);
   actionPlanSymbolSelect.innerHTML = options.map((item) => {
     const label = item.displayName && item.displayName !== item.symbol
       ? `${item.displayName} / ${item.symbol}`
@@ -2217,6 +2368,101 @@ function renderActionPlanSymbolOptions(selectedSymbol = "") {
     const suffix = item.unmanaged ? "（未在标的管理）" : "";
     return `<option value="${escapeHtml(item.symbol)}" ${item.symbol === selected ? "selected" : ""}>${escapeHtml(label + suffix)}</option>`;
   }).join("");
+  renderActionPlanSymbolPicker(selected);
+}
+
+function renderActionPlanSymbolPicker(selectedSymbol = "") {
+  if (!actionPlanSymbolPickerLabel) return;
+  actionPlanSymbolPickerLabel.innerHTML = actionPlanSymbolPickerLabelHtml(selectedSymbol);
+  renderActionPlanSymbolFilterRow();
+  renderActionPlanSymbolPickerResults();
+}
+
+function renderActionPlanSymbolFilterRow() {
+  if (!actionPlanSymbolFilterRow) return;
+  const filters = [{ key: "all", label: "全部" }, ...ACTION_PLAN_SYMBOL_GROUPS.filter((group) => group.key !== "other")];
+  actionPlanSymbolFilterRow.innerHTML = filters.map((filter) => `
+    <button type="button" class="action-plan-symbol-filter ${state.actionPlanSymbolPickerFilter === filter.key ? "active" : ""}" data-symbol-filter="${escapeAttribute(filter.key)}">
+      ${escapeHtml(filter.label)}
+    </button>
+  `).join("");
+}
+
+function renderActionPlanSymbolPickerResults() {
+  if (!actionPlanSymbolResultList) return;
+  const selected = String(actionPlanSymbolInput?.value || actionPlanSymbolSelect?.value || "").trim().toUpperCase();
+  const query = String(actionPlanSymbolSearchInput?.value || "").trim().toLowerCase();
+  const options = getActionPlanSymbolOptions(selected)
+    .filter((item) => {
+      const matchesFilter = state.actionPlanSymbolPickerFilter === "all" || actionPlanSymbolGroupKey(item) === state.actionPlanSymbolPickerFilter;
+      const matchesQuery = !query || actionPlanSymbolSearchText(item).includes(query);
+      return matchesFilter && matchesQuery;
+    });
+  if (!options.length) {
+    actionPlanSymbolResultList.innerHTML = `<div class="action-plan-symbol-empty">没有匹配的标的</div>`;
+    return;
+  }
+  actionPlanSymbolResultList.innerHTML = ACTION_PLAN_SYMBOL_GROUPS.map((group) => {
+    const items = options.filter((item) => actionPlanSymbolGroupKey(item) === group.key);
+    if (!items.length) return "";
+    return `
+      <section class="action-plan-symbol-result-group">
+        <div class="action-plan-symbol-result-group-head">
+          <span>${escapeHtml(group.label)}</span>
+          <span>${items.length} 个</span>
+        </div>
+        ${items.map((item) => {
+          const label = item.displayName && item.displayName !== item.symbol ? item.displayName : item.symbol;
+          const suffix = item.unmanaged ? "（未在标的管理）" : "";
+          return `
+            <button type="button" class="action-plan-symbol-result ${item.symbol === selected ? "active" : ""}" data-symbol-picker-value="${escapeAttribute(item.symbol)}">
+              <span class="action-plan-symbol-result-code">${escapeHtml(item.symbol)}</span>
+              <span class="action-plan-symbol-result-name">
+                <strong>${escapeHtml(label + suffix)}</strong>
+                <small>${escapeHtml([item.marketType, item.symbolType].filter(Boolean).join(" · "))}</small>
+              </span>
+            </button>
+          `;
+        }).join("")}
+      </section>
+    `;
+  }).join("");
+}
+
+function setActionPlanSymbolValue(symbol, options = {}) {
+  const selected = String(symbol || "").trim().toUpperCase();
+  if (actionPlanSymbolInput) actionPlanSymbolInput.value = selected;
+  if (actionPlanSymbolSelect) actionPlanSymbolSelect.value = selected;
+  renderActionPlanSymbolPicker(selected);
+  updateActionPlanDetailHeading();
+  renderActionPlanMetrics(selected);
+  if (options.notify !== false) {
+    actionPlanSymbolSelect?.dispatchEvent(new Event("change", { bubbles: true }));
+  }
+}
+
+function openActionPlanSymbolPicker() {
+  if (isActionPlanEditorReadOnly()) return;
+  actionPlanSymbolPickerPopover?.classList.remove("hidden");
+  actionPlanSymbolPickerTrigger?.classList.add("open");
+  actionPlanSymbolPickerTrigger?.setAttribute("aria-expanded", "true");
+  renderActionPlanSymbolFilterRow();
+  renderActionPlanSymbolPickerResults();
+  requestAnimationFrame(() => actionPlanSymbolSearchInput?.focus());
+}
+
+function closeActionPlanSymbolPicker() {
+  actionPlanSymbolPickerPopover?.classList.add("hidden");
+  actionPlanSymbolPickerTrigger?.classList.remove("open");
+  actionPlanSymbolPickerTrigger?.setAttribute("aria-expanded", "false");
+}
+
+function toggleActionPlanSymbolPicker() {
+  if (actionPlanSymbolPickerPopover?.classList.contains("hidden")) {
+    openActionPlanSymbolPicker();
+  } else {
+    closeActionPlanSymbolPicker();
+  }
 }
 
 function renderActionPlanAccountOptions(selectedAccountId = null) {
@@ -2285,10 +2531,8 @@ function fillActionPlanEditor(plan) {
   if (!plan) return;
   renderActionPlanAccountOptions(plan.accountId || "");
   if (actionPlanAccountSelect) actionPlanAccountSelect.value = String(plan.accountId || "");
-  if (actionPlanSymbolInput) actionPlanSymbolInput.value = plan.symbol || "";
   renderActionPlanSymbolOptions(plan.symbol || "");
-  if (actionPlanSymbolSelect) actionPlanSymbolSelect.value = plan.symbol || "";
-  renderActionPlanMetrics(plan.symbol || "");
+  setActionPlanSymbolValue(plan.symbol || "", { notify: false });
   if (actionPlanActionSelect) actionPlanActionSelect.value = normalizeActionPlanAction(plan.actionType);
   if (actionPlanPositionSelect) actionPlanPositionSelect.value = normalizeActionPlanPosition(plan.currentPosition);
   if (actionPlanPositionAmountInput) {
@@ -2396,7 +2640,7 @@ function openActionPlanDetail(index) {
   saveActionPlanDetailBtn?.classList.toggle("hidden", readOnly);
   requestAnimationFrame(() => {
     resizeActionPlanTextareas();
-    actionPlanSymbolSelect?.focus();
+    actionPlanSymbolPickerTrigger?.focus();
   });
 }
 
@@ -2583,6 +2827,8 @@ function applyActionPlanReadOnly(readOnly) {
     actionPlanAccountSelect,
     actionPlanSymbolInput,
     actionPlanSymbolSelect,
+    actionPlanSymbolPickerTrigger,
+    actionPlanSymbolSearchInput,
     actionPlanActionSelect,
     actionPlanPositionSelect,
     actionPlanSupportLevelsInput,
@@ -2679,7 +2925,10 @@ function buildPriceCard(item) {
   const symbol = document.createElement("span");
   symbol.className = "price-card-symbol";
   symbol.textContent = item?.symbol || "-";
-  name.append(title, symbol);
+  name.append(title);
+  if (item?.market_type !== "大A") {
+    name.append(symbol);
+  }
   const price = document.createElement("div");
   price.className = "price-value";
   price.textContent = formatPrice(item.current_price);
@@ -2723,24 +2972,28 @@ function renderPrices(prices) {
       if (!allDetails.length) return;
       const anyOpen = [...allDetails].some((d) => d.open);
       allDetails.forEach((d) => d.open = !anyOpen);
-      ["priceSectionIndex", "priceSectionSector", "priceSectionStock"].forEach(
+      ["priceSectionUsStock", "priceSectionCnStock", "priceSectionSector", "priceSectionIndex"].forEach(
         (k) => localStorage.setItem(k, anyOpen ? "closed" : "open")
       );
       hint.textContent = anyOpen ? "▸ 点击展开" : "▾ 点击折叠";
     });
   }
 
-  // Sectioned display: { index: [...], sector: [...], stock: [...] }
+  // Sectioned display order: index / sector / usStock / cnStock.
   if (prices && !Array.isArray(prices) && typeof prices === "object") {
     const sections = [
-      { key: "index",  label: "大盘分析",    storageKey: "priceSectionIndex" },
-      { key: "sector", label: "板块分析",    storageKey: "priceSectionSector" },
-      { key: "stock",  label: "个股深度研究", storageKey: "priceSectionStock" },
+      { key: "index",   label: "大盘 / 指数", storageKey: "priceSectionIndex" },
+      { key: "sector",  label: "板块 / ETF", storageKey: "priceSectionSector" },
+      { key: "usStock", label: "美股个股", storageKey: "priceSectionUsStock" },
+      { key: "cnStock", label: "大A个股", storageKey: "priceSectionCnStock" },
     ];
     let hasAny = false;
     let visibleSections = 0;
     sections.forEach(({ key, label, storageKey }) => {
-      const items = prices[key] || [];
+      const hasSplitStock = Array.isArray(prices.usStock) || Array.isArray(prices.cnStock);
+      const items = key === "usStock"
+        ? (hasSplitStock ? (prices.usStock || []) : (prices.stock || []))
+        : (prices[key] || []);
       if (!items.length) return;
       hasAny = true;
       visibleSections += 1;
@@ -3615,7 +3868,11 @@ function formatAccountMoney(value, currency = "CNY") {
   const number = Number(value);
   if (!Number.isFinite(number)) return "未填写";
   const prefix = currency === "USD" ? "$" : currency === "CNY" ? "¥" : `${currency} `;
-  return `${prefix}${(number / 10000).toLocaleString("zh-CN", { maximumFractionDigits: 2 })}万`;
+  const wanValue = number / 10;
+  return `${prefix}${wanValue.toLocaleString("zh-CN", {
+    minimumFractionDigits: 1,
+    maximumFractionDigits: 1,
+  })}万`;
 }
 
 function rawMoneyToWanInput(value) {
@@ -3985,6 +4242,7 @@ function showAccountForm(prefill = {}) {
           <input type="text" name="currency" value="${escapeAttribute(account.currency)}" required placeholder="USD / CNY" />
         </label>
         <label>
+<<<<<<< Updated upstream
           <small>总资产</small>
           <div class="amount-input-wrap">
             <input type="number" step="0.01" min="0" name="totalAssets" value="${rawMoneyToWanInput(account.totalAssets)}" placeholder="账户整体规模" />
@@ -3997,6 +4255,10 @@ function showAccountForm(prefill = {}) {
             <input type="number" step="0.01" min="0" name="availableCash" value="${rawMoneyToWanInput(account.availableCash)}" placeholder="可调仓现金" />
             <span class="amount-input-suffix">万</span>
           </div>
+=======
+          <small>总资产（千）</small>
+          <input type="number" step="0.01" name="totalAssets" value="${account.totalAssets ?? ""}" placeholder="如 32 = 3.2万" />
+>>>>>>> Stashed changes
         </label>
         <label>
           <small>排序</small>
@@ -4226,10 +4488,11 @@ async function refreshOpenLatestReviewActionPlans() {
 async function loadSymbols(forceRefresh = false) {
   const indexList = document.querySelector("#symbolsIndexList");
   const sectorList = document.querySelector("#symbolsSectorList");
-  const stockList = document.querySelector("#symbolsStockList");
+  const stockUsList = document.querySelector("#symbolsStockUsList");
+  const stockCnList = document.querySelector("#symbolsStockCnList");
   if (!indexList) return;
 
-  [indexList, sectorList, stockList].forEach((el) => {
+  [indexList, sectorList, stockUsList, stockCnList].forEach((el) => {
     el.innerHTML = `<tr><td colspan="6" class="empty-state">加载中...</td></tr>`;
   });
 
@@ -4238,10 +4501,14 @@ async function loadSymbols(forceRefresh = false) {
     const items = data.items || [];
     state.symbolsLoaded = true;
 
-    const byType = { index: [], sector: [], stock: [] };
+    const byType = { index: [], sector: [], stockUs: [], stockCn: [] };
     items.forEach((item) => {
       const t = item.symbol_type || "stock";
-      if (byType[t]) byType[t].push(item);
+      if (t === "stock") {
+        (item.market_type === "大A" ? byType.stockCn : byType.stockUs).push(item);
+      } else if (byType[t]) {
+        byType[t].push(item);
+      }
     });
 
     const render = (tbody, typeItems) => {
@@ -4254,12 +4521,13 @@ async function loadSymbols(forceRefresh = false) {
     };
     render(indexList, byType.index);
     render(sectorList, byType.sector);
-    render(stockList, byType.stock);
-    [indexList, sectorList, stockList].forEach((g) => {
+    render(stockUsList, byType.stockUs);
+    render(stockCnList, byType.stockCn);
+    [indexList, sectorList, stockUsList, stockCnList].forEach((g) => {
       if (g.querySelector(".symbol-row")) initSymbolDragDrop(g);
     });
   } catch (error) {
-    [indexList, sectorList, stockList].forEach((el) => {
+    [indexList, sectorList, stockUsList, stockCnList].forEach((el) => {
       el.innerHTML = `<tr><td colspan="6" class="empty-state">加载失败: ${escapeHtml(error.message)}</td></tr>`;
     });
   }
@@ -4274,7 +4542,10 @@ function buildSymbolRow(item) {
 
   const aliases = Array.isArray(item.aliases) ? item.aliases : [];
   const typeClass = { index: "type-index", sector: "type-sector", stock: "type-stock" }[item.symbol_type] || "type-stock";
-  const typeLabel = { index: "大盘", sector: "板块", stock: "个股" }[item.symbol_type] || item.symbol_type;
+  const marketType = item.market_type === "大A" ? "大A" : "美股";
+  const typeLabel = item.symbol_type === "stock"
+    ? `${marketType}个股`
+    : ({ index: "大盘", sector: "板块" }[item.symbol_type] || item.symbol_type);
   const yahooIsDiff = item.yahoo_symbol && item.yahoo_symbol !== item.symbol;
   const activeLabel = item.is_active ? "显示中" : "已隐藏";
   const activeClass = item.is_active ? "status-active" : "status-hidden";
@@ -4362,44 +4633,57 @@ function buildSymbolCard(item) { return buildSymbolRow(item); }
 // 为同一个 <tbody> 内的行绑定拖拽排序
 function initSymbolDragDrop(tbody) {
   let dragSrc = null;
+  let dropTarget = null;
+  let dropAfter = false;
+
+  const clearDropMarks = () => {
+    tbody.querySelectorAll(".symbol-row").forEach((r) => {
+      r.classList.remove("drag-over", "drag-over-before", "drag-over-after");
+    });
+  };
 
   tbody.addEventListener("dragstart", (e) => {
     const row = e.target.closest(".symbol-row");
     if (!row) return;
     dragSrc = row;
+    dropTarget = null;
+    dropAfter = false;
     row.classList.add("dragging");
     e.dataTransfer.effectAllowed = "move";
   });
 
   tbody.addEventListener("dragend", () => {
-    tbody.querySelectorAll(".symbol-row").forEach((r) => r.classList.remove("dragging", "drag-over"));
+    clearDropMarks();
+    tbody.querySelectorAll(".symbol-row").forEach((r) => r.classList.remove("dragging"));
     dragSrc = null;
+    dropTarget = null;
+    dropAfter = false;
   });
 
   tbody.addEventListener("dragover", (e) => {
     e.preventDefault();
     e.dataTransfer.dropEffect = "move";
     const target = e.target.closest(".symbol-row");
-    if (!target || target === dragSrc) return;
-    tbody.querySelectorAll(".symbol-row").forEach((r) => r.classList.remove("drag-over"));
-    target.classList.add("drag-over");
-  });
-
-  tbody.addEventListener("dragleave", (e) => {
-    const row = e.target.closest(".symbol-row");
-    if (row) row.classList.remove("drag-over");
+    if (!target || target === dragSrc) {
+      clearDropMarks();
+      dropTarget = null;
+      return;
+    }
+    const rect = target.getBoundingClientRect();
+    dropTarget = target;
+    dropAfter = e.clientY > rect.top + rect.height / 2;
+    clearDropMarks();
+    target.classList.add("drag-over", dropAfter ? "drag-over-after" : "drag-over-before");
   });
 
   tbody.addEventListener("drop", async (e) => {
     e.preventDefault();
-    const target = e.target.closest(".symbol-row");
+    const target = dropTarget || e.target.closest(".symbol-row");
     if (!target || !dragSrc || target === dragSrc) return;
-    target.classList.remove("drag-over");
+    const insertAfter = dropTarget ? dropAfter : false;
+    clearDropMarks();
 
-    const rows = [...tbody.querySelectorAll(".symbol-row")];
-    const fromIdx = rows.indexOf(dragSrc);
-    const toIdx = rows.indexOf(target);
-    if (fromIdx < toIdx) {
+    if (insertAfter) {
       tbody.insertBefore(dragSrc, target.nextSibling);
     } else {
       tbody.insertBefore(dragSrc, target);
@@ -4454,6 +4738,13 @@ function showSymbolForm(prefill = {}, options = {}) {
               <option value="stock" ${(!prefill.symbol_type || prefill.symbol_type === "stock") ? "selected" : ""}>个股</option>
             </select>
           </label>
+          <label class="symbol-market-type-label">
+            <small>市场</small>
+            <select name="market_type">
+              <option value="美股" ${(prefill.market_type || "美股") !== "大A" ? "selected" : ""}>美股</option>
+              <option value="大A" ${prefill.market_type === "大A" ? "selected" : ""}>大A</option>
+            </select>
+          </label>
           <label class="symbol-manual-aliases-label">
             <small>别名（逗号分隔，用于新闻匹配）</small>
             <input type="text" name="aliases" value="${escapeHtml(aliasStr)}" placeholder="如 Micron, Micron Technology, 美光" />
@@ -4471,6 +4762,13 @@ function showSymbolForm(prefill = {}, options = {}) {
   preview.querySelector("#symbolFormCancelBtn").addEventListener("click", () => {
     preview.classList.add("hidden");
   });
+  const symbolTypeSelect = preview.querySelector("select[name='symbol_type']");
+  const marketTypeLabel = preview.querySelector(".symbol-market-type-label");
+  const syncSymbolMarketField = () => {
+    marketTypeLabel?.classList.toggle("hidden", symbolTypeSelect?.value !== "stock");
+  };
+  symbolTypeSelect?.addEventListener("change", syncSymbolMarketField);
+  syncSymbolMarketField();
   preview.querySelector("#symbolManualForm").addEventListener("submit", async (e) => {
     e.preventDefault();
     await submitSymbolForm(new FormData(e.target));
@@ -4489,6 +4787,7 @@ async function submitSymbolForm(formData) {
     yahoo_symbol: String(formData.get("yahoo_symbol") || "").trim() || null,
     display_name: String(formData.get("display_name") || "").trim(),
     symbol_type: formData.get("symbol_type"),
+    market_type: formData.get("market_type") === "大A" ? "大A" : "美股",
     aliases,
   };
 

@@ -1321,7 +1321,7 @@ async function getReviewBootstrap(env, archiveDate) {
 
   // 从 tracked_symbols 获取分组信息
   const trackedSymbols = await env.DB.prepare(
-    `SELECT symbol, yahoo_symbol, display_name, symbol_type, sort_order
+    `SELECT symbol, yahoo_symbol, display_name, symbol_type, market_type, sort_order
      FROM tracked_symbols WHERE is_active = 1`,
   ).all();
   const symbolInfoMap = {};
@@ -1329,21 +1329,30 @@ async function getReviewBootstrap(env, archiveDate) {
     symbolInfoMap[s.symbol] = s;
   }
 
-  // prices 按 index / sector / stock 分组
-  const pricesByType = { index: [], sector: [], stock: [] };
+  // prices 按 index / sector / stock 分组，并把 stock 拆成美股 / 大A。
+  const pricesByType = { usStock: [], cnStock: [], sector: [], index: [] };
   for (const p of (currentPricesRaw.results || [])) {
     const info = symbolInfoMap[p.symbol];
     const type = info?.symbol_type || "stock";
-    const bucket = pricesByType[type] || pricesByType.stock;
+    const marketType = normalizeSymbolMarketType(info?.market_type || inferSymbolMarketType(info || p));
+    const bucket = type === "stock"
+      ? (marketType === "大A" ? pricesByType.cnStock : pricesByType.usStock)
+      : (pricesByType[type] || pricesByType.usStock);
     bucket.push({
       ...p,
       display_name: info?.display_name || p.stock_name || p.symbol,
+      symbol_type: type,
+      market_type: marketType,
       sort_order: info?.sort_order ?? 999,
     });
   }
   for (const bucket of Object.values(pricesByType)) {
     bucket.sort((a, b) => a.sort_order - b.sort_order);
   }
+  const pricesPayload = {
+    ...pricesByType,
+    stock: [...pricesByType.usStock, ...pricesByType.cnStock].sort((a, b) => a.sort_order - b.sort_order),
+  };
 
   const newsWindow = await getNewsWindowForDate(env, archiveDate);
   const useArchivedNews = normalizeReviewStatus(existingDraft?.review_status) === "reviewed";
@@ -1437,7 +1446,7 @@ async function getReviewBootstrap(env, archiveDate) {
     investmentAccounts,
     newsWindow,
     // 兼容旧版：prices 同时提供扁平数组和分组对象
-    prices: pricesByType,
+    prices: pricesPayload,
     pricesFlat: (currentPricesRaw.results || []),
     news: newsItems,          // 全量（兼容旧版）
     newsByType,               // 按 index/sector/stock 分组
@@ -1686,10 +1695,10 @@ function buildActionPlanSymbolMetrics(latest, weekBaseline, monthBaseline) {
 
 async function getActionPlanSymbolCatalog(env, archiveDate) {
   const result = await env.DB.prepare(
-    `SELECT id, symbol, yahoo_symbol, display_name, symbol_type, aliases, is_active, sort_order, created_at, updated_at
+    `SELECT id, symbol, yahoo_symbol, display_name, symbol_type, market_type, aliases, is_active, sort_order, created_at, updated_at
      FROM tracked_symbols
      WHERE is_active = 1
-     ORDER BY symbol_type, sort_order, id`,
+     ORDER BY symbol_type, market_type, sort_order, id`,
   ).all();
   const symbolRows = result.results || [];
   const symbols = symbolRows.map((row) => row.symbol).filter(Boolean);
@@ -1707,6 +1716,8 @@ async function getActionPlanSymbolCatalog(env, archiveDate) {
       yahooSymbol: symbolItem.yahoo_symbol,
       displayName: symbolItem.display_name,
       symbolType: symbolItem.symbol_type,
+      marketType: symbolItem.market_type,
+      aliases: symbolItem.aliases || [],
       sortOrder: symbolItem.sort_order,
       metrics: buildActionPlanSymbolMetrics(
         latestPoints.get(symbolItem.symbol),
@@ -3295,8 +3306,8 @@ async function getSymbols(env, url) {
   if (activeOnly) { clauses.push("is_active = 1"); }
   const where = clauses.length ? `WHERE ${clauses.join(" AND ")}` : "";
   const result = await env.DB.prepare(
-    `SELECT id, symbol, yahoo_symbol, display_name, symbol_type, aliases, is_active, sort_order, created_at, updated_at
-     FROM tracked_symbols ${where} ORDER BY symbol_type, sort_order, id`,
+    `SELECT id, symbol, yahoo_symbol, display_name, symbol_type, market_type, aliases, is_active, sort_order, created_at, updated_at
+     FROM tracked_symbols ${where} ORDER BY symbol_type, market_type, sort_order, id`,
   ).bind(...params).all();
   const items = (result.results || []).map(enrichSymbolItem);
   return { items, total: items.length };
@@ -3304,7 +3315,7 @@ async function getSymbols(env, url) {
 
 async function getSymbolById(env, id) {
   const row = await env.DB.prepare(
-    `SELECT id, symbol, yahoo_symbol, display_name, symbol_type, aliases, is_active, sort_order, created_at, updated_at
+    `SELECT id, symbol, yahoo_symbol, display_name, symbol_type, market_type, aliases, is_active, sort_order, created_at, updated_at
      FROM tracked_symbols WHERE id = ? LIMIT 1`,
   ).bind(id).first();
   if (!row) { const e = new Error("Symbol not found"); e.statusCode = 404; throw e; }
@@ -3316,13 +3327,14 @@ async function createSymbol(env, body) {
   const now = isoNow();
   const aliases = normalizeAliases(body.aliases, body.symbol, body.display_name);
   const result = await env.DB.prepare(
-    `INSERT INTO tracked_symbols (symbol, yahoo_symbol, display_name, symbol_type, aliases, is_active, sort_order, created_at, updated_at)
-     VALUES (?, ?, ?, ?, ?, 1, ?, ?, ?)`,
+    `INSERT INTO tracked_symbols (symbol, yahoo_symbol, display_name, symbol_type, market_type, aliases, is_active, sort_order, created_at, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, 1, ?, ?, ?)`,
   ).bind(
     body.symbol.trim().toUpperCase(),
     (body.yahoo_symbol || "").trim() || null,
     body.display_name.trim(),
     body.symbol_type,
+    normalizeSymbolMarketType(body.market_type || inferSymbolMarketType(body)),
     JSON.stringify(aliases),
     Number(body.sort_order ?? 0),
     now, now,
@@ -3361,7 +3373,7 @@ async function updateSymbol(env, id, body) {
   const statements = [
     env.DB.prepare(
     `UPDATE tracked_symbols SET
-       symbol = ?, yahoo_symbol = ?, display_name = ?, symbol_type = ?,
+       symbol = ?, yahoo_symbol = ?, display_name = ?, symbol_type = ?, market_type = ?,
        aliases = ?, is_active = ?, sort_order = ?, updated_at = ?
      WHERE id = ?`,
     ).bind(
@@ -3369,6 +3381,7 @@ async function updateSymbol(env, id, body) {
       (body.yahoo_symbol != null ? body.yahoo_symbol : existing.yahoo_symbol) || null,
       displayName,
       body.symbol_type || existing.symbol_type,
+      normalizeSymbolMarketType(body.market_type || existing.market_type || inferSymbolMarketType({ symbol, yahoo_symbol: body.yahoo_symbol ?? existing.yahoo_symbol })),
       JSON.stringify(aliases),
       body.is_active != null ? Number(body.is_active) : existing.is_active,
       body.sort_order != null ? Number(body.sort_order) : existing.sort_order,
@@ -3475,6 +3488,7 @@ async function callLLMForSymbol(apiKey, baseUrl, model, userInput, existingSymbo
   "yahoo_symbol": "Yahoo Finance精确代码。注意：美股指数需要^前缀(如^GSPC)，上证用000001.SS，美元指数用DX-Y.NYB，黄金用GC=F，原油用CL=F",
   "display_name": "中文显示名称",
   "symbol_type": "index（大盘指数/大宗商品/汇率/波动率）或 sector（板块ETF/行业指数）或 stock（个股）",
+  "market_type": "美股 或 大A；A股/H股/沪深代码用大A，美股ticker用美股",
   "aliases": ["中英文别名数组，用于新闻匹配，至少包含symbol、公司名、中文名"],
   "confidence": "high 或 medium 或 low",
   "reason": "一句话识别依据"
@@ -3507,6 +3521,7 @@ async function callLLMForSymbol(apiKey, baseUrl, model, userInput, existingSymbo
     // 规范化字段
     if (parsed.symbol) parsed.symbol = parsed.symbol.trim().toUpperCase();
     if (!["index", "sector", "stock"].includes(parsed.symbol_type)) parsed.symbol_type = "stock";
+    parsed.market_type = normalizeSymbolMarketType(parsed.market_type || inferSymbolMarketType(parsed));
     if (!Array.isArray(parsed.aliases)) parsed.aliases = [parsed.symbol];
     return parsed;
   } catch {
@@ -3554,7 +3569,17 @@ function enrichSymbolItem(row) {
   if (!row) return null;
   let aliases = [];
   try { aliases = JSON.parse(row.aliases || "[]"); } catch { aliases = []; }
-  return { ...row, aliases };
+  return { ...row, market_type: normalizeSymbolMarketType(row.market_type || inferSymbolMarketType(row)), aliases };
+}
+
+function normalizeSymbolMarketType(value) {
+  return value === "大A" ? "大A" : "美股";
+}
+
+function inferSymbolMarketType(item = {}) {
+  const text = `${item.symbol || ""} ${item.yahoo_symbol || ""} ${item.display_name || ""}`;
+  if (/[.\s](SS|SZ|HK)\b/i.test(text) || /[\u4e00-\u9fff]/.test(String(item.symbol || ""))) return "大A";
+  return "美股";
 }
 
 function normalizeAliases(input, symbol, displayName) {

@@ -19,7 +19,8 @@ test('symbol manager page can add and hide a temporary symbol', async ({ page })
   await expect(page.getByRole('heading', { name: '标的管理' })).toBeVisible();
   await expect(page.locator('#symbolsIndexList')).toBeVisible();
   await expect(page.locator('#symbolsSectorList')).toBeVisible();
-  await expect(page.locator('#symbolsStockList')).toBeVisible();
+  await expect(page.locator('#symbolsStockUsList')).toBeVisible();
+  await expect(page.locator('#symbolsStockCnList')).toBeVisible();
 
   await page.getByRole('button', { name: '手动添加' }).click();
   const form = page.locator('#symbolManualForm');
@@ -46,6 +47,54 @@ test('symbol manager page can add and hide a temporary symbol', async ({ page })
   });
   await row.getByRole('button', { name: '显示' }).click();
   await expect(row).toContainText('显示中');
+});
+
+test('stock symbols keep market type and render under US or China sections', async ({ page, request }) => {
+  const suffix = Date.now().toString().slice(-6);
+  const usSymbol = `USMK${suffix}`;
+  const cnSymbol = `CNMK${suffix}`;
+  d1(`DELETE FROM tracked_symbols WHERE symbol IN ('${usSymbol}', '${cnSymbol}');`);
+
+  const usCreated = await request.post(`${BASE_URL}/api/symbols`, {
+    data: {
+      symbol: usSymbol,
+      yahoo_symbol: usSymbol,
+      display_name: '美股市场测试',
+      symbol_type: 'stock',
+      market_type: '美股',
+      aliases: [usSymbol, '美股市场测试'],
+    },
+  });
+  const cnCreated = await request.post(`${BASE_URL}/api/symbols`, {
+    data: {
+      symbol: cnSymbol,
+      yahoo_symbol: '600000.SS',
+      display_name: '大A市场测试',
+      symbol_type: 'stock',
+      market_type: '大A',
+      aliases: [cnSymbol, '大A市场测试'],
+    },
+  });
+  expect(usCreated.ok()).toBeTruthy();
+  expect(cnCreated.ok()).toBeTruthy();
+  expect((await usCreated.json()).item).toMatchObject({ symbol: usSymbol, market_type: '美股' });
+  expect((await cnCreated.json()).item).toMatchObject({ symbol: cnSymbol, market_type: '大A' });
+
+  await page.goto(BASE_URL, { waitUntil: 'networkidle' });
+  await page.getByRole('button', { name: '标的管理' }).click();
+  await expect(page.locator('#symbolsStockUsList')).toContainText(usSymbol);
+  await expect(page.locator('#symbolsStockCnList')).toContainText(cnSymbol);
+
+  await page.getByRole('button', { name: '手动添加' }).click();
+  const form = page.locator('#symbolManualForm');
+  await form.locator('select[name="symbol_type"]').selectOption('stock');
+  await expect(form.locator('select[name="market_type"]')).toBeVisible();
+  await form.locator('select[name="symbol_type"]').selectOption('sector');
+  await expect(form.locator('select[name="market_type"]')).toBeHidden();
+  await form.locator('select[name="symbol_type"]').selectOption('index');
+  await expect(form.locator('select[name="market_type"]')).toBeHidden();
+
+  d1(`DELETE FROM tracked_symbols WHERE symbol IN ('${usSymbol}', '${cnSymbol}');`);
 });
 
 test('resolved symbol fills an editable add form before saving', async ({ page }) => {
@@ -188,8 +237,8 @@ test('symbol system code can be renamed and related records migrate', async ({ p
 
   d1(`INSERT INTO stock_raw (k_date, stock_name, symbol, yahoo_symbol, current_price, change_percent, volume, captured_at)
         VALUES ('${reviewDate}', '重命名测试', '${oldSymbol}', '${oldSymbol}', 12.3, 1.2, 100, datetime('now'));
-      INSERT INTO daily_review_action_plans (archive_date, symbol, action_type, current_position, sort_order)
-        VALUES ('${reviewDate}', '${oldSymbol}', '持仓观察', '0-5%', 0);
+      INSERT INTO daily_review_action_plans (archive_date, account_id, symbol, action_type, current_position, sort_order)
+        VALUES ('${reviewDate}', 1, '${oldSymbol}', '持仓观察', '0-5%', 0);
       INSERT INTO news_raw_data (pub_date, title, content, url, source, type, related_symbols, news_hash, captured_at)
         VALUES (datetime('now'), 'rename raw', '', 'https://example.com/${suffix}', 'test', 'stock', '["${oldSymbol}","KEEP"]', 'rename-${suffix}', datetime('now'));
       INSERT INTO daily_review_archive_news (archive_date, original_news_id, title, related_symbols, news_hash)

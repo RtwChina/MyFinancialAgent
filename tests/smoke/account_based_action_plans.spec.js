@@ -60,15 +60,30 @@ test('account page and review drawer render account groups', async ({ page }) =>
   await expect(page.locator('#accountsView')).toHaveClass(/active/);
   await expect(page.locator('#accountLivePlans')).toContainText('老虎-美股');
   await expect(page.locator('#accountLivePlans')).toContainText('USD');
+<<<<<<< Updated upstream
+=======
+  await expect(page.locator('#accountLivePlans .action-plan-account-impact')).toHaveCount(0);
+>>>>>>> Stashed changes
 
   await page.locator('.nav-chip[data-view="reviews"]').click();
+  await page.locator('#filtersForm input[name="from"]').fill(ACCOUNT_PLAN_DATE);
+  await page.locator('#filtersForm input[name="to"]').fill(ACCOUNT_PLAN_DATE);
+  await page.locator('#filtersForm').getByRole('button', { name: '查询' }).click();
   const row = page.locator('#reviewsList tr', { hasText: ACCOUNT_PLAN_DATE }).first();
   await expect(row).toBeVisible();
+<<<<<<< Updated upstream
   await row.getByRole('button', { name: /开始复盘|继续复盘|进入复盘|查看|编辑草稿/ }).click();
   await page.getByText('个股操作', { exact: true }).click();
   const drawerPlans = page.locator('#actionPlanAccountGroups');
   await expect(drawerPlans.locator('.action-plan-group-label', { hasText: '老虎-美股' })).toBeVisible();
   await expect(drawerPlans.locator('.action-plan-account-funds').first()).toContainText('可用');
+=======
+  await row.getByRole('button', { name: /开始复盘|编辑草稿|查看/ }).click();
+  await page.getByText('4. 操作计划', { exact: true }).click();
+  const reviewPlans = page.locator('#actionPlanAccountGroups');
+  await expect(reviewPlans.locator('.action-plan-group-label', { hasText: '老虎-美股' })).toBeVisible();
+  await expect(reviewPlans.locator('.action-plan-account-funds').first()).toContainText('可用');
+>>>>>>> Stashed changes
   await expect(page.locator('#actionPlanRowsUs tr', { hasText: 'ACCT' })).toBeVisible();
   await page.locator('#actionPlanRowsUs tr', { hasText: 'ACCT' }).click();
   await expect(page.locator('#actionPlanAccountSelect')).toBeVisible();
@@ -93,6 +108,7 @@ test('custom accounts can be deleted when unused', async ({ page, request }) => 
 
   await page.goto(BASE_URL, { waitUntil: 'load' });
   await page.locator('.nav-chip[data-view="accounts"]').click();
+<<<<<<< Updated upstream
   const accountRow = page.locator('#accountLivePlans .action-plan-group', { hasText: name }).first();
   await expect(accountRow).toBeVisible();
   await accountRow.getByRole('button', { name: '编辑' }).click();
@@ -100,6 +116,15 @@ test('custom accounts can be deleted when unused', async ({ page, request }) => 
   await expect(page.locator('#accountFormDeleteBtn')).toBeVisible();
   page.once('dialog', (dialog) => dialog.accept());
   await page.locator('#accountFormDeleteBtn').click();
+=======
+  const accountCard = page.locator('#accountLivePlans .action-plan-group', { hasText: name }).first();
+  await expect(accountCard).toBeVisible();
+  await accountCard.getByRole('button', { name: '编辑' }).click();
+  const deleteButton = page.locator('#accountFormDeleteBtn');
+  await expect(deleteButton).toBeVisible();
+  page.once('dialog', (dialog) => dialog.accept());
+  await deleteButton.click();
+>>>>>>> Stashed changes
   await expect(page.locator('#accountLivePlans .action-plan-group', { hasText: name })).toHaveCount(0);
 
   const accountsResponse = await request.get(`${BASE_URL}/api/investment-accounts`);

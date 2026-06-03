@@ -137,7 +137,7 @@
 | API-033 | Worker | LLM 不可用降级 | LLM_API_KEY 无效 | `POST /api/symbols/resolve` | 返回 `{resolved:null}` 或错误，不崩溃 | P1 |
 | API-034 | Worker | Yahoo 验价成功 | Yahoo 代码有效 | `POST /api/symbols/validate` body={yahoo_symbol:"MU"} | 返回 `{valid:true,latestPrice,change}` | P1 |
 | API-035 | Worker | Yahoo 验价失败 | 代码不存在 | `POST /api/symbols/validate` body={yahoo_symbol:"INVALID999"} | 返回 `{valid:false,error}` | P2 |
-| API-036 | Worker | bootstrap pricesByType 分组 | tracked_symbols 有数据且 stock_raw 有价格 | `GET /api/reviews/:date/bootstrap` | 返回 `prices` 为 `{index:[],sector:[],stock:[]}` 对象而非扁平数组 | P1 |
+| API-036 | Worker | bootstrap pricesByType 分组 | tracked_symbols 有数据且 stock_raw 有价格 | `GET /api/reviews/:date/bootstrap` | 返回 `prices` 为 `{usStock:[],cnStock:[],sector:[],index:[]}` 对象，兼容字段 `stock` 包含全部个股 | P1 |
 
 ### H. 前端 Web（News + Review Workspace）
 
@@ -172,7 +172,7 @@
 | WEB-027 | `web/app.js` | 保存编辑 | 表单已修改 | 修改 display_name 点击"保存修改" | 列表该行更新 | P1 |
 | WEB-028 | `web/app.js` | 删除标的 | 标的存在 | 点击删除确认 | 标的从列表消失 | P1 |
 | WEB-029 | `web/app.js` | 拖拽排序 | 同类型有 2+ 标的 | 拖拽一行改变顺序 | 视觉顺序改变，PUT 请求发出更新 sort_order | P2 |
-| WEB-030 | `web/app.js` | 复盘价格三段折叠 | bootstrap 有 pricesByType 数据 | 打开复盘抽屉 | 大盘/板块/个股三段 details 各自显示，默认展开，折叠后显示摘要条 | P1 |
+| WEB-030 | `web/app.js` | 复盘价格四段折叠 | bootstrap 有 pricesByType 数据 | 打开复盘抽屉 | 大盘/板块/美股个股/大A个股四段 details 各自显示，默认展开，折叠后显示摘要条 | P1 |
 | WEB-031 | `web/app.js` | 价格区 AI 解读 | sector_impact_map 含 [大盘]/[板块]/[个股] 标记 | 打开复盘抽屉 | 每段价格区块内显示对应 AI 解读 | P1 |
 | WEB-032 | `web/app.js` | 价格折叠状态持久化 | 已折叠某段 | 关闭再打开复盘 | 折叠状态与上次一致（localStorage） | P2 |
 
