@@ -439,6 +439,14 @@ const appendDailyRecordDateBtn = document.querySelector("#appendDailyRecordDateB
 const actionPlanTakeProfitInput = document.querySelector("#actionPlanTakeProfitInput");
 const actionPlanStopLossInput = document.querySelector("#actionPlanStopLossInput");
 const actionPlanThinkingInput = document.querySelector("#actionPlanThinkingInput");
+const exportActionPlanZonesBtn = document.querySelector("#exportActionPlanZonesBtn");
+const actionPlanZoneExportModal = document.querySelector("#actionPlanZoneExportModal");
+const actionPlanZoneExportBackdrop = document.querySelector("#actionPlanZoneExportBackdrop");
+const closeActionPlanZoneExportBtn = document.querySelector("#closeActionPlanZoneExportBtn");
+const actionPlanZoneExportOutput = document.querySelector("#actionPlanZoneExportOutput");
+const actionPlanZoneExportEmpty = document.querySelector("#actionPlanZoneExportEmpty");
+const copyActionPlanZoneExportBtn = document.querySelector("#copyActionPlanZoneExportBtn");
+const actionPlanZoneExportCopyStatus = document.querySelector("#actionPlanZoneExportCopyStatus");
 
 navButtons.forEach((button) => {
   button.addEventListener("click", () => switchView(button.dataset.view));
@@ -490,6 +498,10 @@ actionPlanSymbolSelect?.addEventListener("change", () => {
   renderActionPlanMetrics(actionPlanSymbolSelect.value);
 });
 actionPlanPositionAmountInput?.addEventListener("input", syncPositionBucketFromAmount);
+exportActionPlanZonesBtn?.addEventListener("click", openActionPlanZoneExport);
+actionPlanZoneExportBackdrop?.addEventListener("click", closeActionPlanZoneExport);
+closeActionPlanZoneExportBtn?.addEventListener("click", closeActionPlanZoneExport);
+copyActionPlanZoneExportBtn?.addEventListener("click", copyActionPlanZoneExport);
 
 function syncPositionBucketFromAmount() {
   if (!actionPlanPositionAmountInput || !actionPlanPositionSelect) return;
@@ -547,6 +559,10 @@ dailyInsightBackdrop.addEventListener("click", closeDailyInsightModal);
 window.addEventListener("resize", scheduleDailyInsightSummaryLayout);
 document.addEventListener("keydown", (event) => {
   if (event.key === "Escape") {
+    if (actionPlanZoneExportModal && !actionPlanZoneExportModal.classList.contains("hidden")) {
+      closeActionPlanZoneExport();
+      return;
+    }
     if (!newsDetailModal.classList.contains("hidden")) closeNewsDetail();
     if (!reviewDrawer.classList.contains("hidden")) closeDrawer();
     if (!dailyInsightModal.classList.contains("hidden")) closeDailyInsightModal();
@@ -1800,6 +1816,111 @@ function formatSupportResistanceLevels(supportLevels, resistanceLevels) {
   if (supportLevels) sections.push(`支撑位：\n${supportLevels}`);
   if (resistanceLevels) sections.push(`压力位：\n${resistanceLevels}`);
   return sections.join("\n\n");
+}
+
+function formatActionPlanZoneNumber(value) {
+  const number = Number(value);
+  if (!Number.isFinite(number)) return "";
+  return Number.isInteger(number) ? String(number) : String(Number(number.toFixed(4)));
+}
+
+function normalizeActionPlanZoneLine(line) {
+  return String(line || "")
+    .replace(/[（]/g, "(")
+    .replace(/[）]/g, ")")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function escapeDrawZoneString(value) {
+  return String(value || "").replace(/\\/g, "\\\\").replace(/'/g, "\\'");
+}
+
+function parseActionPlanZoneLine(line, zoneType) {
+  const normalized = normalizeActionPlanZoneLine(line);
+  if (!normalized) return null;
+  const rangeMatch = normalized.match(/(-?\d+(?:\.\d+)?)\s*(?:-|–|—|－|~|至)\s*(-?\d+(?:\.\d+)?)/);
+  if (!rangeMatch) return null;
+  const first = Number(rangeMatch[1]);
+  const second = Number(rangeMatch[2]);
+  if (!Number.isFinite(first) || !Number.isFinite(second)) return null;
+  const lower = Math.min(first, second);
+  const upper = Math.max(first, second);
+  const lowerText = formatActionPlanZoneNumber(lower);
+  const upperText = formatActionPlanZoneNumber(upper);
+  let rest = normalized.slice(rangeMatch.index + rangeMatch[0].length).trim();
+  let strength = "";
+  const strengthMatch = rest.match(/^\(([^)]+)\)/);
+  if (strengthMatch) {
+    strength = strengthMatch[1].trim();
+    rest = rest.slice(strengthMatch[0].length).trim();
+  }
+  const labelParts = [`${zoneType}: ${lowerText}-${upperText}`];
+  if (strength) labelParts.push(`(${strength})`);
+  if (rest) labelParts.push(rest);
+  return {
+    lowerText,
+    upperText,
+    label: labelParts.join(" "),
+  };
+}
+
+function buildActionPlanZoneExportLines(plans = []) {
+  const lines = [];
+  plans.forEach((plan) => {
+    const symbol = String(plan?.symbol || "").trim().toUpperCase();
+    if (!symbol) return;
+    [
+      { text: plan.supportLevels, type: "支撑" },
+      { text: plan.resistanceLevels, type: "压力" },
+    ].forEach(({ text, type }) => {
+      String(text || "").split(/\r?\n/).forEach((line) => {
+        const parsed = parseActionPlanZoneLine(line, type);
+        if (!parsed) return;
+        lines.push(`draw_zone('${escapeDrawZoneString(symbol)}', ${parsed.lowerText}, ${parsed.upperText}, '${escapeDrawZoneString(parsed.label)}')`);
+      });
+    });
+  });
+  return lines;
+}
+
+function closeActionPlanZoneExport() {
+  actionPlanZoneExportModal?.classList.add("hidden");
+  if (actionPlanZoneExportCopyStatus) actionPlanZoneExportCopyStatus.textContent = "";
+}
+
+function openActionPlanZoneExport() {
+  const lines = buildActionPlanZoneExportLines(state.actionPlans);
+  const output = lines.join("\n");
+  if (actionPlanZoneExportOutput) {
+    actionPlanZoneExportOutput.value = output;
+    actionPlanZoneExportOutput.classList.toggle("hidden", !output);
+  }
+  actionPlanZoneExportEmpty?.classList.toggle("hidden", Boolean(output));
+  if (copyActionPlanZoneExportBtn) copyActionPlanZoneExportBtn.disabled = !output;
+  if (actionPlanZoneExportCopyStatus) actionPlanZoneExportCopyStatus.textContent = "";
+  actionPlanZoneExportModal?.classList.remove("hidden");
+  requestAnimationFrame(() => {
+    if (output) {
+      actionPlanZoneExportOutput?.focus();
+      actionPlanZoneExportOutput?.select();
+    } else {
+      closeActionPlanZoneExportBtn?.focus();
+    }
+  });
+}
+
+async function copyActionPlanZoneExport() {
+  const output = actionPlanZoneExportOutput?.value || "";
+  if (!output) return;
+  try {
+    await navigator.clipboard.writeText(output);
+    if (actionPlanZoneExportCopyStatus) actionPlanZoneExportCopyStatus.textContent = "已复制";
+  } catch (error) {
+    actionPlanZoneExportOutput?.focus();
+    actionPlanZoneExportOutput?.select();
+    if (actionPlanZoneExportCopyStatus) actionPlanZoneExportCopyStatus.textContent = "复制失败，请手动复制";
+  }
 }
 
 function positionColorClass(position) {

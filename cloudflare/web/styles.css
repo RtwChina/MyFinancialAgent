@@ -3350,6 +3350,88 @@ textarea[name="reviewerNewsNotes"] {
   display: none;
 }
 
+.action-plan-zone-export-modal {
+  position: fixed;
+  inset: 0;
+  z-index: 42;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+}
+
+.action-plan-zone-export-modal.hidden {
+  display: none;
+}
+
+.action-plan-zone-export-backdrop {
+  position: absolute;
+  inset: 0;
+  background: rgba(15, 23, 42, 0.3);
+  backdrop-filter: blur(5px);
+}
+
+.action-plan-zone-export-panel {
+  position: relative;
+  z-index: 1;
+  display: grid;
+  gap: 14px;
+  width: min(760px, calc(100vw - 48px));
+  max-height: calc(100vh - 48px);
+  padding: 18px;
+  border-radius: 20px;
+  border: 1px solid rgba(37, 99, 235, 0.14);
+  background: rgba(255, 255, 255, 0.98);
+  box-shadow: 0 24px 70px rgba(15, 23, 42, 0.22);
+}
+
+.action-plan-zone-export-head,
+.action-plan-zone-export-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.action-plan-zone-export-head h3 {
+  margin: 0;
+  color: #0f172a;
+  font-size: 1.32rem;
+  line-height: 1.2;
+}
+
+.action-plan-zone-export-head p {
+  margin: 4px 0 0;
+  font-size: 0.82rem;
+}
+
+#actionPlanZoneExportOutput {
+  width: 100%;
+  min-height: 260px;
+  box-sizing: border-box;
+  resize: vertical;
+  padding: 14px;
+  border-radius: 14px;
+  border: 1px solid rgba(37, 99, 235, 0.18);
+  background: #f8fbff;
+  color: #0f172a;
+  font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+  font-size: 0.86rem;
+  line-height: 1.7;
+}
+
+#actionPlanZoneExportOutput:focus {
+  outline: 2px solid rgba(37, 99, 235, 0.24);
+  border-color: rgba(37, 99, 235, 0.42);
+}
+
+#actionPlanZoneExportOutput.hidden {
+  display: none;
+}
+
+.action-plan-zone-export-footer {
+  justify-content: flex-end;
+}
+
 .action-plan-detail-backdrop {
   position: absolute;
   inset: 0;

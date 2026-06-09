@@ -1,0 +1,90 @@
+import { test, expect } from '@playwright/test';
+import { execFileSync } from 'node:child_process';
+
+const BASE_URL = process.env.BASE_URL || 'http://127.0.0.1:8787';
+const EXPORT_DATE = '2026-02-20';
+
+function d1(command) {
+  return execFileSync(
+    'npx',
+    ['wrangler', 'd1', 'execute', 'my-financial-agent', '--local', '--command', command],
+    { cwd: `${process.cwd()}/cloudflare`, encoding: 'utf8' },
+  );
+}
+
+function sqlQuote(value) {
+  return `'${String(value).replaceAll("'", "''")}'`;
+}
+
+function seedTrackedSymbol(symbol, displayName = symbol) {
+  d1(`INSERT INTO tracked_symbols (symbol, yahoo_symbol, display_name, symbol_type, aliases, is_active, sort_order, created_at, updated_at)
+      VALUES (${sqlQuote(symbol)}, ${sqlQuote(symbol)}, ${sqlQuote(displayName)}, 'stock', ${sqlQuote(JSON.stringify([symbol, displayName]))}, 1, 8120, datetime('now'), datetime('now'))
+      ON CONFLICT(symbol) DO UPDATE SET
+        yahoo_symbol=excluded.yahoo_symbol,
+        display_name=excluded.display_name,
+        symbol_type=excluded.symbol_type,
+        aliases=excluded.aliases,
+        is_active=1,
+        updated_at=datetime('now');`);
+}
+
+test('action plan zone export previews draw_zone commands', async ({ page, request }) => {
+  seedTrackedSymbol('MSFT', '微软');
+  seedTrackedSymbol('AVGO', '博通');
+  d1(`DELETE FROM daily_review_action_plans WHERE archive_date=${sqlQuote(EXPORT_DATE)};
+      DELETE FROM daily_review_archive WHERE archive_date=${sqlQuote(EXPORT_DATE)};`);
+
+  const accountsJson = await (await request.get(`${BASE_URL}/api/investment-accounts`)).json();
+  const tiger = accountsJson.items.find((item) => item.name === '老虎-美股');
+  expect(tiger).toBeTruthy();
+
+  const saveResponse = await request.post(`${BASE_URL}/api/reviews/${EXPORT_DATE}`, {
+    data: {
+      reviewStatus: 'draft',
+      reviewerNewsNotes: '导出测试：新闻总结。',
+      marketSentiment: '导出测试：大盘盘点。',
+      sectorRotation: '导出测试：板块轮动。',
+      tradingSummary: '',
+      actionPlans: [
+        {
+          accountId: tiger.id,
+          symbol: 'MSFT',
+          actionType: '持仓观察',
+          currentPosition: '0-5%',
+          marketType: '美股',
+          supportLevels: '381 – 392（中） 长线\n无法解析这一行\n360-375（强）',
+          resistanceLevels: '397-430（超强） 突破右侧',
+        },
+        {
+          accountId: tiger.id,
+          symbol: 'AVGO',
+          actionType: '准备开仓',
+          currentPosition: '0%',
+          marketType: '美股',
+          supportLevels: '433.5-392.25 反向小数区间',
+          resistanceLevels: '',
+        },
+      ],
+    },
+  });
+  expect(saveResponse.ok()).toBeTruthy();
+
+  await page.goto(BASE_URL, { waitUntil: 'networkidle' });
+  const row = page.locator('#reviewsList tr', { hasText: EXPORT_DATE }).first();
+  await expect(row).toBeVisible();
+  await row.getByRole('button', { name: /开始复盘|继续复盘|进入复盘|查看|编辑草稿/ }).click();
+  await expect(page.locator('#reviewDrawer')).toBeVisible();
+  await page.getByText('个股操作', { exact: true }).click();
+
+  await page.getByRole('button', { name: '导出画线' }).click();
+  const modal = page.locator('#actionPlanZoneExportModal');
+  await expect(modal).toBeVisible();
+  const output = modal.locator('#actionPlanZoneExportOutput');
+  await expect(output).toHaveValue([
+    "draw_zone('MSFT', 381, 392, '支撑: 381-392 (中) 长线')",
+    "draw_zone('MSFT', 360, 375, '支撑: 360-375 (强)')",
+    "draw_zone('MSFT', 397, 430, '压力: 397-430 (超强) 突破右侧')",
+    "draw_zone('AVGO', 392.25, 433.5, '支撑: 392.25-433.5 反向小数区间')",
+  ].join('\n'));
+  await expect(output).not.toHaveValue(/无法解析/);
+});

@@ -523,6 +523,7 @@
                     <strong class="review-section-title">个股与资产操作计划</strong>
                     <small class="muted">每个标的一行，表格扫全局，下方编辑当前选中标的。</small>
                   </div>
+                  <button id="exportActionPlanZonesBtn" type="button" class="ghost compact-button">导出画线</button>
                 </div>
 
                 <div id="actionPlanAccountGroups" class="action-plan-account-groups"></div>
@@ -669,6 +670,25 @@
           <button id="cancelActionPlanDetailBtn" type="button" class="ghost">关闭</button>
           <button id="saveActionPlanDetailBtn" type="button">保存并关闭</button>
         </div>
+      </div>
+    </aside>
+
+    <aside id="actionPlanZoneExportModal" class="action-plan-zone-export-modal hidden">
+      <div id="actionPlanZoneExportBackdrop" class="action-plan-zone-export-backdrop"></div>
+      <div class="action-plan-zone-export-panel">
+        <header class="action-plan-zone-export-head">
+          <div>
+            <h3>导出画线</h3>
+            <p class="muted">将当前操作计划里的支撑位、压力位转为 draw_zone 命令。</p>
+          </div>
+          <button id="closeActionPlanZoneExportBtn" type="button" class="ghost compact-button">关闭</button>
+        </header>
+        <div id="actionPlanZoneExportEmpty" class="empty-state hidden">当前没有可导出的支撑位或压力位区间。</div>
+        <textarea id="actionPlanZoneExportOutput" rows="12" readonly spellcheck="false"></textarea>
+        <footer class="action-plan-zone-export-footer">
+          <span id="actionPlanZoneExportCopyStatus" class="muted"></span>
+          <button id="copyActionPlanZoneExportBtn" type="button">复制</button>
+        </footer>
       </div>
     </aside>
 
