@@ -448,6 +448,7 @@ const actionPlanTakeProfitInput = document.querySelector("#actionPlanTakeProfitI
 const actionPlanStopLossInput = document.querySelector("#actionPlanStopLossInput");
 const actionPlanThinkingInput = document.querySelector("#actionPlanThinkingInput");
 const exportActionPlanZonesBtn = document.querySelector("#exportActionPlanZonesBtn");
+const exportLiveActionPlanZonesBtn = document.querySelector("#exportLiveActionPlanZonesBtn");
 const actionPlanZoneExportModal = document.querySelector("#actionPlanZoneExportModal");
 const actionPlanZoneExportBackdrop = document.querySelector("#actionPlanZoneExportBackdrop");
 const closeActionPlanZoneExportBtn = document.querySelector("#closeActionPlanZoneExportBtn");
@@ -531,6 +532,7 @@ document.addEventListener("click", (event) => {
 });
 actionPlanPositionAmountInput?.addEventListener("input", syncPositionBucketFromAmount);
 exportActionPlanZonesBtn?.addEventListener("click", openActionPlanZoneExport);
+exportLiveActionPlanZonesBtn?.addEventListener("click", openActionPlanZoneExport);
 actionPlanZoneExportBackdrop?.addEventListener("click", closeActionPlanZoneExport);
 closeActionPlanZoneExportBtn?.addEventListener("click", closeActionPlanZoneExport);
 copyActionPlanZoneExportBtn?.addEventListener("click", copyActionPlanZoneExport);

@@ -159,3 +159,87 @@ test('action plan zone export shows an empty state when no range can be parsed',
   await expect(modal.locator('#actionPlanZoneExportOutput')).toBeHidden();
   await expect(modal.getByRole('button', { name: '复制' })).toBeDisabled();
 });
+
+test('account management exposes zone export for live action plans', async ({ page, request }) => {
+  const symbol = 'LIVEZONE';
+  seedTrackedSymbol(symbol, '实时导出测试');
+
+  const accountsJson = await (await request.get(`${BASE_URL}/api/investment-accounts`)).json();
+  const tiger = accountsJson.items.find((item) => item.name === '老虎-美股');
+  expect(tiger).toBeTruthy();
+
+  d1(`DELETE FROM account_live_action_plans WHERE symbol=${sqlQuote(symbol)};`);
+  const createResponse = await request.post(`${BASE_URL}/api/account-live-action-plans`, {
+    data: {
+      accountId: tiger.id,
+      symbol,
+      actionType: '持仓观察',
+      currentPosition: '0-5%',
+      supportLevels: '100-110（中） 观察',
+      resistanceLevels: '',
+    },
+  });
+  expect(createResponse.ok()).toBeTruthy();
+
+  try {
+    await page.goto(BASE_URL, { waitUntil: 'networkidle' });
+    await page.locator('.nav-chip[data-view="accounts"]').click();
+    const exportButton = page.locator('#accountsView').getByRole('button', { name: '导出画线' });
+    await expect(exportButton).toBeVisible();
+    await exportButton.click();
+
+    await expect(page.locator('#actionPlanZoneExportModal')).toBeVisible();
+    await expect(page.locator('#actionPlanZoneExportOutput')).toHaveValue(
+      /draw_zone\('LIVEZONE', 100, 110, '支撑: 100-110 \(中\) 观察'\)/,
+    );
+  } finally {
+    d1(`DELETE FROM account_live_action_plans WHERE symbol=${sqlQuote(symbol)};`);
+  }
+});
+
+test('closed action plans stay out of the active account table', async ({ page, request }) => {
+  const activeSymbol = 'LIVEOPEN';
+  const closedSymbol = 'LIVECLOSED';
+  seedTrackedSymbol(activeSymbol, '当前持仓测试');
+  seedTrackedSymbol(closedSymbol, '已清仓测试');
+
+  const accountsJson = await (await request.get(`${BASE_URL}/api/investment-accounts`)).json();
+  const tiger = accountsJson.items.find((item) => item.name === '老虎-美股');
+  expect(tiger).toBeTruthy();
+
+  d1(`DELETE FROM account_live_action_plans WHERE symbol IN (${sqlQuote(activeSymbol)}, ${sqlQuote(closedSymbol)});`);
+  const activeResponse = await request.post(`${BASE_URL}/api/account-live-action-plans`, {
+    data: {
+      accountId: tiger.id,
+      symbol: activeSymbol,
+      actionType: '持仓观察',
+      currentPosition: '0-5%',
+    },
+  });
+  const closedResponse = await request.post(`${BASE_URL}/api/account-live-action-plans`, {
+    data: {
+      accountId: tiger.id,
+      symbol: closedSymbol,
+      actionType: '已清仓复盘',
+      currentPosition: '0%',
+    },
+  });
+  expect(activeResponse.ok()).toBeTruthy();
+  expect(closedResponse.ok()).toBeTruthy();
+
+  try {
+    await page.goto(BASE_URL, { waitUntil: 'networkidle' });
+    await page.locator('.nav-chip[data-view="accounts"]').click();
+    const tigerGroup = page.locator('#accountLivePlans .action-plan-group', { hasText: '老虎-美股' }).first();
+    const activeTable = tigerGroup.locator('.action-plan-table').first();
+    await expect(activeTable).toContainText(activeSymbol);
+    await expect(activeTable).not.toContainText(closedSymbol);
+
+    const closedSection = tigerGroup.locator('[data-action-plan-closed-section]');
+    await expect(closedSection).toBeVisible();
+    await expect(closedSection).not.toHaveAttribute('open', '');
+    await expect(closedSection.locator('tbody')).toContainText(closedSymbol);
+  } finally {
+    d1(`DELETE FROM account_live_action_plans WHERE symbol IN (${sqlQuote(activeSymbol)}, ${sqlQuote(closedSymbol)});`);
+  }
+});

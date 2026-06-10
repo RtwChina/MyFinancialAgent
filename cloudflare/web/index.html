@@ -4,7 +4,7 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>My Financial Agent</title>
-    <link rel="stylesheet" href="/styles.css?v=20260608-zone-export" />
+    <link rel="stylesheet" href="/styles.css?v=20260610-zone-export-fix" />
   </head>
   <body>
     <div class="shell">
@@ -285,6 +285,7 @@
                 <p class="toolbar-caption">维护每个账户的资金状态，以及该账户下追踪的标的。保存后会同步到最新复盘日。</p>
               </div>
               <div class="panel-header-meta">
+                <button id="exportLiveActionPlanZonesBtn" type="button" class="ghost">导出画线</button>
                 <a id="showFundSummaryBtn" class="ghost panel-link-button" href="/?view=fundSummary" target="_blank" rel="noopener noreferrer">统计汇总</a>
                 <button id="newAccountBtn" class="ghost">新增账户</button>
                 <button id="refreshAccountsBtn" class="ghost">刷新</button>
@@ -709,6 +710,6 @@
 
     <div id="actionPlanCellTooltip" class="action-plan-cell-tooltip hidden" role="tooltip"></div>
 
-    <script type="module" src="/app.js?v=20260608-zone-export"></script>
+    <script type="module" src="/app.js?v=20260610-zone-export-fix"></script>
   </body>
 </html>
