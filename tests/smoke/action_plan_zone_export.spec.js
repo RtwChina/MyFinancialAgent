@@ -3,6 +3,7 @@ import { execFileSync } from 'node:child_process';
 
 const BASE_URL = process.env.BASE_URL || 'http://127.0.0.1:8787';
 const EXPORT_DATE = '2026-02-20';
+const EMPTY_EXPORT_DATE = '2026-02-19';
 
 function d1(command) {
   return execFileSync(
@@ -25,7 +26,14 @@ function seedTrackedSymbol(symbol, displayName = symbol) {
         symbol_type=excluded.symbol_type,
         aliases=excluded.aliases,
         is_active=1,
-        updated_at=datetime('now');`);
+      updated_at=datetime('now');`);
+}
+
+async function filterReviewsByDate(page, date) {
+  const form = page.locator('#filtersForm');
+  await form.locator('input[name="from"]').fill(date);
+  await form.locator('input[name="to"]').fill(date);
+  await form.getByRole('button', { name: '查询' }).click();
 }
 
 test('action plan zone export previews draw_zone commands', async ({ page, request }) => {
@@ -70,6 +78,7 @@ test('action plan zone export previews draw_zone commands', async ({ page, reque
   expect(saveResponse.ok()).toBeTruthy();
 
   await page.goto(BASE_URL, { waitUntil: 'networkidle' });
+  await filterReviewsByDate(page, EXPORT_DATE);
   const row = page.locator('#reviewsList tr', { hasText: EXPORT_DATE }).first();
   await expect(row).toBeVisible();
   await row.getByRole('button', { name: /开始复盘|继续复盘|进入复盘|查看|编辑草稿/ }).click();
@@ -87,4 +96,66 @@ test('action plan zone export previews draw_zone commands', async ({ page, reque
     "draw_zone('AVGO', 392.25, 433.5, '支撑: 392.25-433.5 反向小数区间')",
   ].join('\n'));
   await expect(output).not.toHaveValue(/无法解析/);
+  await expect(modal.getByRole('button', { name: '复制' })).toBeEnabled();
+
+  await page.setViewportSize({ width: 390, height: 844 });
+  const mobileLayout = await page.evaluate(() => {
+    const panel = document.querySelector('.action-plan-zone-export-panel');
+    const outputBox = document.querySelector('#actionPlanZoneExportOutput');
+    const panelRect = panel.getBoundingClientRect();
+    const outputRect = outputBox.getBoundingClientRect();
+    return {
+      panelLeft: panelRect.left,
+      panelRight: panelRect.right,
+      outputLeft: outputRect.left,
+      outputRight: outputRect.right,
+      viewportWidth: window.innerWidth,
+    };
+  });
+  expect(mobileLayout.panelLeft).toBeGreaterThanOrEqual(0);
+  expect(mobileLayout.panelRight).toBeLessThanOrEqual(mobileLayout.viewportWidth);
+  expect(mobileLayout.outputLeft).toBeGreaterThanOrEqual(mobileLayout.panelLeft);
+  expect(mobileLayout.outputRight).toBeLessThanOrEqual(mobileLayout.panelRight);
+});
+
+test('action plan zone export shows an empty state when no range can be parsed', async ({ page, request }) => {
+  seedTrackedSymbol('MSFT', '微软');
+  d1(`DELETE FROM daily_review_action_plans WHERE archive_date=${sqlQuote(EMPTY_EXPORT_DATE)};
+      DELETE FROM daily_review_archive WHERE archive_date=${sqlQuote(EMPTY_EXPORT_DATE)};`);
+
+  const accountsJson = await (await request.get(`${BASE_URL}/api/investment-accounts`)).json();
+  const tiger = accountsJson.items.find((item) => item.name === '老虎-美股');
+  expect(tiger).toBeTruthy();
+
+  const saveResponse = await request.post(`${BASE_URL}/api/reviews/${EMPTY_EXPORT_DATE}`, {
+    data: {
+      reviewStatus: 'draft',
+      reviewerNewsNotes: '空导出测试。',
+      marketSentiment: '空导出测试。',
+      sectorRotation: '空导出测试。',
+      tradingSummary: '',
+      actionPlans: [{
+        accountId: tiger.id,
+        symbol: 'MSFT',
+        actionType: '持仓观察',
+        currentPosition: '0-5%',
+        marketType: '美股',
+        supportLevels: '等待结构确认',
+        resistanceLevels: '',
+      }],
+    },
+  });
+  expect(saveResponse.ok()).toBeTruthy();
+
+  await page.goto(BASE_URL, { waitUntil: 'networkidle' });
+  await filterReviewsByDate(page, EMPTY_EXPORT_DATE);
+  const row = page.locator('#reviewsList tr', { hasText: EMPTY_EXPORT_DATE }).first();
+  await row.getByRole('button', { name: /开始复盘|继续复盘|进入复盘|查看|编辑草稿/ }).click();
+  await page.getByText('个股操作', { exact: true }).click();
+  await page.getByRole('button', { name: '导出画线' }).click();
+
+  const modal = page.locator('#actionPlanZoneExportModal');
+  await expect(modal.locator('#actionPlanZoneExportEmpty')).toBeVisible();
+  await expect(modal.locator('#actionPlanZoneExportOutput')).toBeHidden();
+  await expect(modal.getByRole('button', { name: '复制' })).toBeDisabled();
 });

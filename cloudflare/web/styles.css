@@ -4486,6 +4486,26 @@ textarea[name="reviewerNewsNotes"] {
 }
 
 @media (max-width: 760px) {
+  .action-plan-zone-export-modal {
+    padding: 12px;
+  }
+
+  .action-plan-zone-export-panel {
+    width: calc(100vw - 24px);
+    max-height: calc(100vh - 24px);
+    padding: 14px;
+    border-radius: 16px;
+  }
+
+  .action-plan-zone-export-head {
+    align-items: flex-start;
+  }
+
+  #actionPlanZoneExportOutput {
+    min-height: 220px;
+    font-size: 0.78rem;
+  }
+
   .hero {
     grid-template-columns: 1fr;
   }
