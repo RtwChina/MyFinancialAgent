@@ -1,0 +1,311 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>操作计划表格 B5 Demo</title>
+  <style>
+    :root {
+      --bg: #f6f8fb;
+      --panel: #ffffff;
+      --line: rgba(15, 23, 42, 0.08);
+      --text: #0f172a;
+      --muted: #64748b;
+      --accent: #2563eb;
+      --green: #047857;
+      --amber: #b45309;
+      --red: #b42318;
+    }
+
+    * { box-sizing: border-box; }
+
+    body {
+      margin: 0;
+      padding: 28px;
+      background: var(--bg);
+      color: var(--text);
+      font: 14px/1.45 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
+
+    main {
+      max-width: 1380px;
+      margin: 0 auto;
+      display: grid;
+      gap: 16px;
+    }
+
+    .demo-head {
+      display: flex;
+      align-items: flex-end;
+      justify-content: space-between;
+      gap: 18px;
+    }
+
+    h1 {
+      margin: 0;
+      font-size: 24px;
+      letter-spacing: 0;
+    }
+
+    .demo-head p {
+      margin: 6px 0 0;
+      color: var(--muted);
+      font-size: 13px;
+    }
+
+    .font-samples {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      padding: 10px 12px;
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      background: var(--panel);
+    }
+
+    .font-sample {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      min-height: 30px;
+      padding: 0 10px;
+      border-radius: 8px;
+      border: 1px solid rgba(15, 23, 42, 0.08);
+      background: #fbfcfe;
+      color: #334155;
+      font-size: 12px;
+    }
+
+    .font-sample strong {
+      color: #0f172a;
+      font-size: 16px;
+      font-weight: 900;
+      letter-spacing: 0;
+    }
+
+    .font-songti { font-family: "Songti SC", "STSong", "SimSun", serif; }
+    .font-heiti { font-family: "PingFang SC", "Microsoft YaHei", sans-serif; }
+    .font-kaiti { font-family: "Kaiti SC", "STKaiti", "KaiTi", serif; }
+    .font-system { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+
+    .variant {
+      border: 1px solid var(--line);
+      border-radius: 14px;
+      background: var(--panel);
+      box-shadow: 0 12px 28px rgba(15, 23, 42, 0.06);
+      overflow: hidden;
+    }
+
+    .variant-head {
+      display: flex;
+      justify-content: space-between;
+      gap: 18px;
+      padding: 14px 16px;
+      border-bottom: 1px solid var(--line);
+      background: #fbfcfe;
+    }
+
+    .variant-title {
+      display: grid;
+      gap: 3px;
+    }
+
+    .variant-title strong {
+      font-size: 16px;
+    }
+
+    .variant-title small,
+    .variant-note {
+      color: var(--muted);
+      font-size: 12px;
+    }
+
+    .table-wrap {
+      overflow-x: auto;
+      padding-bottom: 8px;
+    }
+
+    table {
+      width: 100%;
+      min-width: 1180px;
+      border-collapse: collapse;
+      table-layout: fixed;
+    }
+
+    col.symbol { width: 142px; }
+    col.position { width: 168px; }
+    col.entry { width: 202px; }
+    col.plan { width: 142px; }
+    col.level { width: 140px; }
+    col.thinking { width: 184px; }
+
+    th,
+    td {
+      height: 58px;
+      padding: 9px 13px;
+      text-align: left;
+      vertical-align: middle;
+      border-bottom: 1px solid rgba(15, 23, 42, 0.06);
+      font-size: 13px;
+    }
+
+    th {
+      height: 36px;
+      position: sticky;
+      top: 0;
+      z-index: 1;
+      color: #475569;
+      background: #f1f5f9;
+      font-size: 12px;
+      font-weight: 700;
+    }
+
+    tbody tr:hover td {
+      background: #f8fafc;
+    }
+
+    .symbol-code {
+      display: inline-block;
+      color: #0f172a;
+      font-family: "PingFang SC", "Microsoft YaHei", "Noto Sans CJK SC", sans-serif;
+      font-size: 16px;
+      font-weight: 900;
+      line-height: 1.1;
+      letter-spacing: 0;
+      white-space: nowrap;
+    }
+
+    .position,
+    .action {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      min-height: 24px;
+      padding: 0 10px;
+      border-radius: 999px;
+      font-size: 12px;
+      font-weight: 850;
+      white-space: nowrap;
+    }
+
+    .position {
+      background: #ecfdf5;
+      color: var(--green);
+    }
+
+    .action.open {
+      background: #fff7ed;
+      color: var(--amber);
+    }
+
+    .action.closed {
+      background: #fef2f2;
+      color: var(--red);
+    }
+
+    .text-cell {
+      color: #334155;
+      line-height: 1.42;
+    }
+
+    .text-cell span {
+      display: -webkit-box;
+      -webkit-line-clamp: 2;
+      -webkit-box-orient: vertical;
+      overflow: hidden;
+    }
+
+    .muted-cell {
+      color: #94a3b8;
+    }
+  </style>
+</head>
+<body>
+  <main>
+    <header class="demo-head">
+      <div>
+        <h1>方案 B5：正式页克制版</h1>
+        <p>只保留这一版：固定行高、统一行距；标的只显示粗体文本；0% 时只显示动作，不显示 0%。</p>
+      </div>
+    </header>
+
+    <div class="font-samples" aria-label="标的字体比较">
+      <span class="font-sample"><strong class="font-songti">机器人ETF</strong><span>宋体</span></span>
+      <span class="font-sample"><strong class="font-heiti">机器人ETF</strong><span>黑体</span></span>
+      <span class="font-sample"><strong class="font-kaiti">机器人ETF</strong><span>楷体</span></span>
+      <span class="font-sample"><strong class="font-system">机器人ETF</strong><span>系统</span></span>
+    </div>
+
+    <section class="variant">
+      <div class="variant-head">
+        <div class="variant-title">
+          <strong>B5 表格预览</strong>
+          <small>当前表格主体使用系统黑体 / 苹方方向。每行 58px，文字最多两行，避免一行高一行矮。</small>
+        </div>
+        <div class="variant-note">当前仓位列加宽，和每日记录拉开距离。</div>
+      </div>
+      <div class="table-wrap">
+        <table>
+          <colgroup>
+            <col class="symbol"><col class="position"><col class="entry"><col class="plan"><col class="plan"><col class="level"><col class="level"><col class="thinking">
+          </colgroup>
+          <thead>
+            <tr>
+              <th>标的</th>
+              <th>当前仓位</th>
+              <th>每日记录</th>
+              <th>止盈计划</th>
+              <th>止损计划</th>
+              <th>支撑位</th>
+              <th>压力位</th>
+              <th>思考</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><strong class="symbol-code">DELL</strong></td>
+              <td><span class="position">15%-20%</span></td>
+              <td class="text-cell"><span>回踩 880 附近观察承接，放量突破再加。</span></td>
+              <td class="text-cell"><span>第一目标 960，第二目标 1020。</span></td>
+              <td class="text-cell"><span>跌破 840 减仓。</span></td>
+              <td class="text-cell"><span>880 / 840</span></td>
+              <td class="text-cell"><span>960 / 1020</span></td>
+              <td class="text-cell"><span>AI 资本开支预期仍强。</span></td>
+            </tr>
+            <tr>
+              <td><strong class="symbol-code">机器人ETF</strong></td>
+              <td><span class="action open">准备开仓</span></td>
+              <td class="text-cell"><span>只等回踩，不追高。</span></td>
+              <td class="text-cell"><span>突破 72 后看 78。</span></td>
+              <td class="text-cell"><span>跌回 61 放弃。</span></td>
+              <td class="text-cell"><span>64 / 61</span></td>
+              <td class="text-cell"><span>72 / 78</span></td>
+              <td class="text-cell"><span>大A题材观察，不急着追。</span></td>
+            </tr>
+            <tr>
+              <td><strong class="symbol-code">工业板块</strong></td>
+              <td><span class="action closed">清仓复盘</span></td>
+              <td class="text-cell"><span>已清仓，只保留复盘记录。</span></td>
+              <td class="muted-cell">-</td>
+              <td class="muted-cell">-</td>
+              <td class="text-cell"><span>0.82</span></td>
+              <td class="text-cell"><span>0.91</span></td>
+              <td class="text-cell"><span>后续只在折叠区查看。</span></td>
+            </tr>
+            <tr>
+              <td><strong class="symbol-code">韩国ETF</strong></td>
+              <td><span class="action open">准备开仓</span></td>
+              <td class="text-cell"><span>等韩国科技股回踩确认，不追涨。</span></td>
+              <td class="text-cell"><span>先看前高附近。</span></td>
+              <td class="text-cell"><span>跌回均线下方放弃。</span></td>
+              <td class="text-cell"><span>回踩区</span></td>
+              <td class="text-cell"><span>前高</span></td>
+              <td class="text-cell"><span>区域 ETF 观察池。</span></td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+  </main>
+</body>
+</html>

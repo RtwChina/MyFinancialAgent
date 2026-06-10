@@ -263,12 +263,14 @@
                       <th></th>
                     </tr>
                   </thead>
-                  <tbody class="symbols-section-head"><tr><td colspan="6" class="symbols-section-label type-index">大盘 / 指数</td></tr></tbody>
-                  <tbody id="symbolsIndexList"></tbody>
+                  <tbody class="symbols-section-head"><tr><td colspan="6" class="symbols-section-label type-stock">美股个股</td></tr></tbody>
+                  <tbody id="symbolsStockUsList"></tbody>
+                  <tbody class="symbols-section-head"><tr><td colspan="6" class="symbols-section-label type-stock-cn">大A个股</td></tr></tbody>
+                  <tbody id="symbolsStockCnList"></tbody>
                   <tbody class="symbols-section-head"><tr><td colspan="6" class="symbols-section-label type-sector">板块 / ETF</td></tr></tbody>
                   <tbody id="symbolsSectorList"></tbody>
-                  <tbody class="symbols-section-head"><tr><td colspan="6" class="symbols-section-label type-stock">个股</td></tr></tbody>
-                  <tbody id="symbolsStockList"></tbody>
+                  <tbody class="symbols-section-head"><tr><td colspan="6" class="symbols-section-label type-index">大盘 / 指数</td></tr></tbody>
+                  <tbody id="symbolsIndexList"></tbody>
                 </table>
               </div>
             </div>
@@ -606,7 +608,20 @@
             </label>
             <label class="compact compact-symbol">
               标的
-              <select id="actionPlanSymbolSelect"></select>
+              <div class="action-plan-symbol-picker" id="actionPlanSymbolPicker">
+                <button id="actionPlanSymbolPickerTrigger" type="button" class="action-plan-symbol-trigger" aria-expanded="false">
+                  <span id="actionPlanSymbolPickerLabel" class="action-plan-symbol-trigger-label"></span>
+                  <span class="action-plan-symbol-trigger-arrow">⌄</span>
+                </button>
+                <div id="actionPlanSymbolPickerPopover" class="action-plan-symbol-popover hidden">
+                  <div class="action-plan-symbol-search-wrap">
+                    <input id="actionPlanSymbolSearchInput" type="search" autocomplete="off" placeholder="搜索代码、名称、类型" />
+                  </div>
+                  <div id="actionPlanSymbolFilterRow" class="action-plan-symbol-filter-row"></div>
+                  <div id="actionPlanSymbolResultList" class="action-plan-symbol-result-list"></div>
+                </div>
+              </div>
+              <select id="actionPlanSymbolSelect" class="action-plan-symbol-native" aria-hidden="true" tabindex="-1"></select>
               <input id="actionPlanSymbolInput" type="hidden">
             </label>
             <label class="compact compact-action">

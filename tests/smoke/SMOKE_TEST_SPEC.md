@@ -328,7 +328,7 @@ npx wrangler d1 execute my-financial-agent-test \
 ```
 
 - 预期结果：
-  - `prices.stock` 非空，包含 seed 中的美股个股（如 `MU`、`MSFT`、`GOOGL`、`LITE`）
+  - `prices.usStock` / `prices.cnStock` / `prices.sector` / `prices.index` 按市场与类型分组；兼容字段 `prices.stock` 包含全部个股。
 - 阻断级别：阻断（主链路修复核心验证）
 
 ## 7. 冒烟结果汇报要求
