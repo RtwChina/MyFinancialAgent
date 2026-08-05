@@ -69,6 +69,8 @@ test('review list uses trading-desk columns and primary edit action', async ({ p
   await page.setViewportSize({ width: 1360, height: 900 });
   await page.goto(BASE_URL, { waitUntil: 'load' });
 
+  await expect(page.locator('#reviewsPageSizeSelect')).toHaveValue('5');
+  expect(await page.locator('#reviewsList tr').count()).toBeLessThanOrEqual(5);
   await expect(page.locator('.review-table th .review-date-head')).toHaveText('复盘日');
   await expect(page.locator('.review-table th').filter({ hasText: '账户估算影响' })).toBeVisible();
   await expect(page.locator('.review-table th').filter({ hasText: '当日主线' })).toBeVisible();
@@ -99,6 +101,45 @@ test('review list uses trading-desk columns and primary edit action', async ({ p
   expect(layout.desktopHasOverflow).toBeFalsy();
   expect(layout.rightClipped).toBeFalsy();
   expect(layout.actionCellWidth).toBeGreaterThan(120);
+});
+
+test('review drawer opens immediately while bootstrap loads and defers optional requests', async ({ page }) => {
+  let releaseBootstrap;
+  const bootstrapGate = new Promise((resolve) => { releaseBootstrap = resolve; });
+  let symbolCatalogRequests = 0;
+  let previewRequests = 0;
+
+  await page.route(`**/api/reviews/${REVIEWED_DATE}/bootstrap`, async (route) => {
+    await bootstrapGate;
+    await route.continue();
+  });
+  page.on('request', (request) => {
+    if (request.url().includes(`/api/reviews/${REVIEWED_DATE}/action-plan-symbols`)) {
+      symbolCatalogRequests += 1;
+    }
+    if (request.url().includes(`/api/reviews/${REVIEWED_DATE}/account-impact/preview`)) {
+      previewRequests += 1;
+    }
+  });
+
+  await page.goto(BASE_URL, { waitUntil: 'load' });
+  const reviewedRow = page.locator('#reviewsList tr', { hasText: REVIEWED_DATE });
+  await expect(reviewedRow).toBeVisible();
+  await reviewedRow.getByRole('button', { name: '查看' }).click();
+
+  const drawer = page.locator('#reviewDrawer');
+  await expect(drawer).toBeVisible();
+  await expect(drawer).toHaveClass(/review-loading/);
+  await expect(page.locator('#reviewLoadingTitle')).toHaveText('正在读取复盘数据');
+  expect(symbolCatalogRequests).toBe(0);
+  expect(previewRequests).toBe(0);
+
+  releaseBootstrap();
+  await expect(drawer).not.toHaveClass(/review-loading/);
+  await expect(page.locator('#archiveDateLabel')).toContainText(REVIEWED_DATE);
+  await page.waitForTimeout(400);
+  expect(symbolCatalogRequests).toBe(0);
+  expect(previewRequests).toBe(0);
 });
 
 test('review list keeps right actions reachable on narrow screens', async ({ page }) => {

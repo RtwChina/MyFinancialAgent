@@ -319,7 +319,7 @@ function requireWriteAuth(request, env, appEnv) {
 }
 
 function json(data, status = 200, request = null) {
-  return new Response(JSON.stringify(data, null, 2), {
+  return new Response(JSON.stringify(data), {
     status,
     headers: {
       ...JSON_HEADERS,
@@ -879,14 +879,14 @@ async function getReviews(env, url) {
     params.push(to);
   }
   if (status) {
-    clauses.push("COALESCE(a.review_status, 'initialized') = ?");
+    clauses.push("a.review_status = ?");
     params.push(status);
   }
   const whereClause = clauses.length ? `WHERE ${clauses.join(" AND ")}` : "";
 
   const dataQuery = `SELECT
       a.archive_date,
-      COALESCE(a.review_status, 'initialized') AS review_status,
+      a.review_status AS review_status,
       a.updated_at,
       a.reviewed_at,
       a.reviewer_news_notes,
@@ -900,9 +900,11 @@ async function getReviews(env, url) {
       ) AS action_plan_summary,
       a.trading_summary,
       n.daily_major_events,
-      n.linkage_logic_chain
+      n.linkage_logic_chain,
+      s.accounts_snapshot AS account_snapshot_json
     FROM daily_review_archive a
     LEFT JOIN daily_news_ai_analysis n ON n.analysis_date = a.archive_date
+    LEFT JOIN review_account_snapshots s ON s.archive_date = a.archive_date
     ${whereClause}
     ORDER BY a.archive_date DESC
     LIMIT ? OFFSET ?`;
@@ -930,12 +932,16 @@ async function getReviews(env, url) {
 
 async function buildReviewListItems(env, rows) {
   return Promise.all((rows || []).map(async (item) => {
+    const { account_snapshot_json: accountSnapshotJson, ...reviewItem } = item;
     const reviewStatus = normalizeReviewStatus(item.review_status);
+    const embeddedSnapshot = accountSnapshotJson == null
+      ? null
+      : { accounts: parseJsonArray(accountSnapshotJson).map((account) => normalizeAccountSnapshotEntry(account)) };
     const accountImpactSummary = reviewStatus === "reviewed"
-      ? await buildAccountImpactSummaryForReview(env, item.archive_date)
+      ? await buildAccountImpactSummaryForReview(env, item.archive_date, { snapshot: embeddedSnapshot })
       : [];
     return {
-      ...item,
+      ...reviewItem,
       review_status: reviewStatus,
       news_summary: item.reviewer_news_notes || item.linkage_logic_chain || "",
       daily_thesis: deriveReviewDailyThesis(item),
@@ -1109,8 +1115,7 @@ function impactDirection(value) {
   return number > 0 ? "gain" : "loss";
 }
 
-async function buildAccountImpactSummaryForReview(env, archiveDate) {
-  const snapshot = await getReviewAccountSnapshot(env, archiveDate);
+function buildAccountImpactSummaryFromSnapshot(snapshot) {
   if (snapshot?.accounts?.length) {
     const withImpact = snapshot.accounts
       .filter((account) => account.impact)
@@ -1134,20 +1139,40 @@ async function buildAccountImpactSummaryForReview(env, archiveDate) {
     }));
   }
 
-  return buildEstimatedAccountImpactSummary(env, archiveDate);
+  return null;
 }
 
-async function buildEstimatedAccountImpactSummary(env, archiveDate) {
-  const actionPlans = await listReviewActionPlans(env, archiveDate);
-  return buildEstimatedAccountImpactSummaryForPlans(env, archiveDate, actionPlans);
+async function buildAccountImpactSummaryForReview(env, archiveDate, options = {}) {
+  const snapshot = Object.hasOwn(options, "snapshot")
+    ? options.snapshot
+    : await getReviewAccountSnapshot(env, archiveDate);
+  const snapshotSummary = buildAccountImpactSummaryFromSnapshot(snapshot);
+  if (snapshotSummary) return snapshotSummary;
+
+  return buildEstimatedAccountImpactSummary(env, archiveDate, options);
 }
 
-async function buildEstimatedAccountImpactSummaryForPlans(env, archiveDate, actionPlans = []) {
+async function buildEstimatedAccountImpactSummary(env, archiveDate, options = {}) {
+  const actionPlans = Object.hasOwn(options, "actionPlans")
+    ? options.actionPlans
+    : await listReviewActionPlans(env, archiveDate);
+  return buildEstimatedAccountImpactSummaryForPlans(env, archiveDate, actionPlans, options);
+}
+
+async function buildEstimatedAccountImpactSummaryForPlans(env, archiveDate, actionPlans = [], options = {}) {
   if (!actionPlans.length) return [];
-  const accounts = await listInvestmentAccounts(env, { includeDisabled: true });
+  const accounts = Object.hasOwn(options, "accounts")
+    ? options.accounts
+    : await listInvestmentAccounts(env, { includeDisabled: true });
   const symbols = [...new Set(actionPlans.map((plan) => plan.symbol).filter(Boolean))];
-  const priceMap = await getLatestPricePointMap(env, symbols, archiveDate);
-  const previousSymbolsByAccount = await getPreviousActionPlanSymbolKeys(env, archiveDate);
+  const [priceMap, previousSymbolsByAccount] = await Promise.all([
+    Object.hasOwn(options, "priceMap")
+      ? options.priceMap
+      : getLatestPricePointMap(env, symbols, archiveDate),
+    Object.hasOwn(options, "previousSymbolsByAccount")
+      ? options.previousSymbolsByAccount
+      : getPreviousActionPlanSymbolKeys(env, archiveDate),
+  ]);
   return buildAccountImpactSummaryFromPlans({
     actionPlans,
     accounts,
@@ -1235,8 +1260,18 @@ function addImpactSkip(map, account, reason) {
 
 async function previewReviewAccountImpact(env, archiveDate, body = {}) {
   const inputPlans = Array.isArray(body.actionPlans) ? body.actionPlans : [];
-  const normalizedPlans = await resolveActionPlanAccountsForSave(env, normalizeActionPlansForSave(inputPlans));
-  const accounts = await buildEstimatedAccountImpactSummaryForPlans(env, archiveDate, normalizedPlans);
+  const investmentAccounts = await listInvestmentAccounts(env, { includeDisabled: true });
+  const normalizedPlans = await resolveActionPlanAccountsForSave(
+    env,
+    normalizeActionPlansForSave(inputPlans),
+    { ensureDefaults: false, accounts: investmentAccounts },
+  );
+  const accounts = await buildEstimatedAccountImpactSummaryForPlans(
+    env,
+    archiveDate,
+    normalizedPlans,
+    { accounts: investmentAccounts },
+  );
   return { accounts };
 }
 
@@ -1252,17 +1287,20 @@ function impactSummaryToSnapshotImpact(item = {}) {
 }
 
 async function getPreviousActionPlanSymbolKeys(env, archiveDate) {
-  const previous = await env.DB.prepare(
-    `SELECT archive_date
+  const rows = await env.DB.prepare(
+    `SELECT account_id, symbol
      FROM daily_review_action_plans
-     WHERE archive_date < ?
-     GROUP BY archive_date
-     ORDER BY archive_date DESC
-     LIMIT 1`,
-  ).bind(archiveDate).first();
-  if (!previous?.archive_date) return new Set();
-  const rows = await listReviewActionPlans(env, previous.archive_date);
-  return new Set(rows.map((plan) => `${Number(plan.accountId)}:${plan.symbol}`));
+     WHERE archive_date = (
+       SELECT MAX(archive_date)
+       FROM daily_review_action_plans
+       WHERE archive_date < ?
+     )`,
+  ).bind(archiveDate).all();
+  return previousActionPlanSymbolKeysFromRows(rows.results || []);
+}
+
+function previousActionPlanSymbolKeysFromRows(rows = []) {
+  return new Set(rows.map((row) => `${Number(row.account_id)}:${row.symbol}`));
 }
 
 async function getReviewByDate(env, archiveDate) {
@@ -1292,58 +1330,75 @@ async function getReviewByDate(env, archiveDate) {
 }
 
 async function getReviewBootstrap(env, archiveDate) {
-  await ensureDefaultInvestmentAccounts(env);
-  const investmentAccounts = await listInvestmentAccounts(env, { includeDisabled: true });
-  const existingDraft = await env.DB.prepare(
-    `SELECT * FROM daily_review_archive WHERE archive_date = ? LIMIT 1`,
-  )
-    .bind(archiveDate)
-    .first();
+  const phaseOne = await env.DB.batch([
+    env.DB.prepare(`SELECT * FROM investment_accounts ORDER BY sort_order ASC, id ASC`),
+    env.DB.prepare(`SELECT * FROM daily_review_archive WHERE archive_date = ? LIMIT 1`).bind(archiveDate),
+    // 活跃标的驱动，并逐标的定位最近交易日；可直接使用 (symbol, k_date DESC) 索引。
+    env.DB.prepare(
+      `SELECT managed.symbol, p.stock_name, p.current_price, p.change_percent, p.volume, p.k_date,
+         managed.yahoo_symbol, managed.display_name, managed.symbol_type,
+         managed.market_type, managed.sort_order
+       FROM tracked_symbols managed
+       JOIN stock_raw p
+         ON p.symbol = managed.symbol
+        AND p.k_date = (
+          SELECT MAX(point.k_date)
+          FROM stock_raw point
+          WHERE point.symbol = managed.symbol
+            AND point.k_date <= ?
+        )
+       WHERE managed.is_active = 1
+       ORDER BY managed.symbol`,
+    ).bind(archiveDate),
+    env.DB.prepare(
+      `SELECT DISTINCT k_date FROM stock_raw
+       WHERE k_date <= ? ORDER BY k_date DESC LIMIT 2`,
+    ).bind(archiveDate),
+    env.DB.prepare(`SELECT * FROM daily_news_ai_analysis WHERE analysis_date = ? LIMIT 1`).bind(archiveDate),
+    env.DB.prepare(
+      `SELECT archive_date, reviewer_news_notes, market_sentiment_blocks_json, sector_rotation_blocks_json
+       FROM daily_review_archive
+       WHERE archive_date < ? AND review_status = 'reviewed'
+       ORDER BY archive_date DESC
+       LIMIT 1`,
+    ).bind(archiveDate),
+    env.DB.prepare(
+      `SELECT p.*, a.name AS account_name, a.currency AS account_currency,
+          a.sort_order AS account_sort_order, a.enabled AS account_enabled
+       FROM daily_review_action_plans p
+       LEFT JOIN investment_accounts a ON a.id = p.account_id
+       WHERE p.archive_date = ?
+       ORDER BY COALESCE(a.sort_order, 999) ASC, p.sort_order ASC, p.symbol ASC`,
+    ).bind(archiveDate),
+    env.DB.prepare(`SELECT * FROM review_account_snapshots WHERE archive_date = ? LIMIT 1`).bind(archiveDate),
+    env.DB.prepare(`SELECT MAX(archive_date) AS latest FROM daily_review_archive`),
+  ]);
 
-  // 跨市场资产的 k_date 不统一（美股/亚洲/汇率/商品收盘时间不同），
-  // 对每个 symbol 取 k_date <= archiveDate 的最近一条，避免因日期偏差漏掉美股个股/板块价格。
-  const currentPricesRaw = await env.DB.prepare(
-    `SELECT p.symbol, p.stock_name, p.current_price, p.change_percent, p.volume, p.k_date
-     FROM stock_raw p
-     JOIN tracked_symbols managed
-       ON managed.symbol = p.symbol
-      AND managed.is_active = 1
-     JOIN (
-       SELECT symbol, MAX(k_date) AS latest_k_date
-       FROM stock_raw
-       WHERE k_date <= ?
-       GROUP BY symbol
-     ) latest ON latest.symbol = p.symbol AND latest.latest_k_date = p.k_date
-     ORDER BY p.symbol`,
-  )
-    .bind(archiveDate)
-    .all();
-
-  // 从 tracked_symbols 获取分组信息
-  const trackedSymbols = await env.DB.prepare(
-    `SELECT symbol, yahoo_symbol, display_name, symbol_type, market_type, sort_order
-     FROM tracked_symbols WHERE is_active = 1`,
-  ).all();
-  const symbolInfoMap = {};
-  for (const s of (trackedSymbols.results || [])) {
-    symbolInfoMap[s.symbol] = s;
-  }
+  const investmentAccounts = (phaseOne[0]?.results || []).map(accountRowToApi);
+  const existingDraft = firstBatchRow(phaseOne[1]);
+  const currentPriceRows = phaseOne[2]?.results || [];
+  const currentPricesRaw = { results: currentPriceRows };
+  const newsWindow = buildNewsWindowFromRows(phaseOne[3]?.results || [], archiveDate);
+  const analysis = firstBatchRow(phaseOne[4]);
+  const previousCompletedReview = firstBatchRow(phaseOne[5]);
+  const actionPlans = (phaseOne[6]?.results || []).map(dbActionPlanToApi);
+  const accountSnapshot = snapshotRowToApi(firstBatchRow(phaseOne[7]));
+  const latestArchiveDate = firstBatchRow(phaseOne[8])?.latest || null;
 
   // prices 按 index / sector / stock 分组，并把 stock 拆成美股 / 大A。
   const pricesByType = { usStock: [], cnStock: [], sector: [], index: [] };
-  for (const p of (currentPricesRaw.results || [])) {
-    const info = symbolInfoMap[p.symbol];
-    const type = info?.symbol_type || "stock";
-    const marketType = normalizeSymbolMarketType(info?.market_type || inferSymbolMarketType(info || p));
+  for (const p of currentPriceRows) {
+    const type = p.symbol_type || "stock";
+    const marketType = normalizeSymbolMarketType(p.market_type || inferSymbolMarketType(p));
     const bucket = type === "stock"
       ? (marketType === "大A" ? pricesByType.cnStock : pricesByType.usStock)
       : (pricesByType[type] || pricesByType.usStock);
     bucket.push({
       ...p,
-      display_name: info?.display_name || p.stock_name || p.symbol,
+      display_name: p.display_name || p.stock_name || p.symbol,
       symbol_type: type,
       market_type: marketType,
-      sort_order: info?.sort_order ?? 999,
+      sort_order: p.sort_order ?? 999,
     });
   }
   for (const bucket of Object.values(pricesByType)) {
@@ -1354,69 +1409,87 @@ async function getReviewBootstrap(env, archiveDate) {
     stock: [...pricesByType.usStock, ...pricesByType.cnStock].sort((a, b) => a.sort_order - b.sort_order),
   };
 
-  const newsWindow = await getNewsWindowForDate(env, archiveDate);
   const useArchivedNews = normalizeReviewStatus(existingDraft?.review_status) === "reviewed";
-  const analysis = await env.DB.prepare(
-    `SELECT * FROM daily_news_ai_analysis WHERE analysis_date = ? LIMIT 1`,
-  )
-    .bind(archiveDate)
-    .first();
   const sourceNewsIds = parseStoredIds(analysis?.source_news_ids);
-  let newsItems = [];
+  const phaseTwoStatements = [];
+  let archivedNewsIndex = -1;
+  let sourceNewsIndex = -1;
 
   if (useArchivedNews) {
-    const archivedNews = await env.DB.prepare(
+    archivedNewsIndex = phaseTwoStatements.length;
+    phaseTwoStatements.push(env.DB.prepare(
       `SELECT id AS archive_news_id, original_news_id, pub_date, title, content, source, type,
         ai_summary, market_impact, related_symbols, rule_passed, rule_reason,
         processing_status, importance_stars, url, news_hash
        FROM daily_review_archive_news
        WHERE archive_date = ?
        ORDER BY pub_date DESC, id DESC`,
-    )
-      .bind(archiveDate)
-      .all();
-    newsItems = (archivedNews.results || []).map((item) => enrichNewsItem({
+    ).bind(archiveDate));
+  }
+
+  if (sourceNewsIds.length) {
+    const placeholders = sourceNewsIds.map(() => "?").join(", ");
+    sourceNewsIndex = phaseTwoStatements.length;
+    phaseTwoStatements.push(env.DB.prepare(
+      `SELECT id, pub_date, title, content, source, sub_source, language, type, ai_summary, market_impact,
+        related_symbols, is_relevant_to_review, rule_passed, rule_reason,
+        processing_status, importance_stars, url, news_hash
+       FROM news_raw_data
+       WHERE id IN (${placeholders})
+       ORDER BY pub_date DESC, id DESC`,
+    ).bind(...sourceNewsIds));
+  }
+
+  const reviewStatus = normalizeReviewStatus(existingDraft?.review_status);
+  let accountImpactSummary = reviewStatus === "reviewed"
+    ? buildAccountImpactSummaryFromSnapshot(accountSnapshot)
+    : null;
+  const needsEstimatedImpact = accountImpactSummary == null && actionPlans.length > 0;
+  let priceResultStart = -1;
+  let priceResultCount = 0;
+  let previousSymbolsIndex = -1;
+  if (needsEstimatedImpact) {
+    const symbols = [...new Set(actionPlans.map((plan) => plan.symbol).filter(Boolean))];
+    const priceStatements = prepareLatestPricePointStatements(env, symbols, archiveDate);
+    priceResultStart = phaseTwoStatements.length;
+    priceResultCount = priceStatements.length;
+    phaseTwoStatements.push(...priceStatements);
+    previousSymbolsIndex = phaseTwoStatements.length;
+    phaseTwoStatements.push(env.DB.prepare(
+      `SELECT account_id, symbol
+       FROM daily_review_action_plans
+       WHERE archive_date = (
+         SELECT MAX(archive_date)
+         FROM daily_review_action_plans
+         WHERE archive_date < ?
+       )`,
+    ).bind(archiveDate));
+  }
+
+  const phaseTwo = phaseTwoStatements.length ? await env.DB.batch(phaseTwoStatements) : [];
+  const archivedNewsRows = archivedNewsIndex >= 0 ? (phaseTwo[archivedNewsIndex]?.results || []) : [];
+  const sourceNewsRows = sourceNewsIndex >= 0 ? (phaseTwo[sourceNewsIndex]?.results || []) : [];
+  const newsItems = archivedNewsRows.length
+    ? archivedNewsRows.map((item) => enrichNewsItem({
       ...item,
       id: item.archive_news_id,
       archived: 1,
-    }));
+    }))
+    : sourceNewsRows.map(enrichNewsItem);
+
+  if (needsEstimatedImpact) {
+    accountImpactSummary = buildAccountImpactSummaryFromPlans({
+      actionPlans,
+      accounts: investmentAccounts,
+      priceMap: latestPricePointMapFromBatchResults(
+        phaseTwo.slice(priceResultStart, priceResultStart + priceResultCount),
+      ),
+      previousSymbolsByAccount: previousActionPlanSymbolKeysFromRows(
+        phaseTwo[previousSymbolsIndex]?.results || [],
+      ),
+    });
   }
-
-  if (!newsItems.length) {
-    if (sourceNewsIds.length) {
-      const placeholders = sourceNewsIds.map(() => "?").join(", ");
-      const sourceNews = await env.DB.prepare(
-        `SELECT id, pub_date, title, content, source, sub_source, language, type, ai_summary, market_impact,
-          related_symbols, is_relevant_to_review, rule_passed, rule_reason,
-          processing_status, importance_stars, url, news_hash
-         FROM news_raw_data
-         WHERE id IN (${placeholders})
-         ORDER BY pub_date DESC, id DESC`,
-      )
-        .bind(...sourceNewsIds)
-        .all();
-      newsItems = (sourceNews.results || []).map(enrichNewsItem);
-    }
-
-    // 没有 source_news_ids 时不再回退，保持空列表
-  }
-
-  const previousCompletedReview = await env.DB.prepare(
-    `SELECT archive_date, reviewer_news_notes, market_sentiment_blocks_json, sector_rotation_blocks_json
-     FROM daily_review_archive
-     WHERE archive_date < ? AND review_status = 'reviewed'
-     ORDER BY archive_date DESC
-     LIMIT 1`,
-  )
-    .bind(archiveDate)
-    .first();
-
-  const actionPlans = await listReviewActionPlans(env, archiveDate);
-  const accountSnapshot = await getReviewAccountSnapshot(env, archiveDate);
-  const reviewStatus = normalizeReviewStatus(existingDraft?.review_status);
-  const accountImpactSummary = reviewStatus === "reviewed"
-    ? await buildAccountImpactSummaryForReview(env, archiveDate)
-    : await buildEstimatedAccountImpactSummaryForPlans(env, archiveDate, actionPlans);
+  if (accountImpactSummary == null) accountImpactSummary = [];
   const marketNoteBlocks = resolveReviewNoteBlocksWithFallback(
     existingDraft,
     previousCompletedReview,
@@ -1437,8 +1510,6 @@ async function getReviewBootstrap(env, archiveDate) {
     const bucket = newsByType[t] || newsByType.index;
     bucket.push(item);
   }
-
-  const latestArchiveDate = await getLatestArchiveDate(env);
 
   return {
     archiveDate,
@@ -1647,30 +1718,41 @@ function computePercentChange(currentPrice, baselinePrice) {
 
 async function getLatestPricePointMap(env, symbols, targetDate) {
   if (!symbols.length) return new Map();
-  const rows = [];
+  const statements = prepareLatestPricePointStatements(env, symbols, targetDate);
+  const results = await env.DB.batch(statements);
+  return latestPricePointMapFromBatchResults(results);
+}
+
+function prepareLatestPricePointStatements(env, symbols, targetDate) {
+  const statements = [];
   const chunkSize = 80;
   for (let index = 0; index < symbols.length; index += chunkSize) {
     const chunk = symbols.slice(index, index + chunkSize);
-    const placeholders = chunk.map(() => "?").join(", ");
-    const result = await env.DB.prepare(
-      `SELECT p.symbol, p.stock_name, p.yahoo_symbol, p.current_price, p.change_percent, p.k_date
-       FROM stock_raw p
-       JOIN (
-         SELECT symbol, MAX(k_date) AS latest_k_date
-         FROM stock_raw
-         WHERE symbol IN (${placeholders})
-           AND k_date <= ?
-           AND current_price IS NOT NULL
-         GROUP BY symbol
-       ) latest
-         ON latest.symbol = p.symbol
-        AND latest.latest_k_date = p.k_date
+    const values = chunk.map(() => "(?)").join(", ");
+    statements.push(env.DB.prepare(
+      `WITH requested(symbol) AS (VALUES ${values})
+       SELECT p.symbol, p.stock_name, p.yahoo_symbol, p.current_price, p.change_percent, p.k_date
+       FROM requested requested_symbol
+       JOIN stock_raw p
+         ON p.symbol = requested_symbol.symbol
+        AND p.k_date = (
+          SELECT MAX(point.k_date)
+          FROM stock_raw point
+          WHERE point.symbol = requested_symbol.symbol
+            AND point.k_date <= ?
+            AND point.current_price IS NOT NULL
+        )
        WHERE p.current_price IS NOT NULL`,
-    ).bind(...chunk, targetDate).all();
-    rows.push(...(result.results || []));
+    ).bind(...chunk, targetDate));
   }
+  return statements;
+}
+
+function latestPricePointMapFromBatchResults(results = []) {
   const points = new Map();
-  for (const row of rows) points.set(row.symbol, row);
+  for (const result of results) {
+    for (const row of (result.results || [])) points.set(row.symbol, row);
+  }
   return points;
 }
 
@@ -1695,18 +1777,46 @@ function buildActionPlanSymbolMetrics(latest, weekBaseline, monthBaseline) {
 
 async function getActionPlanSymbolCatalog(env, archiveDate) {
   const result = await env.DB.prepare(
-    `SELECT id, symbol, yahoo_symbol, display_name, symbol_type, market_type, aliases, is_active, sort_order, created_at, updated_at
-     FROM tracked_symbols
-     WHERE is_active = 1
-     ORDER BY symbol_type, market_type, sort_order, id`,
-  ).all();
+    `SELECT managed.id, managed.symbol, managed.yahoo_symbol, managed.display_name,
+       managed.symbol_type, managed.market_type, managed.aliases, managed.is_active,
+       managed.sort_order, managed.created_at, managed.updated_at,
+       latest.k_date AS latest_date,
+       latest.current_price AS latest_price,
+       latest.change_percent AS day_change_percent,
+       week.current_price AS week_baseline_price,
+       month.current_price AS month_baseline_price
+     FROM tracked_symbols managed
+     LEFT JOIN stock_raw latest
+       ON latest.symbol = managed.symbol
+      AND latest.k_date = (
+        SELECT MAX(point.k_date)
+        FROM stock_raw point
+        WHERE point.symbol = managed.symbol
+          AND point.k_date <= ?
+          AND point.current_price IS NOT NULL
+      )
+     LEFT JOIN stock_raw week
+       ON week.symbol = managed.symbol
+      AND week.k_date = (
+        SELECT MAX(point.k_date)
+        FROM stock_raw point
+        WHERE point.symbol = managed.symbol
+          AND point.k_date <= ?
+          AND point.current_price IS NOT NULL
+      )
+     LEFT JOIN stock_raw month
+       ON month.symbol = managed.symbol
+      AND month.k_date = (
+        SELECT MAX(point.k_date)
+        FROM stock_raw point
+        WHERE point.symbol = managed.symbol
+          AND point.k_date <= ?
+          AND point.current_price IS NOT NULL
+      )
+     WHERE managed.is_active = 1
+     ORDER BY managed.symbol_type, managed.market_type, managed.sort_order, managed.id`,
+  ).bind(archiveDate, shiftDate(archiveDate, -7), shiftDate(archiveDate, -30)).all();
   const symbolRows = result.results || [];
-  const symbols = symbolRows.map((row) => row.symbol).filter(Boolean);
-  const [latestPoints, weekBaselines, monthBaselines] = await Promise.all([
-    getLatestPricePointMap(env, symbols, archiveDate),
-    getLatestPricePointMap(env, symbols, shiftDate(archiveDate, -7)),
-    getLatestPricePointMap(env, symbols, shiftDate(archiveDate, -30)),
-  ]);
   const items = [];
   for (const row of symbolRows) {
     const symbolItem = enrichSymbolItem(row);
@@ -1720,9 +1830,13 @@ async function getActionPlanSymbolCatalog(env, archiveDate) {
       aliases: symbolItem.aliases || [],
       sortOrder: symbolItem.sort_order,
       metrics: buildActionPlanSymbolMetrics(
-        latestPoints.get(symbolItem.symbol),
-        weekBaselines.get(symbolItem.symbol),
-        monthBaselines.get(symbolItem.symbol),
+        row.latest_date ? {
+          k_date: row.latest_date,
+          current_price: row.latest_price,
+          change_percent: row.day_change_percent,
+        } : null,
+        row.week_baseline_price == null ? null : { current_price: row.week_baseline_price },
+        row.month_baseline_price == null ? null : { current_price: row.month_baseline_price },
       ),
     });
   }
@@ -1821,7 +1935,7 @@ async function getReviewAccountSnapshot(env, archiveDate) {
 }
 
 async function upsertReviewAccountSnapshot(env, archiveDate, snapshotInput = {}, options = {}) {
-  const accounts = await listInvestmentAccounts(env, { includeDisabled: true });
+  const accounts = await listInvestmentAccounts(env, { includeDisabled: true, ensureDefaults: true });
   const accountMap = new Map(accounts.map((account) => [Number(account.id), account]));
   const inputAccounts = Array.isArray(snapshotInput.accounts)
     ? snapshotInput.accounts
@@ -1877,8 +1991,8 @@ async function syncInvestmentAccountsFromSnapshot(env, snapshot) {
 
 async function ensureDefaultInvestmentAccounts(env) {
   const now = isoNow();
-  for (const account of DEFAULT_INVESTMENT_ACCOUNTS) {
-    await env.DB.prepare(
+  const statements = DEFAULT_INVESTMENT_ACCOUNTS.map((account) => (
+    env.DB.prepare(
       `INSERT INTO investment_accounts (
         name, broker, account_type, region, currency, enabled, sort_order, notes, created_at, updated_at
       )
@@ -1895,12 +2009,13 @@ async function ensureDefaultInvestmentAccounts(env) {
       now,
       now,
       account.name,
-    ).run();
-  }
+    )
+  ));
+  await env.DB.batch(statements);
 }
 
 async function listInvestmentAccounts(env, options = {}) {
-  await ensureDefaultInvestmentAccounts(env);
+  if (options.ensureDefaults === true) await ensureDefaultInvestmentAccounts(env);
   const includeDisabled = options.includeDisabled !== false;
   const result = await env.DB.prepare(
     `SELECT *
@@ -2224,26 +2339,26 @@ async function deleteInvestmentAccount(env, id) {
   return { ok: true, deletedId: id };
 }
 
-async function getFallbackActionPlanAccountId(env, marketType) {
-  await ensureDefaultInvestmentAccounts(env);
+function getFallbackActionPlanAccountId(accounts, marketType) {
   const fallbackName = MARKET_ACCOUNT_FALLBACKS[marketType] || "未分配账户";
-  const row = await env.DB.prepare(`SELECT id FROM investment_accounts WHERE name = ? LIMIT 1`).bind(fallbackName).first();
-  if (row?.id) return Number(row.id);
-  const unassigned = await env.DB.prepare(`SELECT id FROM investment_accounts WHERE name = '未分配账户' LIMIT 1`).first();
-  if (unassigned?.id) return Number(unassigned.id);
+  const fallback = accounts.find((account) => account.name === fallbackName)
+    || accounts.find((account) => account.name === "未分配账户");
+  if (fallback?.id) return Number(fallback.id);
   const error = new Error("没有可用于操作计划的账户");
   error.statusCode = 400;
   throw error;
 }
 
-async function resolveActionPlanAccountsForSave(env, actionPlans) {
-  await ensureDefaultInvestmentAccounts(env);
-  const accounts = await listInvestmentAccounts(env, { includeDisabled: true });
+async function resolveActionPlanAccountsForSave(env, actionPlans, options = {}) {
+  if (options.ensureDefaults !== false) await ensureDefaultInvestmentAccounts(env);
+  const accounts = Object.hasOwn(options, "accounts")
+    ? options.accounts
+    : await listInvestmentAccounts(env, { includeDisabled: true });
   const accountById = new Map(accounts.map((account) => [Number(account.id), account]));
   const resolved = [];
   for (const plan of actionPlans) {
     let accountId = Number(plan.accountId || 0);
-    if (!accountId) accountId = await getFallbackActionPlanAccountId(env, plan.marketType);
+    if (!accountId) accountId = getFallbackActionPlanAccountId(accounts, plan.marketType);
     const account = accountById.get(accountId);
     if (!account) {
       const error = new Error(`操作计划账户不存在：${accountId}`);
@@ -3244,6 +3359,19 @@ async function getLatestClosedNyseTradingDay(env) {
   return row?.latest || null;
 }
 
+function firstBatchRow(result) {
+  return result?.results?.[0] || null;
+}
+
+function buildNewsWindowFromRows(rows, archiveDate) {
+  const dates = (rows || []).map((row) => row.k_date).sort();
+  const startDate = dates.length >= 2 ? dates[0] : subtractTradingDays(archiveDate, 1);
+  return {
+    start: `${startDate} 16:00:00`,
+    end: `${archiveDate} 16:00:00`,
+  };
+}
+
 async function getNewsWindowForDate(env, archiveDate) {
   const datesResult = await env.DB.prepare(
     `SELECT DISTINCT k_date
@@ -3255,13 +3383,7 @@ async function getNewsWindowForDate(env, archiveDate) {
     .bind(archiveDate)
     .all();
 
-  const dates = (datesResult.results || []).map((row) => row.k_date).sort();
-  const endDate = archiveDate;
-  const startDate = dates.length >= 2 ? dates[0] : subtractTradingDays(archiveDate, 1);
-  return {
-    start: `${startDate} 16:00:00`,
-    end: `${endDate} 16:00:00`,
-  };
+  return buildNewsWindowFromRows(datesResult.results || [], archiveDate);
 }
 
 async function digest(input) {
@@ -3665,10 +3787,16 @@ async function deleteScreeningKeyword(env, id) {
 
 export {
   buildAccountImpactSummaryFromPlans,
+  buildAccountImpactSummaryFromSnapshot,
   buildAccountSnapshotFromAccounts,
+  buildActionPlanSymbolMetrics,
+  buildNewsWindowFromRows,
+  buildReviewListItems,
   bucketEstimatedImpactPercent,
   deriveReviewDailyThesis,
+  getReviewBootstrap,
   normalizeReviewNoteBlocks,
   parsePositionWeight,
+  previousActionPlanSymbolKeysFromRows,
   resolveReviewNoteBlocksWithFallback,
 };

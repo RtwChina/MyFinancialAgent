@@ -1664,6 +1664,71 @@ textarea {
   gap: 18px;
 }
 
+.review-loading-state {
+  min-height: 240px;
+  place-items: center;
+  align-content: center;
+  grid-template-columns: auto minmax(0, 360px);
+  gap: 16px;
+  padding: 32px;
+  color: var(--text);
+}
+
+.review-loading-state > div {
+  display: grid;
+  gap: 5px;
+}
+
+.review-loading-state strong {
+  font-size: 1rem;
+}
+
+.review-loading-state small {
+  color: var(--muted);
+  line-height: 1.55;
+}
+
+.review-loading-spinner {
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  border: 3px solid rgba(37, 99, 235, 0.16);
+  border-top-color: var(--accent);
+  animation: review-loading-spin 720ms linear infinite;
+}
+
+.review-modal.review-loading .review-loading-state {
+  display: grid;
+}
+
+.review-modal.review-loading #reviewOutline,
+.review-modal.review-loading #editorContent,
+.review-modal.review-loading .review-modal-footer,
+.review-modal.review-loading #reviewActionGroup,
+.review-modal.review-loading #reviewStatusBadge {
+  display: none;
+}
+
+.review-modal.review-load-error .review-loading-spinner {
+  animation: none;
+  border-color: rgba(220, 38, 38, 0.22);
+  position: relative;
+}
+
+.review-modal.review-load-error .review-loading-spinner::after {
+  content: "!";
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  color: #b91c1c;
+  font-weight: 800;
+}
+
+@keyframes review-loading-spin {
+  to { transform: rotate(360deg); }
+}
+
 .review-panel-header {
   display: block;
   margin-bottom: 12px;

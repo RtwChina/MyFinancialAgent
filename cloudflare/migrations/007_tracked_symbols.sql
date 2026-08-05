@@ -47,7 +47,7 @@ INSERT OR IGNORE INTO tracked_symbols (symbol, yahoo_symbol, display_name, symbo
 ('SILVER','SI=F',      '白银',       'index', '["SI=F","Silver","白银","银价","COMEX白银","白银/美元","现货白银"]', 14),
 ('COPPER','HG=F',      '铜期货',     'index', '["COPPER","HG=F","铜","铜期货","COMEX铜"]', 15),
 ('SOYBEAN','ZS=F',     '大豆期货',   'index', '["SOYBEAN","ZS=F","大豆期货","大豆"]', 16),
-('BTCUSD','BTC-USD',   '比特币/美元','index', '["BTCUSD","BTC-USD","比特币/美元","比特币","BTC"]', 17),
+('BTCUSD','BTC-USD',   '比特币/美元','index', '["BTCUSD","BTC-USD","比特币/美元","比特币","BTC"]', 17);
 
 -- 板块 (sector)
 -- ticker 本身（XLK/SOXX 等）会出现在新闻里，保留

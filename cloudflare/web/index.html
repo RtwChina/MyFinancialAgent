@@ -208,7 +208,8 @@
                 <label class="pagination-size">
                   每页
                   <select id="reviewsPageSizeSelect">
-                    <option value="10" selected>10</option>
+                    <option value="5" selected>5</option>
+                    <option value="10">10</option>
                     <option value="20">20</option>
                     <option value="50">50</option>
                     <option value="100">100</option>
@@ -464,6 +465,14 @@
         </div>
 
         <nav id="reviewOutline" class="review-outline hidden" aria-label="复盘目录"></nav>
+
+        <div id="reviewLoadingState" class="review-loading-state hidden" role="status" aria-live="polite">
+          <span class="review-loading-spinner" aria-hidden="true"></span>
+          <div>
+            <strong id="reviewLoadingTitle">正在读取复盘数据</strong>
+            <small id="reviewLoadingDetail">正在加载价格、新闻与操作计划，请稍候…</small>
+          </div>
+        </div>
 
         <div id="editorContent" class="review-modal-body">
           <section id="reviewPriceSnapshot" class="review-snapshot-card">

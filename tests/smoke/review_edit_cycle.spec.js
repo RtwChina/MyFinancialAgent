@@ -309,6 +309,68 @@ test('opening and closed action plans default current position to zero', async (
   }));
 });
 
+test('closing a newly added action plan discards the temporary symbol', async ({ page, request }) => {
+  const cancelReviewDate = '2026-02-20';
+  const symbolList = await (await request.get(`${BASE_URL}/api/symbols?active=0`)).json();
+  const symbolsByCode = new Map((symbolList.items || []).map((item) => [item.symbol, item]));
+  for (const symbol of ['CANCELKEEP', 'CANCELAUTO']) {
+    const existing = symbolsByCode.get(symbol);
+    const response = existing
+      ? await request.put(`${BASE_URL}/api/symbols/${existing.id}`, { data: { is_active: 1 } })
+      : await request.post(`${BASE_URL}/api/symbols`, {
+        data: {
+          symbol,
+          yahoo_symbol: symbol,
+          display_name: symbol,
+          symbol_type: 'stock',
+          market_type: '美股',
+          aliases: [symbol],
+          is_active: 1,
+          sort_order: 5000,
+        },
+      });
+    expect(response.ok()).toBeTruthy();
+  }
+
+  await request.post(`${BASE_URL}/api/reviews/${cancelReviewDate}`, {
+    data: {
+      reviewStatus: 'draft',
+      reviewerNewsNotes: '取消新增标的回归：新闻总结。',
+      marketSentiment: '取消新增标的回归：大盘盘点。',
+      sectorRotation: '取消新增标的回归：板块轮动。',
+      tradingSummary: '',
+      actionPlans: [
+        { symbol: 'CANCELKEEP', actionType: '持仓观察', currentPosition: '0-5%', marketType: '美股' },
+      ],
+    },
+  });
+
+  await page.goto(BASE_URL, { waitUntil: 'networkidle' });
+  await page.locator('#filtersForm input[name="from"]').fill(cancelReviewDate);
+  await page.locator('#filtersForm input[name="to"]').fill(cancelReviewDate);
+  await page.locator('#filtersForm').getByRole('button', { name: '查询' }).click();
+  const reviewRow = page.locator('#reviewsList tr', { hasText: cancelReviewDate }).first();
+  await expect(reviewRow).toBeVisible();
+  await reviewRow.getByRole('button', { name: /开始复盘|继续复盘|进入复盘|编辑草稿|查看/ }).click();
+  await expect(page.locator('#reviewDrawer')).toBeVisible();
+  await page.getByText('4. 操作计划', { exact: true }).click();
+
+  const accountGroup = page.locator('#actionPlanAccountGroups .action-plan-group', { hasText: 'CANCELKEEP' });
+  const rows = accountGroup.locator('tbody tr');
+  await expect(rows).toHaveCount(1);
+  await accountGroup.locator('[data-action="add-plan"]').click();
+  await expect(page.locator('#actionPlanDetailModal')).toBeVisible();
+  await expect(rows).toHaveCount(2);
+  await page.locator('#cancelActionPlanDetailBtn').click();
+  await expect(page.locator('#actionPlanDetailModal')).toBeHidden();
+  await expect(rows).toHaveCount(1);
+
+  await page.locator('#saveDraftBtn').click();
+  const bootstrap = await request.get(`${BASE_URL}/api/reviews/${cancelReviewDate}/bootstrap`);
+  const bootstrapJson = await bootstrap.json();
+  expect(bootstrapJson.actionPlans.map((plan) => plan.symbol)).toEqual(['CANCELKEEP']);
+});
+
 test('new review carries forward previous structured action plans without legacy asset text', async ({ request }) => {
   seedPlanSymbols(['CARRY']);
   await request.post(`${BASE_URL}/api/reviews/${CARRY_SOURCE_DATE}`, {

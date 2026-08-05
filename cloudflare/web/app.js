@@ -120,8 +120,9 @@ const state = {
   readmeLoaded: false,
   newsPage: 1,
   newsPageSize: 20,
+  newsLoaded: false,
   reviewsPage: 1,
-  reviewsPageSize: 10,
+  reviewsPageSize: 5,
 };
 
 const APP_TOKEN_STORAGE_KEY = "myFinancialAgentApiToken";
@@ -155,6 +156,11 @@ function applyActionPlanEditorModeHint(labelEl, mode, archiveDate) {
 }
 
 let activeActionPlanEditorContext = null;
+let pendingNewActionPlan = null;
+let reviewOpenSequence = 0;
+let reviewOpenController = null;
+const actionPlanSymbolCatalogCache = new Map();
+const actionPlanSymbolCatalogRequests = new Map();
 
 function mountActionPlanEditor(rootEl, context = {}) {
   const ctx = {
@@ -186,7 +192,7 @@ function mountActionPlanEditor(rootEl, context = {}) {
   if (ctx.accounts.length) {
     state.investmentAccounts = ctx.accounts.slice();
   }
-  renderActionPlans();
+  if (!context.deferInitialRender) renderActionPlans({ refreshImpact: false });
   applyActionPlanEditorModeHint(carryForwardLabel, ctx.mode, ctx.archiveDate);
 
   return {
@@ -199,6 +205,13 @@ function mountActionPlanEditor(rootEl, context = {}) {
         }
       }
       renderActionPlans();
+    },
+    setSymbolCatalog(items) {
+      ctx.symbolCatalog = Array.isArray(items) ? items.slice() : [];
+      state.actionPlanSymbolCatalog = ctx.symbolCatalog.slice();
+      if (!actionPlanDetailModal?.classList.contains("hidden")) {
+        fillActionPlanEditor(state.actionPlans[state.selectedActionPlanIndex] || null);
+      }
     },
     destroy() {
       closeActionPlanDetail();
@@ -390,6 +403,9 @@ const newsPicker = document.querySelector("#newsPicker");
 const reviewStepNav = document.querySelector("#reviewStepNav");
 const reviewStepHint = document.querySelector("#reviewStepHint");
 const reviewOutline = document.querySelector("#reviewOutline");
+const reviewLoadingState = document.querySelector("#reviewLoadingState");
+const reviewLoadingTitle = document.querySelector("#reviewLoadingTitle");
+const reviewLoadingDetail = document.querySelector("#reviewLoadingDetail");
 const saveDraftBtn = document.querySelector("#saveDraftBtn");
 const initializeBtn = document.querySelector("#initializeBtn");
 const reviewActionGroup = document.querySelector("#reviewActionGroup");
@@ -623,7 +639,6 @@ loadHeroEnvironment();
 decorateAiHeaders();
 initializeHomepageInsights();
 initRichTooltips();
-loadNewsList();
 loadReviews();
 
 function initRichTooltips() {
@@ -652,6 +667,7 @@ function switchView(view) {
   if (keywordsView) keywordsView.classList.toggle("active", view === "keywords");
   if (readmeView) readmeView.classList.toggle("active", view === "readme");
   if (view === "symbols" && !state.symbolsLoaded) loadSymbols();
+  if (view === "news" && !state.newsLoaded) loadNewsList();
   if (view === "accounts") {
     if (state.accountsLoaded) renderAccountLiveActionPlans();
     else loadAccounts();
@@ -823,6 +839,7 @@ async function loadNewsList(formData = null, resetPage = false) {
   const query = `?${params.toString()}`;
   try {
     const data = await fetchJson(`/api/news${query}`);
+    state.newsLoaded = true;
     newsList.innerHTML = "";
     if (!data.items.length) {
       newsList.innerHTML = `<tr><td colspan="5" class="table-empty">没有查到匹配新闻</td></tr>`;
@@ -943,18 +960,95 @@ function renderReviewsPagination(data) {
   state.reviewsPage = page;
 }
 
+function setReviewOpenButtonsBusy(busy) {
+  document.querySelectorAll("[data-review-open]").forEach((button) => {
+    button.disabled = busy;
+    button.classList.toggle("is-loading", busy);
+  });
+}
+
+function setReviewDrawerLoading(archiveDate, error = null) {
+  reviewDrawer.classList.remove("hidden");
+  reviewDrawer.classList.add("review-loading");
+  reviewDrawer.classList.toggle("review-load-error", Boolean(error));
+  reviewLoadingState?.classList.remove("hidden");
+  archiveDateLabel.textContent = archiveDate ? `${archiveDate} · 美股交易日` : "正在打开复盘";
+  drawerSubtitle.textContent = error ? "复盘数据读取失败" : "正在连接复盘数据…";
+  if (reviewLoadingTitle) reviewLoadingTitle.textContent = error ? "复盘加载失败" : "正在读取复盘数据";
+  if (reviewLoadingDetail) {
+    reviewLoadingDetail.textContent = error
+      ? `${error.message || "请求失败"}。请关闭后重试。`
+      : "正在加载价格、新闻与操作计划，请稍候…";
+  }
+}
+
+function finishReviewDrawerLoading() {
+  reviewDrawer.classList.remove("review-loading", "review-load-error");
+  reviewLoadingState?.classList.add("hidden");
+}
+
+async function ensureActionPlanSymbolCatalog(archiveDate = state.activeDate) {
+  if (!archiveDate) return state.actionPlanSymbolCatalog || [];
+  if (actionPlanSymbolCatalogCache.has(archiveDate)) {
+    const cached = actionPlanSymbolCatalogCache.get(archiveDate) || [];
+    if (state.activeDate === archiveDate) {
+      state.actionPlanSymbolCatalog = cached.slice();
+      state.activeActionPlanEditor?.setSymbolCatalog?.(cached);
+    }
+    return cached;
+  }
+  if (actionPlanSymbolCatalogRequests.has(archiveDate)) {
+    return actionPlanSymbolCatalogRequests.get(archiveDate);
+  }
+  const request = fetchJson(`/api/reviews/${archiveDate}/action-plan-symbols`)
+    .then((data) => {
+      const items = data.items || [];
+      actionPlanSymbolCatalogCache.set(archiveDate, items);
+      if (state.activeDate === archiveDate) {
+        state.actionPlanSymbolCatalog = items.slice();
+        state.activeActionPlanEditor?.setSymbolCatalog?.(items);
+      }
+      return items;
+    })
+    .finally(() => actionPlanSymbolCatalogRequests.delete(archiveDate));
+  actionPlanSymbolCatalogRequests.set(archiveDate, request);
+  return request;
+}
+
+function invalidateActionPlanSymbolCatalogCache() {
+  actionPlanSymbolCatalogCache.clear();
+  state.actionPlanSymbolCatalog = [];
+}
+
 async function openReviewDrawer(archiveDate, options = {}) {
   const { editPlan = false, initialStep = "news" } = options;
-  const [data, symbolCatalog] = await Promise.all([
-    fetchJson(`/api/reviews/${archiveDate}/bootstrap`),
-    fetchJson(`/api/reviews/${archiveDate}/action-plan-symbols`),
-  ]);
+  const requestSequence = ++reviewOpenSequence;
+  reviewOpenController?.abort();
+  reviewOpenController = new AbortController();
+  setReviewOpenButtonsBusy(true);
+  setReviewDrawerLoading(archiveDate);
+  let data;
+  try {
+    data = await fetchJson(`/api/reviews/${archiveDate}/bootstrap`, {
+      signal: reviewOpenController.signal,
+    });
+  } catch (error) {
+    if (requestSequence !== reviewOpenSequence || error?.name === "AbortError") return;
+    setReviewDrawerLoading(archiveDate, error);
+    return;
+  } finally {
+    if (requestSequence === reviewOpenSequence) {
+      setReviewOpenButtonsBusy(false);
+      reviewOpenController = null;
+    }
+  }
+  if (requestSequence !== reviewOpenSequence) return;
   state.activeDate = archiveDate;
   state.activeBootstrap = data;
   state.investmentAccounts = normalizeInvestmentAccounts(data.investmentAccounts || state.investmentAccounts || []);
   state.accountSnapshot = normalizeAccountSnapshot(data.accountSnapshot, state.investmentAccounts);
   state.accountsLoaded = state.investmentAccounts.length > 0;
-  state.actionPlanSymbolCatalog = symbolCatalog.items || [];
+  state.actionPlanSymbolCatalog = (actionPlanSymbolCatalogCache.get(archiveDate) || []).slice();
 
   const cycle = buildReviewCycle(archiveDate);
   archiveDateLabel.textContent = `${archiveDate} · 美股交易日`;
@@ -996,13 +1090,15 @@ async function openReviewDrawer(archiveDate, options = {}) {
     reviewerNewsNotes: data.draft?.reviewer_news_notes || data.draft?.news_brief || buildDefaultNewsBrief(data.analysis, data.news),
     tradingSummary: data.draft?.trading_summary || "",
   });
-  renderStructuredNoteEditors();
+  const jumpToPlan = editPlan && reviewStatus === "reviewed";
+  state.reviewStep = jumpToPlan ? "plan" : initialStep;
   state.activeActionPlanEditor = mountActionPlanEditor(actionPlanAccountGroups, {
     mode: state.actionPlanEditorMode,
     plans: normalizeActionPlans(data.actionPlans || []),
     symbolCatalog: state.actionPlanSymbolCatalog,
     accounts: state.investmentAccounts,
     archiveDate,
+    deferInitialRender: true,
     callbacks: {
       onLocalChange: (plans) => {
         state.actionPlans = plans;
@@ -1013,24 +1109,32 @@ async function openReviewDrawer(archiveDate, options = {}) {
       historicalDraftHint: state.actionPlanEditorMode === "review-historical",
     },
   });
-  if (state.editMode) scheduleAccountImpactPreview(0);
 
   initMdTabs();
-  setReviewMode(reviewStatus);
-  // editPlan 只在已复盘记录上跳到"个股操作"；未复盘时按正常顺序从 news 开始
-  const jumpToPlan = editPlan && reviewStatus === "reviewed";
-  setReviewStep(jumpToPlan ? "plan" : initialStep);
-  reviewDrawer.classList.remove("hidden");
+  setReviewMode(reviewStatus, { refreshImpact: false });
+  finishReviewDrawerLoading();
+  if (state.editMode || state.reviewStep === "plan") {
+    ensureActionPlanSymbolCatalog(archiveDate).catch((error) => {
+      console.warn("Failed to load action plan symbol catalog", error);
+    });
+  }
   scheduleStructuredNoteTextareaResize();
 }
 
 function closeDrawer() {
+  reviewOpenSequence += 1;
+  reviewOpenController?.abort();
+  reviewOpenController = null;
+  setReviewOpenButtonsBusy(false);
+  window.clearTimeout(state.accountImpactPreviewTimer);
+  state.accountImpactPreviewTimer = null;
   if (state.activeActionPlanEditor?.destroy) {
     state.activeActionPlanEditor.destroy();
     state.activeActionPlanEditor = null;
   } else {
     closeActionPlanDetail();
   }
+  finishReviewDrawerLoading();
   reviewDrawer.classList.add("hidden");
 }
 
@@ -1049,6 +1153,8 @@ async function saveReview() {
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(payload),
   });
+
+  commitPendingNewActionPlan();
 
   state.activeBootstrap = {
     ...state.activeBootstrap,
@@ -1176,11 +1282,13 @@ function buildReviewRow(item) {
   if (isReviewed) {
     const viewButton = document.createElement("button");
     viewButton.className = "ghost compact-button";
+    viewButton.dataset.reviewOpen = "1";
     viewButton.textContent = "查看";
     viewButton.addEventListener("click", () => openReviewDrawer(item.archive_date));
 
     const editButton = document.createElement("button");
     editButton.className = "compact-button";
+    editButton.dataset.reviewOpen = "1";
     editButton.textContent = "编辑";
     editButton.addEventListener("click", () => openReviewDrawer(item.archive_date, { editPlan: true }));
 
@@ -1188,6 +1296,7 @@ function buildReviewRow(item) {
   } else {
     const startButton = document.createElement("button");
     startButton.className = "compact-button";
+    startButton.dataset.reviewOpen = "1";
     startButton.textContent = isHistoricalDraft ? "编辑草稿" : "开始复盘";
     startButton.addEventListener("click", () => openReviewDrawer(item.archive_date));
     if (isHistoricalDraft) {
@@ -2672,9 +2781,16 @@ function fillActionPlanEditor(plan) {
   resizeActionPlanTextareas();
 }
 
-function selectActionPlan(index) {
+async function selectActionPlan(index) {
   if (index < 0 || index >= state.actionPlans.length) return;
   hideActionPlanCellTooltip();
+  if (!isLiveActionPlanMode() && state.activeDate) {
+    try {
+      await ensureActionPlanSymbolCatalog(state.activeDate);
+    } catch (error) {
+      console.warn("Failed to load action plan symbol catalog", error);
+    }
+  }
   openActionPlanDetail(index);
 }
 
@@ -2709,8 +2825,9 @@ function syncSelectedActionPlanFromEditor() {
     ? null
     : (Number.isFinite(Number(positionAmountRaw)) ? Number(positionAmountRaw) : null);
   const positionAmount = positionAmountWan == null ? null : Math.round(positionAmountWan * 10000 * 100) / 100;
-  state.actionPlans[index] = normalizeActionPlan({
-    ...state.actionPlans[index],
+  const previousPlan = state.actionPlans[index];
+  const nextPlan = normalizeActionPlan({
+    ...previousPlan,
     accountId: selectedAccountId,
     accountName: account?.name || state.actionPlans[index].accountName,
     symbol: selectedSymbol,
@@ -2725,6 +2842,13 @@ function syncSelectedActionPlanFromEditor() {
     stopLossPlan: actionPlanStopLossInput.value,
     thinking: actionPlanThinkingInput.value,
   }, index);
+  state.actionPlans[index] = nextPlan;
+  if (
+    pendingNewActionPlan?.context === getActiveActionPlanEditorContext()
+    && pendingNewActionPlan.plan === previousPlan
+  ) {
+    pendingNewActionPlan.plan = nextPlan;
+  }
   syncLegacyAssetPlanField();
   notifyActionPlanLocalChange();
   renderActionPlanRowsOnly();
@@ -2767,7 +2891,32 @@ function openActionPlanDetail(index) {
   });
 }
 
-function closeActionPlanDetail() {
+function commitPendingNewActionPlan(plan = null) {
+  if (!pendingNewActionPlan) return false;
+  if (plan && pendingNewActionPlan.plan !== plan) return false;
+  pendingNewActionPlan = null;
+  return true;
+}
+
+function discardPendingNewActionPlan() {
+  const pending = pendingNewActionPlan;
+  if (!pending) return false;
+  pendingNewActionPlan = null;
+  if (pending.context !== getActiveActionPlanEditorContext()) return false;
+  const index = state.actionPlans.indexOf(pending.plan);
+  if (index < 0) return false;
+  state.actionPlans.splice(index, 1);
+  state.actionPlans = state.actionPlans.map((plan, sortOrder) => ({ ...plan, sortOrder }));
+  state.selectedActionPlanIndex = state.actionPlans.length
+    ? Math.min(index, state.actionPlans.length - 1)
+    : -1;
+  notifyActionPlanLocalChange();
+  renderActionPlans();
+  return true;
+}
+
+function closeActionPlanDetail({ discardPendingNew = true } = {}) {
+  if (discardPendingNew) discardPendingNewActionPlan();
   hideActionPlanCellTooltip();
   actionPlanDetailModal?.classList.add("hidden");
   actionPlanEditor?.classList.add("hidden");
@@ -2777,12 +2926,20 @@ async function saveActionPlanDetailAndClose() {
   if (syncSelectedActionPlanFromEditor() === false) return;
   const ctx = getActiveActionPlanEditorContext();
   const plan = state.actionPlans[state.selectedActionPlanIndex] || null;
+  const wasPendingNew = Boolean(
+    pendingNewActionPlan?.context === ctx
+    && pendingNewActionPlan.plan === plan
+  );
+  if (wasPendingNew) commitPendingNewActionPlan(plan);
   try {
     if (ctx?.callbacks?.onSave && plan) {
       await ctx.callbacks.onSave(plan);
     }
-    closeActionPlanDetail();
+    closeActionPlanDetail({ discardPendingNew: false });
   } catch (error) {
+    if (wasPendingNew && getActiveActionPlanEditorContext() === ctx && state.actionPlans.includes(plan)) {
+      pendingNewActionPlan = { context: ctx, plan };
+    }
     window.alert(`保存失败: ${error.message}`);
   }
 }
@@ -2815,9 +2972,17 @@ function addActionPlan(marketType = "美股") {
   addActionPlanForAccount(account?.id || 0, marketType);
 }
 
-function addActionPlanForAccount(accountId, marketType = null) {
+async function addActionPlanForAccount(accountId, marketType = null) {
   const readOnly = isActionPlanEditorReadOnly();
   if (readOnly) return;
+  if (!isLiveActionPlanMode() && state.activeDate && !state.actionPlanSymbolCatalog.length) {
+    try {
+      await ensureActionPlanSymbolCatalog(state.activeDate);
+    } catch (error) {
+      window.alert(`标的目录加载失败: ${error.message}`);
+      return;
+    }
+  }
   const account = findAccountById(accountId) || getDefaultAccountForMarket(marketType || "美股");
   if (isLiveActionPlanMode() && account && !account.enabled) {
     window.alert("已停用账户不能新增标的。");
@@ -2833,14 +2998,19 @@ function addActionPlanForAccount(accountId, marketType = null) {
     window.alert("没有可添加的标的，请先在标的管理中新增或显示标的。");
     return;
   }
-  state.actionPlans.push(normalizeActionPlan({
+  const plan = normalizeActionPlan({
     accountId: resolvedAccountId,
     accountName: account?.name || "",
     symbol,
     actionType: "准备开仓",
     currentPosition: "0%",
     marketType: marketType || marketTypeForAccount(account),
-  }, state.actionPlans.length));
+  }, state.actionPlans.length);
+  state.actionPlans.push(plan);
+  pendingNewActionPlan = {
+    context: getActiveActionPlanEditorContext(),
+    plan,
+  };
   state.selectedActionPlanIndex = state.actionPlans.length - 1;
   notifyActionPlanLocalChange();
   renderActionPlans();
@@ -3339,6 +3509,11 @@ function showReviewNewsFallback(item) {
 
 function setReviewStep(stepKey = null) {
   if (stepKey) state.reviewStep = stepKey;
+  if (state.reviewStep === "plan" && state.activeDate && !state.actionPlanSymbolCatalog.length) {
+    ensureActionPlanSymbolCatalog(state.activeDate).catch((error) => {
+      console.warn("Failed to load action plan symbol catalog", error);
+    });
+  }
   reviewStepNav.innerHTML = "";
   const maxReachableIndex = getMaxReachableStepIndex();
   const reviewedMode = state.reviewStatus === "reviewed" && !state.editMode;
@@ -3500,7 +3675,7 @@ function applyEditMode(editable) {
   setReviewMode(state.reviewStatus);
 }
 
-function setReviewMode(status) {
+function setReviewMode(status, options = {}) {
   const readOnly = status === "reviewed" && !state.editMode;
   reviewActionGroup.classList.toggle("hidden", false);
   reviewModalFooter.classList.toggle("hidden", readOnly);
@@ -3513,7 +3688,7 @@ function setReviewMode(status) {
     if ("disabled" in field && field.type !== "hidden") field.disabled = readOnly && field.type === "checkbox";
   });
   applyActionPlanReadOnly(readOnly);
-  renderActionPlans();
+  renderActionPlans({ refreshImpact: options.refreshImpact !== false });
   renderStructuredNoteEditors();
   // 非编辑状态（已复盘且未点编辑）整个隐藏保存按钮，而不是 disabled 灰显
   saveDraftBtn.classList.toggle("hidden", readOnly);
@@ -4108,12 +4283,14 @@ function scheduleAccountImpactPreview(delay = 300) {
 
 async function refreshAccountImpactPreview() {
   if (!state.activeDate || state.reviewStatus === "reviewed" && !state.editMode) return;
+  const previewDate = state.activeDate;
   try {
-    const result = await fetchJson(`/api/reviews/${state.activeDate}/account-impact/preview`, {
+    const result = await fetchJson(`/api/reviews/${previewDate}/account-impact/preview`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ actionPlans: normalizeActionPlans(state.actionPlans) }),
     });
+    if (state.activeDate !== previewDate || reviewDrawer?.classList.contains("hidden")) return;
     state.accountImpactSummary = normalizeAccountImpactSummary(result.accounts || []);
     renderActionPlans({ refreshImpact: false });
   } catch (error) {
@@ -4733,6 +4910,7 @@ function buildSymbolRow(item) {
       } else {
         await loadSymbols();
       }
+      invalidateActionPlanSymbolCatalogCache();
     } catch (err) {
       window.alert(`${actionLabel}失败: ${err.message}`);
     }
@@ -4743,6 +4921,7 @@ function buildSymbolRow(item) {
     try {
       await fetchJson(`/api/symbols/${id}?hard=1`, { method: "DELETE" });
       row.remove();
+      invalidateActionPlanSymbolCatalogCache();
     } catch (err) {
       window.alert(`删除失败: ${err.message}`);
     }
@@ -4822,6 +5001,7 @@ function initSymbolDragDrop(tbody) {
           body: JSON.stringify({ sort_order }),
         })
       ));
+      invalidateActionPlanSymbolCatalogCache();
     } catch {
       // 持久化失败不影响 UI
     }
@@ -4934,6 +5114,7 @@ async function submitSymbolForm(formData) {
         body: JSON.stringify(payload),
       });
     }
+    invalidateActionPlanSymbolCatalogCache();
     preview.classList.add("hidden");
     await loadSymbols();
   } catch (err) {

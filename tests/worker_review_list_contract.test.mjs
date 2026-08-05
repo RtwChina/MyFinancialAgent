@@ -4,12 +4,83 @@ import test from "node:test";
 import {
   buildAccountSnapshotFromAccounts,
   buildAccountImpactSummaryFromPlans,
+  buildAccountImpactSummaryFromSnapshot,
+  buildActionPlanSymbolMetrics,
+  buildNewsWindowFromRows,
+  buildReviewListItems,
   bucketEstimatedImpactPercent,
   deriveReviewDailyThesis,
+  getReviewBootstrap,
   normalizeReviewNoteBlocks,
   parsePositionWeight,
+  previousActionPlanSymbolKeysFromRows,
   resolveReviewNoteBlocksWithFallback,
 } from "../cloudflare/worker/src/index.js";
+
+function createBootstrapDb() {
+  const batchCalls = [];
+  const resultFor = (sql) => {
+    if (sql.includes("FROM investment_accounts ORDER BY")) {
+      return { results: [{ id: 1, name: "老虎-美股", currency: "USD", enabled: 1, sort_order: 10 }] };
+    }
+    if (sql.includes("SELECT * FROM daily_review_archive WHERE")) {
+      return { results: [{ archive_date: "2026-08-05", review_status: "reviewed" }] };
+    }
+    if (sql.includes("FROM tracked_symbols managed") && sql.includes("JOIN stock_raw p")) {
+      return { results: [{
+        symbol: "MU",
+        stock_name: "Micron",
+        current_price: 110,
+        change_percent: 2.5,
+        volume: 10,
+        k_date: "2026-08-05",
+        display_name: "美光",
+        symbol_type: "stock",
+        market_type: "美股",
+        sort_order: 1,
+      }] };
+    }
+    if (sql.includes("SELECT DISTINCT k_date")) {
+      return { results: [{ k_date: "2026-08-05" }, { k_date: "2026-08-04" }] };
+    }
+    if (sql.includes("FROM daily_news_ai_analysis")) return { results: [] };
+    if (sql.includes("archive_date < ? AND review_status = 'reviewed'")) return { results: [] };
+    if (sql.includes("FROM daily_review_action_plans p")) return { results: [] };
+    if (sql.includes("FROM review_account_snapshots")) {
+      return { results: [{
+        id: 1,
+        archive_date: "2026-08-05",
+        accounts_snapshot: JSON.stringify([{
+          accountId: 1,
+          accountName: "老虎-美股",
+          currency: "USD",
+          impact: { rangeLabel: "1~2%", direction: "gain", contributors: 1 },
+        }]),
+      }] };
+    }
+    if (sql.includes("MAX(archive_date) AS latest")) return { results: [{ latest: "2026-08-05" }] };
+    if (sql.includes("FROM daily_review_archive_news")) return { results: [] };
+    throw new Error(`Unexpected bootstrap SQL: ${sql}`);
+  };
+
+  return {
+    batchCalls,
+    prepare(sql) {
+      return {
+        sql,
+        params: [],
+        bind(...params) {
+          this.params = params;
+          return this;
+        },
+      };
+    },
+    async batch(statements) {
+      batchCalls.push(statements);
+      return statements.map((statement) => resultFor(statement.sql));
+    },
+  };
+}
 
 test("deriveReviewDailyThesis prefers trading summary, then review notes, then AI analysis", () => {
   assert.equal(
@@ -103,6 +174,99 @@ test("buildAccountSnapshotFromAccounts preserves one review-day structured snaps
       notes: "",
     },
   ]);
+});
+
+test("bootstrap helpers reuse snapshot impact without another database read", () => {
+  assert.deepEqual(buildAccountImpactSummaryFromSnapshot({
+    accounts: [
+      {
+        accountId: 1,
+        accountName: "老虎-美股",
+        currency: "USD",
+        impact: { rangeLabel: "1~2%", direction: "gain", contributors: 2 },
+      },
+    ],
+  }), [
+    {
+      accountId: 1,
+      accountName: "老虎-美股",
+      currency: "USD",
+      rangeLabel: "1~2%",
+      direction: "gain",
+      contributors: 2,
+      source: "estimated_action_plan",
+      label: "账户影响",
+    },
+  ]);
+  assert.equal(buildAccountImpactSummaryFromSnapshot(null), null);
+});
+
+test("previous action plan symbols are reduced from one-query rows", () => {
+  const keys = previousActionPlanSymbolKeysFromRows([
+    { account_id: 1, symbol: "MU" },
+    { account_id: 3, symbol: "GOLD" },
+  ]);
+  assert.deepEqual([...keys], ["1:MU", "3:GOLD"]);
+});
+
+test("batched bootstrap date rows preserve the news window contract", () => {
+  assert.deepEqual(
+    buildNewsWindowFromRows([{ k_date: "2026-08-04" }, { k_date: "2026-08-01" }], "2026-08-05"),
+    { start: "2026-08-01 16:00:00", end: "2026-08-05 16:00:00" },
+  );
+});
+
+test("single-query symbol catalog rows preserve day/week/month metrics", () => {
+  assert.deepEqual(
+    buildActionPlanSymbolMetrics(
+      { k_date: "2026-08-05", current_price: 110, change_percent: 2.5 },
+      { current_price: 100 },
+      { current_price: 88 },
+    ),
+    {
+      latestDate: "2026-08-05",
+      latestPrice: 110,
+      dayChangePercent: 2.5,
+      weekChangePercent: 10,
+      monthChangePercent: 25,
+    },
+  );
+});
+
+test("review bootstrap uses batched read stages and reuses its account snapshot", async () => {
+  const DB = createBootstrapDb();
+  const result = await getReviewBootstrap({ DB }, "2026-08-05");
+
+  assert.equal(DB.batchCalls.length, 2);
+  assert.equal(DB.batchCalls[0].length, 9);
+  assert.equal(DB.batchCalls.flat().some((statement) => /\bINSERT\b/i.test(statement.sql)), false);
+  assert.equal(result.prices.usStock[0].symbol, "MU");
+  assert.equal(result.accountImpactSummary[0].rangeLabel, "1~2%");
+  assert.deepEqual(result.account_impact_summary, result.accountImpactSummary);
+});
+
+test("review list reuses the joined account snapshot without per-row database reads", async () => {
+  const env = {
+    DB: {
+      prepare() {
+        throw new Error("review list should not query an already joined snapshot");
+      },
+    },
+  };
+  const [item] = await buildReviewListItems(env, [{
+    archive_date: "2026-08-05",
+    review_status: "reviewed",
+    trading_summary: "日内主线",
+    account_snapshot_json: JSON.stringify([{
+      accountId: 1,
+      accountName: "老虎-美股",
+      currency: "USD",
+      impact: { rangeLabel: "0~1%", direction: "gain", contributors: 1 },
+    }]),
+  }]);
+
+  assert.equal(item.account_snapshot_json, undefined);
+  assert.equal(item.account_impact_summary[0].rangeLabel, "0~1%");
 });
 
 test("review note blocks preserve arbitrary titles", () => {
