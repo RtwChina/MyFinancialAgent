@@ -562,9 +562,9 @@ function syncPositionBucketFromAmount() {
   const amountRaw = wan * 10000;
   const accountId = Number(actionPlanAccountSelect?.value || 0);
   const account = findAccountById(accountId);
-  const totalThousands = Number(account?.totalAssets);
-  if (!Number.isFinite(totalThousands) || totalThousands <= 0) return;
-  const bucket = mapAmountToPositionBucket(amountRaw, totalThousands * 1000);
+  const totalAssets = Number(account?.totalAssets);
+  if (!Number.isFinite(totalAssets) || totalAssets <= 0) return;
+  const bucket = mapAmountToPositionBucket(amountRaw, totalAssets);
   if (!bucket) return;
   actionPlanPositionSelect.value = bucket;
 }
@@ -4166,10 +4166,9 @@ function formatAccountMoney(value, currency = "CNY") {
   const number = Number(value);
   if (!Number.isFinite(number)) return "未填写";
   const prefix = currency === "USD" ? "$" : currency === "CNY" ? "¥" : `${currency} `;
-  const wanValue = number / 10;
+  const wanValue = number / 10000;
   return `${prefix}${wanValue.toLocaleString("zh-CN", {
-    minimumFractionDigits: 1,
-    maximumFractionDigits: 1,
+    maximumFractionDigits: 2,
   })}万`;
 }
 
@@ -4542,7 +4541,6 @@ function showAccountForm(prefill = {}) {
           <input type="text" name="currency" value="${escapeAttribute(account.currency)}" required placeholder="USD / CNY" />
         </label>
         <label>
-<<<<<<< Updated upstream
           <small>总资产</small>
           <div class="amount-input-wrap">
             <input type="number" step="0.01" min="0" name="totalAssets" value="${rawMoneyToWanInput(account.totalAssets)}" placeholder="账户整体规模" />
@@ -4555,10 +4553,6 @@ function showAccountForm(prefill = {}) {
             <input type="number" step="0.01" min="0" name="availableCash" value="${rawMoneyToWanInput(account.availableCash)}" placeholder="可调仓现金" />
             <span class="amount-input-suffix">万</span>
           </div>
-=======
-          <small>总资产（千）</small>
-          <input type="number" step="0.01" name="totalAssets" value="${account.totalAssets ?? ""}" placeholder="如 32 = 3.2万" />
->>>>>>> Stashed changes
         </label>
         <label>
           <small>排序</small>
