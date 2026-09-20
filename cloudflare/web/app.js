@@ -1,3 +1,5 @@
+import { buildZoneExport } from "./zone-export.js?v=20260904-sp500-template";
+
 // ===== snarkdown (inline, ~1KB) — Markdown → HTML =====
 const _sdTags={'':['\x3cem>','</em>'],_:['\x3cstrong>','</strong>'],'*':['\x3cstrong>','</strong>'],'~':['\x3cs>','</s>'],'\n':['\x3cbr />'],' ':['\x3cbr />'],'-':['\x3chr />']};
 function _sdOutdent(s){return s.replace(RegExp('^'+(s.match(/^(\t| )+/)||'')[0],'gm'),'');}
@@ -373,6 +375,8 @@ const newsDetailLink = document.querySelector("#newsDetailLink");
 const closeNewsDetailBtn = document.querySelector("#closeNewsDetailBtn");
 
 const reviewsList = document.querySelector("#reviewsList");
+const completePendingReviewsBtn = document.querySelector("#completePendingReviewsBtn");
+const batchReviewStatus = document.querySelector("#batchReviewStatus");
 
 // 新闻检索台分页控件
 const newsPagination = document.querySelector("#newsPagination");
@@ -470,6 +474,8 @@ const actionPlanZoneExportBackdrop = document.querySelector("#actionPlanZoneExpo
 const closeActionPlanZoneExportBtn = document.querySelector("#closeActionPlanZoneExportBtn");
 const actionPlanZoneExportOutput = document.querySelector("#actionPlanZoneExportOutput");
 const actionPlanZoneExportEmpty = document.querySelector("#actionPlanZoneExportEmpty");
+const actionPlanZoneExportDescription = document.querySelector("#actionPlanZoneExportDescription");
+const actionPlanZoneExportSummary = document.querySelector("#actionPlanZoneExportSummary");
 const copyActionPlanZoneExportBtn = document.querySelector("#copyActionPlanZoneExportBtn");
 const actionPlanZoneExportCopyStatus = document.querySelector("#actionPlanZoneExportCopyStatus");
 
@@ -495,6 +501,7 @@ newsPageSizeSelect.addEventListener("change", () => {
 });
 
 document.querySelector("#refreshReviewsBtn").addEventListener("click", () => loadReviews(null, true));
+completePendingReviewsBtn?.addEventListener("click", () => completeAllPendingReviews());
 document.querySelector("#filtersForm").addEventListener("submit", (event) => {
   event.preventDefault();
   loadReviews(new FormData(event.currentTarget), true);
@@ -547,8 +554,8 @@ document.addEventListener("click", (event) => {
   if (!actionPlanSymbolPicker?.contains(event.target)) closeActionPlanSymbolPicker();
 });
 actionPlanPositionAmountInput?.addEventListener("input", syncPositionBucketFromAmount);
-exportActionPlanZonesBtn?.addEventListener("click", openActionPlanZoneExport);
-exportLiveActionPlanZonesBtn?.addEventListener("click", openActionPlanZoneExport);
+exportActionPlanZonesBtn?.addEventListener("click", () => openActionPlanZoneExport({ includeRotation: true }));
+exportLiveActionPlanZonesBtn?.addEventListener("click", () => openActionPlanZoneExport({ includeRotation: false }));
 actionPlanZoneExportBackdrop?.addEventListener("click", closeActionPlanZoneExport);
 closeActionPlanZoneExportBtn?.addEventListener("click", closeActionPlanZoneExport);
 copyActionPlanZoneExportBtn?.addEventListener("click", copyActionPlanZoneExport);
@@ -960,6 +967,98 @@ function renderReviewsPagination(data) {
   state.reviewsPage = page;
 }
 
+function setBatchReviewStatus(message = "", variant = "") {
+  if (!batchReviewStatus) return;
+  batchReviewStatus.textContent = message;
+  batchReviewStatus.className = `review-batch-status muted ${message ? "" : "hidden"} ${variant ? `is-${variant}` : ""}`.trim();
+}
+
+async function completeAllPendingReviews() {
+  if (!completePendingReviewsBtn || completePendingReviewsBtn.disabled) return;
+
+  completePendingReviewsBtn.disabled = true;
+  completePendingReviewsBtn.textContent = "正在统计…";
+  setBatchReviewStatus("正在读取全部待复盘日期…");
+
+  try {
+    const pending = await fetchJson("/api/reviews/pending?limit=all");
+    const dates = (pending.items || [])
+      .map((item) => item.archiveDate)
+      .filter((date) => date && date !== pending.latestArchiveDate)
+      .sort((left, right) => left.localeCompare(right));
+
+    if (!dates.length) {
+      setBatchReviewStatus("没有需要自动复盘的历史日期；最新一次保留手动复盘。", "success");
+      return;
+    }
+
+    const confirmed = window.confirm(
+      `确认按日期从早到晚完成 ${dates.length} 个待复盘日？\n\n` +
+      `最新一次（${pending.latestArchiveDate || "暂无"}）保留手动复盘。其余日期先按原有逻辑自动回填并保存，再完成归档；已有内容优先保留，无参考内容的字段保持为空。个别日期失败不影响其余日期。`,
+    );
+    if (!confirmed) {
+      setBatchReviewStatus("已取消批量复盘。", "neutral");
+      return;
+    }
+
+    let completed = 0;
+    let skipped = 0;
+    const skippedDates = [];
+    const failures = [];
+    for (let index = 0; index < dates.length; index += 1) {
+      const archiveDate = dates[index];
+      completePendingReviewsBtn.textContent = `${index + 1} / ${dates.length}`;
+      setBatchReviewStatus(`正在复盘 ${archiveDate}（${index + 1}/${dates.length}）…`);
+      try {
+        const data = await fetchJson(`/api/reviews/${archiveDate}/bootstrap`);
+        if (data.latestArchiveDate === archiveDate || ["reviewed", "completed"].includes(data.draft?.review_status)) {
+          skipped += 1;
+          skippedDates.push(archiveDate);
+          continue;
+        }
+        const result = await fetchJson(`/api/reviews/${archiveDate}/complete`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            onlyIfPending: true,
+            completionSource: "batch",
+            autoFill: {
+              reviewerNewsNotes: buildDefaultNewsBrief(data.analysis, data.news || []),
+              marketSentimentBlocks: resolveBootstrapNoteBlocks(data, "marketSentiment"),
+              sectorRotationBlocks: resolveBootstrapNoteBlocks(data, "sectorRotation"),
+            },
+          }),
+        });
+        if (result.skipped) {
+          skipped += 1;
+          skippedDates.push(archiveDate);
+        } else completed += 1;
+      } catch (error) {
+        failures.push({ archiveDate, message: error.message });
+      }
+    }
+
+    await loadReviews(state.reviewsFilters, true);
+    const skippedSuffix = skippedDates.length ? `（已完成或保留：${skippedDates.join("、")}）` : "";
+    if (failures.length) {
+      const failedDates = failures.map((item) => item.archiveDate).join("、");
+      setBatchReviewStatus(
+        `已完成 ${completed} 个，跳过 ${skipped} 个${skippedSuffix}，失败 ${failures.length} 个：${failedDates}`,
+        "error",
+      );
+      window.alert(`批量复盘部分完成。失败日期：${failedDates}\n\n失败项仍保留为待复盘，可再次重试。`);
+    } else {
+      setBatchReviewStatus(`批量复盘完成：完成 ${completed} 个，跳过 ${skipped} 个${skippedSuffix}。`, "success");
+    }
+  } catch (error) {
+    setBatchReviewStatus(`批量复盘失败：${error.message}`, "error");
+    window.alert(`批量复盘失败：${error.message}`);
+  } finally {
+    completePendingReviewsBtn.disabled = false;
+    completePendingReviewsBtn.textContent = "复盘全部待处理";
+  }
+}
+
 function setReviewOpenButtonsBusy(busy) {
   document.querySelectorAll("[data-review-open]").forEach((button) => {
     button.disabled = busy;
@@ -1138,7 +1237,7 @@ function closeDrawer() {
   reviewDrawer.classList.add("hidden");
 }
 
-async function saveReview() {
+async function saveReview({ forCompletion = false } = {}) {
   if (!actionPlanDetailModal?.classList.contains("hidden")) {
     if (syncSelectedActionPlanFromEditor() === false) return;
   }
@@ -1172,14 +1271,17 @@ async function saveReview() {
   state.reviewNoteBlocks.sectorRotation = payload.sectorRotationBlocks;
   state.actionPlans = payload.actionPlans;
   state.selectedActionPlanIndex = state.actionPlans.length ? Math.max(0, state.selectedActionPlanIndex) : -1;
-  renderActionPlans();
-  renderStructuredNoteEditors();
-  scheduleAccountImpactPreview(0);
+  if (!forCompletion) {
+    renderActionPlans();
+    renderStructuredNoteEditors();
+    scheduleAccountImpactPreview(0);
+  }
   if (state.reviewStatus === "reviewed" && state.editMode) {
     state.editMode = false;
     setReviewMode("reviewed");
   }
-  await loadReviews();
+  if (!forCompletion) await loadReviews();
+  return true;
 }
 
 function buildNewsRow(item) {
@@ -1961,88 +2063,59 @@ function formatSupportResistanceLevels(supportLevels, resistanceLevels) {
   return sections.join("\n\n");
 }
 
-function formatActionPlanZoneNumber(value) {
-  const number = Number(value);
-  if (!Number.isFinite(number)) return "";
-  return Number.isInteger(number) ? String(number) : String(Number(number.toFixed(4)));
-}
-
-function normalizeActionPlanZoneLine(line) {
-  return String(line || "")
-    .replace(/[（]/g, "(")
-    .replace(/[）]/g, ")")
-    .replace(/\s+/g, " ")
-    .trim();
-}
-
-function escapeDrawZoneString(value) {
-  return String(value || "").replace(/\\/g, "\\\\").replace(/'/g, "\\'");
-}
-
-function parseActionPlanZoneLine(line, zoneType) {
-  const normalized = normalizeActionPlanZoneLine(line);
-  if (!normalized) return null;
-  const rangeMatch = normalized.match(/(-?\d+(?:\.\d+)?)\s*(?:-|–|—|－|~|至)\s*(-?\d+(?:\.\d+)?)/);
-  if (!rangeMatch) return null;
-  const first = Number(rangeMatch[1]);
-  const second = Number(rangeMatch[2]);
-  if (!Number.isFinite(first) || !Number.isFinite(second)) return null;
-  const lower = Math.min(first, second);
-  const upper = Math.max(first, second);
-  const lowerText = formatActionPlanZoneNumber(lower);
-  const upperText = formatActionPlanZoneNumber(upper);
-  let rest = normalized.slice(rangeMatch.index + rangeMatch[0].length).trim();
-  let strength = "";
-  const strengthMatch = rest.match(/^\(([^)]+)\)/);
-  if (strengthMatch) {
-    strength = strengthMatch[1].trim();
-    rest = rest.slice(strengthMatch[0].length).trim();
-  }
-  const labelParts = [`${zoneType}: ${lowerText}-${upperText}`];
-  if (strength) labelParts.push(`(${strength})`);
-  if (rest) labelParts.push(rest);
-  return {
-    lowerText,
-    upperText,
-    label: labelParts.join(" "),
-  };
-}
-
-function buildActionPlanZoneExportLines(plans = []) {
-  const lines = [];
-  plans.forEach((plan) => {
-    const symbol = String(plan?.symbol || "").trim().toUpperCase();
-    if (!symbol) return;
-    [
-      { text: plan.supportLevels, type: "支撑" },
-      { text: plan.resistanceLevels, type: "压力" },
-    ].forEach(({ text, type }) => {
-      String(text || "").split(/\r?\n/).forEach((line) => {
-        const parsed = parseActionPlanZoneLine(line, type);
-        if (!parsed) return;
-        lines.push(`draw_zone('${escapeDrawZoneString(symbol)}', ${parsed.lowerText}, ${parsed.upperText}, '${escapeDrawZoneString(parsed.label)}')`);
-      });
-    });
-  });
-  return lines;
-}
-
 function closeActionPlanZoneExport() {
   actionPlanZoneExportModal?.classList.add("hidden");
   if (actionPlanZoneExportCopyStatus) actionPlanZoneExportCopyStatus.textContent = "";
 }
 
-function openActionPlanZoneExport() {
-  const lines = buildActionPlanZoneExportLines(state.actionPlans);
-  const output = lines.join("\n");
+async function openActionPlanZoneExport({ includeRotation = true } = {}) {
+  const originalLabel = exportActionPlanZonesBtn?.textContent || "导出画线";
+  if (includeRotation && exportActionPlanZonesBtn) {
+    exportActionPlanZonesBtn.disabled = true;
+    exportActionPlanZonesBtn.textContent = "正在识别…";
+  }
+  let symbolCatalog = state.actionPlanSymbolCatalog || [];
+  if (includeRotation && state.activeDate) {
+    try {
+      symbolCatalog = await ensureActionPlanSymbolCatalog(state.activeDate);
+    } catch (error) {
+      console.warn("Failed to load symbol catalog for zone export", error);
+    }
+  }
+  const result = buildZoneExport({
+    marketBlocks: includeRotation ? state.reviewNoteBlocks.marketSentiment : [],
+    rotationBlocks: includeRotation ? state.reviewNoteBlocks.sectorRotation : [],
+    actionPlans: state.actionPlans,
+    symbolCatalog,
+    includeMarket: includeRotation,
+    includeRotation,
+  });
+  const output = result.text;
   if (actionPlanZoneExportOutput) {
     actionPlanZoneExportOutput.value = output;
     actionPlanZoneExportOutput.classList.toggle("hidden", !output);
   }
   actionPlanZoneExportEmpty?.classList.toggle("hidden", Boolean(output));
   if (copyActionPlanZoneExportBtn) copyActionPlanZoneExportBtn.disabled = !output;
+  if (actionPlanZoneExportDescription) {
+    actionPlanZoneExportDescription.textContent = includeRotation
+      ? "合并标普500支撑与关键破位点、大宗商品与板块轮动、个股与资产操作计划，并生成 draw_zone 命令。"
+      : "将当前操作计划里的压力位、支撑位转为 draw_zone 命令。";
+  }
+  if (actionPlanZoneExportSummary) {
+    const skippedText = result.skippedCount ? `，跳过 ${result.skippedCount} 行无法识别的内容` : "";
+    actionPlanZoneExportSummary.textContent = output
+      ? `已识别 ${result.groups.length} 个标的、${result.zoneCount} 个区间${skippedText}。`
+      : result.skippedCount
+        ? `未识别到可导出区间，已跳过 ${result.skippedCount} 行。`
+        : "";
+  }
   if (actionPlanZoneExportCopyStatus) actionPlanZoneExportCopyStatus.textContent = "";
   actionPlanZoneExportModal?.classList.remove("hidden");
+  if (includeRotation && exportActionPlanZonesBtn) {
+    exportActionPlanZonesBtn.disabled = false;
+    exportActionPlanZonesBtn.textContent = originalLabel;
+  }
   requestAnimationFrame(() => {
     if (output) {
       actionPlanZoneExportOutput?.focus();
@@ -3568,12 +3641,30 @@ async function handleNextStep() {
   if (!validateStep(REVIEW_STEPS[currentIndex])) return;
 
   if (currentIndex === REVIEW_STEPS.length - 1) {
-    await saveReview();
-    await fetchJson(`/api/reviews/${state.activeDate}/complete`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ accountSnapshot: collectAccountSnapshotPayload() }),
-    });
+    const saved = await saveReview({ forCompletion: true });
+    try {
+      await fetchJson(`/api/reviews/${state.activeDate}/complete`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ accountSnapshot: collectAccountSnapshotPayload() }),
+      });
+    } catch (error) {
+      if (saved) {
+        // Restore the saved draft presentation omitted on the success path.
+        // Presentation failures must not replace the original completion error.
+        try {
+          renderActionPlans();
+          renderStructuredNoteEditors();
+          scheduleAccountImpactPreview(0);
+        } catch (presentationError) {
+          console.warn("Failed to restore saved review presentation", presentationError);
+        }
+        try { await loadReviews(); } catch (refreshError) {
+          console.warn("Failed to refresh saved review", refreshError);
+        }
+      }
+      throw error;
+    }
     setReviewStatus("reviewed");
     setReviewMode("reviewed");
     if (state.activeBootstrap?.draft) state.activeBootstrap.draft.review_status = "reviewed";

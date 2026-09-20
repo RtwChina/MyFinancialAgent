@@ -2,14 +2,26 @@ import { test, expect } from '@playwright/test';
 import { execFileSync } from 'node:child_process';
 
 const BASE_URL = process.env.BASE_URL || 'http://127.0.0.1:8787';
+const executablePath = process.env.PLAYWRIGHT_EXECUTABLE_PATH;
 const EXPORT_DATE = '2026-02-20';
 const EMPTY_EXPORT_DATE = '2026-02-19';
+
+if (executablePath) test.use({ launchOptions: { executablePath } });
+test.describe.configure({ timeout: 120_000 });
 
 function d1(command) {
   return execFileSync(
     'npx',
-    ['wrangler', 'd1', 'execute', 'my-financial-agent', '--local', '--command', command],
-    { cwd: `${process.cwd()}/cloudflare`, encoding: 'utf8' },
+    ['wrangler', 'd1', 'execute', 'DB', '--local', '--config', 'wrangler.toml', '--command', command],
+    {
+      cwd: process.cwd(),
+      encoding: 'utf8',
+      env: {
+        ...process.env,
+        WRANGLER_LOG_PATH: '/private/tmp/myfinancialagent-zone-export-test.log',
+        WRANGLER_SEND_METRICS: 'false',
+      },
+    },
   );
 }
 
@@ -17,8 +29,8 @@ function sqlQuote(value) {
   return `'${String(value).replaceAll("'", "''")}'`;
 }
 
-function seedTrackedSymbol(symbol, displayName = symbol) {
-  d1(`INSERT INTO tracked_symbols (symbol, yahoo_symbol, display_name, symbol_type, aliases, is_active, sort_order, created_at, updated_at)
+function trackedSymbolUpsertSql(symbol, displayName = symbol) {
+  return `INSERT INTO tracked_symbols (symbol, yahoo_symbol, display_name, symbol_type, aliases, is_active, sort_order, created_at, updated_at)
       VALUES (${sqlQuote(symbol)}, ${sqlQuote(symbol)}, ${sqlQuote(displayName)}, 'stock', ${sqlQuote(JSON.stringify([symbol, displayName]))}, 1, 8120, datetime('now'), datetime('now'))
       ON CONFLICT(symbol) DO UPDATE SET
         yahoo_symbol=excluded.yahoo_symbol,
@@ -26,7 +38,15 @@ function seedTrackedSymbol(symbol, displayName = symbol) {
         symbol_type=excluded.symbol_type,
         aliases=excluded.aliases,
         is_active=1,
-      updated_at=datetime('now');`);
+      updated_at=datetime('now');`;
+}
+
+function seedTrackedSymbols(items) {
+  d1(items.map(([symbol, displayName]) => trackedSymbolUpsertSql(symbol, displayName)).join('\n'));
+}
+
+function seedTrackedSymbol(symbol, displayName = symbol) {
+  seedTrackedSymbols([[symbol, displayName]]);
 }
 
 async function filterReviewsByDate(page, date) {
@@ -36,9 +56,12 @@ async function filterReviewsByDate(page, date) {
   await form.getByRole('button', { name: '查询' }).click();
 }
 
-test('action plan zone export previews draw_zone commands', async ({ page, request }) => {
-  seedTrackedSymbol('MSFT', '微软');
-  seedTrackedSymbol('AVGO', '博通');
+test('review header zone export merges rotation and action-plan ranges pressure first', async ({ page, request }) => {
+  seedTrackedSymbols([
+    ['MSFT', '微软'],
+    ['AVGO', '博通'],
+    ['QQQ', '纳斯达克100ETF'],
+  ]);
   d1(`DELETE FROM daily_review_action_plans WHERE archive_date=${sqlQuote(EXPORT_DATE)};
       DELETE FROM daily_review_archive WHERE archive_date=${sqlQuote(EXPORT_DATE)};`);
 
@@ -50,8 +73,24 @@ test('action plan zone export previews draw_zone commands', async ({ page, reque
     data: {
       reviewStatus: 'draft',
       reviewerNewsNotes: '导出测试：新闻总结。',
-      marketSentiment: '导出测试：大盘盘点。',
-      sectorRotation: '导出测试：板块轮动。',
+      marketSentimentBlocks: [{
+        title: '标普500点位',
+        children: [
+          { title: 'CTA流动性', body: '横盘：buy\n加速卖出触发：跌破 7620 / 7356 / 6884' },
+          { title: '支撑位', body: '7310-7350（小）\n7200–7250（强） 防守' },
+          { title: '负伽马', body: '6475（破了该点位后就会出现较大的抛压）' },
+          { title: '压力位', body: '7500-7550（不应从大盘导出）' },
+          { title: '判断', body: '7000-7100（不应导出）' },
+        ],
+      }],
+      sectorRotationBlocks: [{
+        title: '纳斯达克 QQQ',
+        children: [
+          { title: '支撑位 (Support):', body: '671–681（小）' },
+          { title: '压力位', body: '734–744（小）\n693–724（强）注意反弹承压' },
+          { title: '关键指标', body: '600-620（不应导出）' },
+        ],
+      }],
       tradingSummary: '',
       actionPlans: [
         {
@@ -83,19 +122,54 @@ test('action plan zone export previews draw_zone commands', async ({ page, reque
   await expect(row).toBeVisible();
   await row.getByRole('button', { name: /开始复盘|继续复盘|进入复盘|查看|编辑草稿/ }).click();
   await expect(page.locator('#reviewDrawer')).toBeVisible();
-  await page.getByText('个股操作', { exact: true }).click();
 
-  await page.getByRole('button', { name: '导出画线' }).click();
+  const exportButton = page.locator('#exportActionPlanZonesBtn');
+  await expect(exportButton).toBeVisible();
+  const exportComesBeforeEdit = await page.evaluate(() => {
+    const exportNode = document.querySelector('#exportActionPlanZonesBtn');
+    const editNode = document.querySelector('#initializeBtn');
+    return Boolean(exportNode?.compareDocumentPosition(editNode) & Node.DOCUMENT_POSITION_FOLLOWING);
+  });
+  expect(exportComesBeforeEdit).toBe(true);
+  await exportButton.click();
   const modal = page.locator('#actionPlanZoneExportModal');
   await expect(modal).toBeVisible();
   const output = modal.locator('#actionPlanZoneExportOutput');
   await expect(output).toHaveValue([
+    "// --- 标普500 ---",
+    "",
+    "// 支撑位",
+    "draw_zone('SPX,ES1!,ES', 7350, 7310, '支撑: 7310-7350 (小)')",
+    "draw_zone('SPX,ES1!,ES', 7250, 7200, '支撑: 7200-7250 (强) 防守')",
+    "",
+    "// 负伽马位 (关键破位点)",
+    "// 给它稍微加了2个点的厚度，并在图表上强制显示为醒目的红色",
+    "draw_zone('SPX,ES1!,ES', 6476, 6474, '负伽马: 6475 (破位大抛压)', color.new(color.red, 50), color.red)",
+    "",
+    "// 加速下跌位 (关键破位点)",
+    "// 给它稍微加了2个点的厚度，并在图表上强制显示为醒目的红色",
+    "draw_zone('SPX,ES1!,ES', 7621, 7619, '加速下跌: 7620 (跌破加速卖出)', color.new(color.red, 50), color.red)",
+    "draw_zone('SPX,ES1!,ES', 7357, 7355, '加速下跌: 7356 (跌破加速卖出)', color.new(color.red, 50), color.red)",
+    "draw_zone('SPX,ES1!,ES', 6885, 6883, '加速下跌: 6884 (跌破加速卖出)', color.new(color.red, 50), color.red)",
+    "",
+    "// QQQ 的压力支持",
+    "draw_zone('QQQ', 734, 744, '压力: 734-744 (小)')",
+    "draw_zone('QQQ', 693, 724, '压力: 693-724 (强) 注意反弹承压')",
+    "draw_zone('QQQ', 671, 681, '支撑: 671-681 (小)')",
+    "",
+    "// MSFT 的压力支持",
+    "draw_zone('MSFT', 397, 430, '压力: 397-430 (超强) 突破右侧')",
     "draw_zone('MSFT', 381, 392, '支撑: 381-392 (中) 长线')",
     "draw_zone('MSFT', 360, 375, '支撑: 360-375 (强)')",
-    "draw_zone('MSFT', 397, 430, '压力: 397-430 (超强) 突破右侧')",
+    "",
+    "// AVGO 的压力支持",
     "draw_zone('AVGO', 392.25, 433.5, '支撑: 392.25-433.5 反向小数区间')",
   ].join('\n'));
   await expect(output).not.toHaveValue(/无法解析/);
+  await expect(output).not.toHaveValue(/600-620/);
+  await expect(output).not.toHaveValue(/7500-7550/);
+  await expect(output).not.toHaveValue(/7000-7100/);
+  await expect(modal.locator('#actionPlanZoneExportSummary')).toContainText('4 个标的、13 个区间');
   await expect(modal.getByRole('button', { name: '复制' })).toBeEnabled();
 
   await page.setViewportSize({ width: 390, height: 844 });
@@ -151,8 +225,7 @@ test('action plan zone export shows an empty state when no range can be parsed',
   await filterReviewsByDate(page, EMPTY_EXPORT_DATE);
   const row = page.locator('#reviewsList tr', { hasText: EMPTY_EXPORT_DATE }).first();
   await row.getByRole('button', { name: /开始复盘|继续复盘|进入复盘|查看|编辑草稿/ }).click();
-  await page.getByText('个股操作', { exact: true }).click();
-  await page.getByRole('button', { name: '导出画线' }).click();
+  await page.locator('#exportActionPlanZonesBtn').click();
 
   const modal = page.locator('#actionPlanZoneExportModal');
   await expect(modal.locator('#actionPlanZoneExportEmpty')).toBeVisible();
@@ -190,7 +263,7 @@ test('account management exposes zone export for live action plans', async ({ pa
 
     await expect(page.locator('#actionPlanZoneExportModal')).toBeVisible();
     await expect(page.locator('#actionPlanZoneExportOutput')).toHaveValue(
-      /draw_zone\('LIVEZONE', 100, 110, '支撑: 100-110 \(中\) 观察'\)/,
+      /\/\/ LIVEZONE 的压力支持\ndraw_zone\('LIVEZONE', 100, 110, '支撑: 100-110 \(中\) 观察'\)/,
     );
   } finally {
     d1(`DELETE FROM account_live_action_plans WHERE symbol=${sqlQuote(symbol)};`);

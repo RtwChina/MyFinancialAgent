@@ -4,7 +4,7 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>My Financial Agent</title>
-    <link rel="stylesheet" href="/styles.css?v=20260610-zone-export-fix" />
+    <link rel="stylesheet" href="/styles.css?v=20260904-sp500-template" />
   </head>
   <body>
     <div class="shell">
@@ -156,8 +156,14 @@
           <div class="review-layout">
             <section class="panel wide">
               <div class="panel-header">
-                <h2>全量复盘列表</h2>
-                <button id="refreshReviewsBtn" class="ghost">刷新</button>
+                <div class="review-list-heading">
+                  <h2>全量复盘列表</h2>
+                  <p id="batchReviewStatus" class="review-batch-status muted hidden" role="status" aria-live="polite"></p>
+                </div>
+                <div class="panel-header-meta">
+                  <button id="completePendingReviewsBtn" class="secondary">复盘全部待处理</button>
+                  <button id="refreshReviewsBtn" class="ghost">刷新</button>
+                </div>
               </div>
               <form id="filtersForm" class="filters review-filters">
                 <label>
@@ -454,6 +460,7 @@
             <div class="action-bar">
               <span id="reviewStatusBadge" class="status-pill">编辑中</span>
               <div class="btn-row">
+                <button id="exportActionPlanZonesBtn" type="button" class="ghost">导出画线</button>
                 <span id="reviewActionGroup" class="btn-row">
                   <button id="saveDraftBtn" class="primary">保存</button>
                   <button id="initializeBtn" class="ghost">编辑</button>
@@ -535,7 +542,6 @@
                     <strong class="review-section-title">个股与资产操作计划</strong>
                     <small class="muted">每个标的一行，表格扫全局，下方编辑当前选中标的。</small>
                   </div>
-                  <button id="exportActionPlanZonesBtn" type="button" class="ghost compact-button">导出画线</button>
                 </div>
 
                 <div id="actionPlanAccountGroups" class="action-plan-account-groups"></div>
@@ -704,14 +710,17 @@
         <header class="action-plan-zone-export-head">
           <div>
             <h3>导出画线</h3>
-            <p class="muted">将当前操作计划里的支撑位、压力位转为 draw_zone 命令。</p>
+            <p id="actionPlanZoneExportDescription" class="muted">将当前操作计划里的压力位、支撑位转为 draw_zone 命令。</p>
           </div>
           <button id="closeActionPlanZoneExportBtn" type="button" class="ghost compact-button">关闭</button>
         </header>
         <div id="actionPlanZoneExportEmpty" class="empty-state hidden">当前没有可导出的支撑位或压力位区间。</div>
         <textarea id="actionPlanZoneExportOutput" rows="12" readonly spellcheck="false"></textarea>
         <footer class="action-plan-zone-export-footer">
-          <span id="actionPlanZoneExportCopyStatus" class="muted"></span>
+          <div class="action-plan-zone-export-meta">
+            <span id="actionPlanZoneExportSummary" class="muted"></span>
+            <span id="actionPlanZoneExportCopyStatus" class="muted"></span>
+          </div>
           <button id="copyActionPlanZoneExportBtn" type="button">复制</button>
         </footer>
       </div>
@@ -719,6 +728,6 @@
 
     <div id="actionPlanCellTooltip" class="action-plan-cell-tooltip hidden" role="tooltip"></div>
 
-    <script type="module" src="/app.js?v=20260610-zone-export-fix"></script>
+    <script type="module" src="/app.js?v=20260904-sp500-template"></script>
   </body>
 </html>

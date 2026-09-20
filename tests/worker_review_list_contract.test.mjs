@@ -10,14 +10,47 @@ import {
   buildReviewListItems,
   bucketEstimatedImpactPercent,
   deriveReviewDailyThesis,
+  getBatchReviewReadiness,
+  completeReview,
   getReviewBootstrap,
   normalizeReviewNoteBlocks,
+  parsePendingReviewLimit,
   parsePositionWeight,
   previousActionPlanSymbolKeysFromRows,
   resolveReviewNoteBlocksWithFallback,
 } from "../cloudflare/worker/src/index.js";
 
-function createBootstrapDb() {
+test("pending review limit supports an explicit all mode and bounds numeric requests", () => {
+  assert.equal(parsePendingReviewLimit(null), 10);
+  assert.equal(parsePendingReviewLimit("all"), null);
+  assert.equal(parsePendingReviewLimit("25"), 25);
+  assert.equal(parsePendingReviewLimit("0"), 1);
+  assert.equal(parsePendingReviewLimit("5000"), 500);
+  assert.equal(parsePendingReviewLimit("invalid"), 10);
+});
+
+test("batch review requires every mandatory review section before completion", () => {
+  const complete = getBatchReviewReadiness({
+    reviewer_news_notes: "今日主线明确。",
+    market_sentiment_blocks_json: JSON.stringify([{ title: "大盘", children: [] }]),
+    sector_rotation_blocks_json: JSON.stringify([{ title: "板块", children: [] }]),
+    action_plan_count: 1,
+  });
+  assert.deepEqual(complete, { ready: true, missingFields: [] });
+
+  const incomplete = getBatchReviewReadiness({
+    reviewer_news_notes: "已有新闻总结",
+    market_sentiment_blocks_json: null,
+    sector_rotation_blocks_json: "[]",
+    action_plan_count: 0,
+  });
+  assert.deepEqual(incomplete, {
+    ready: false,
+    missingFields: ["market", "rotation", "plan"],
+  });
+});
+
+function createBootstrapDb({ previousReview = null } = {}) {
   const batchCalls = [];
   const resultFor = (sql) => {
     if (sql.includes("FROM investment_accounts ORDER BY")) {
@@ -44,7 +77,12 @@ function createBootstrapDb() {
       return { results: [{ k_date: "2026-08-05" }, { k_date: "2026-08-04" }] };
     }
     if (sql.includes("FROM daily_news_ai_analysis")) return { results: [] };
-    if (sql.includes("archive_date < ? AND review_status = 'reviewed'")) return { results: [] };
+    if (sql.includes("AS market_sentiment_blocks_json") && sql.includes("AS sector_rotation_blocks_json")) {
+      return { results: [previousReview || {
+        market_sentiment_blocks_json: null,
+        sector_rotation_blocks_json: null,
+      }] };
+    }
     if (sql.includes("FROM daily_review_action_plans p")) return { results: [] };
     if (sql.includes("FROM review_account_snapshots")) {
       return { results: [{
@@ -245,6 +283,23 @@ test("review bootstrap uses batched read stages and reuses its account snapshot"
   assert.deepEqual(result.account_impact_summary, result.accountImpactSummary);
 });
 
+test("review bootstrap can fall back to independently selected nonempty market and rotation notes", async () => {
+  const DB = createBootstrapDb({
+    previousReview: {
+      market_sentiment_blocks_json: JSON.stringify([{ title: "更早的大盘内容" }]),
+      sector_rotation_blocks_json: JSON.stringify([{ title: "较近的板块内容" }]),
+    },
+  });
+  const result = await getReviewBootstrap({ DB }, "2026-08-05");
+
+  assert.equal(result.structuredNotes.marketSentiment.blocks[0].title, "更早的大盘内容");
+  assert.equal(result.structuredNotes.sectorRotation.blocks[0].title, "较近的板块内容");
+  const fallbackStatement = DB.batchCalls[0][5];
+  assert.equal(fallbackStatement.params.length, 2);
+  assert.equal(fallbackStatement.sql.includes("LENGTH(TRIM(COALESCE(market_sentiment_blocks_json"), true);
+  assert.equal(fallbackStatement.sql.includes("LENGTH(TRIM(COALESCE(sector_rotation_blocks_json"), true);
+});
+
 test("review list reuses the joined account snapshot without per-row database reads", async () => {
   const env = {
     DB: {
@@ -325,4 +380,46 @@ test("empty initialized review notes prefer previous saved structured notes", ()
   assert.equal(resolved.source, "saved");
   assert.equal(resolved.blocks[0].title, "标普500点位");
   assert.equal(resolved.blocks[0].children[0].title, "CTA流动性");
+});
+
+
+test("batch completion protects the newest record even when it is already reviewed", async () => {
+  const DB = { prepare(sql) {
+    assert.match(sql, /SELECT MAX/);
+    return { first: async () => ({ latest: "2026-05-12" }) };
+  } };
+  const result = await completeReview({ DB }, "2026-05-12", { completionSource: "batch" });
+  assert.equal(result.skipped, true);
+  assert.equal(result.reason, "reserved review date");
+});
+
+test("batch autofill preserves drafts and explicit empty blocks before archiving; failures stay pending", async () => {
+  const writes = [];
+  const DB = { prepare(sql) {
+    let values = [];
+    return {
+      bind(...args) { values = args; return this; },
+      async first() {
+        if (sql.includes("SELECT MAX")) return { latest: "2026-05-12" };
+        return { review_status: "draft", reviewer_news_notes: "自己的新闻点评",
+          trading_summary: "自己的深度总结", market_sentiment_blocks_json: "[]",
+          sector_rotation_blocks_json: null };
+      },
+      async run() { writes.push({ sql, values }); },
+      async all() { throw new Error("模拟新闻归档失败"); },
+    };
+  } };
+  await assert.rejects(completeReview({ DB }, "2026-05-08", {
+    completionSource: "batch", autoFill: {
+      reviewerNewsNotes: "AI 总结",
+      marketSentimentBlocks: [{ title: "旧大盘", children: [] }],
+      sectorRotationBlocks: [{ title: "旧板块", children: [] }],
+    },
+  }), /模拟新闻归档失败/);
+  assert.equal(writes.length, 1);
+  assert.equal(writes[0].values[1], "draft");
+  assert.equal(writes[0].values[2], "自己的新闻点评");
+  assert.equal(writes[0].values[3], "[]");
+  assert.equal(JSON.parse(writes[0].values[4])[0].title, "旧板块");
+  assert.equal(writes[0].values[5], "自己的深度总结");
 });

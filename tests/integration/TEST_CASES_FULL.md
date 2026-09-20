@@ -138,6 +138,7 @@
 | API-034 | Worker | Yahoo 验价成功 | Yahoo 代码有效 | `POST /api/symbols/validate` body={yahoo_symbol:"MU"} | 返回 `{valid:true,latestPrice,change}` | P1 |
 | API-035 | Worker | Yahoo 验价失败 | 代码不存在 | `POST /api/symbols/validate` body={yahoo_symbol:"INVALID999"} | 返回 `{valid:false,error}` | P2 |
 | API-036 | Worker | bootstrap pricesByType 分组 | tracked_symbols 有数据且 stock_raw 有价格 | `GET /api/reviews/:date/bootstrap` | 返回 `prices` 为 `{usStock:[],cnStock:[],sector:[],index:[]}` 对象，兼容字段 `stock` 包含全部个股 | P1 |
+| API-037 | Worker | 获取全部待复盘日 | 存在超过 10 个已收盘且未完成的复盘日 | `GET /api/reviews/pending?limit=all` | 返回全部未完成日期；排除 `reviewed/completed`；不受默认 10 条限制 | P1 |
 
 ### H. 前端 Web（News + Review Workspace）
 
@@ -175,6 +176,8 @@
 | WEB-030 | `web/app.js` | 复盘价格四段折叠 | bootstrap 有 pricesByType 数据 | 打开复盘抽屉 | 大盘/板块/美股个股/大A个股四段 details 各自显示，默认展开，折叠后显示摘要条 | P1 |
 | WEB-031 | `web/app.js` | 价格区 AI 解读 | sector_impact_map 含 [大盘]/[板块]/[个股] 标记 | 打开复盘抽屉 | 每段价格区块内显示对应 AI 解读 | P1 |
 | WEB-032 | `web/app.js` | 价格折叠状态持久化 | 已折叠某段 | 关闭再打开复盘 | 折叠状态与上次一致（localStorage） | P2 |
+| WEB-033 | `web/app.js` | 历史待复盘日自动回填 | pending API 返回乱序日期和 latestArchiveDate | 点击“复盘全部待处理”并确认 | 排除最新日期；按日期读取 bootstrap、自动回填并完成；已有内容保留；失败不阻断后续日期 | P1 |
+| WEB-034 | `web/zone-export.js`、`web/app.js` | 复盘压力支撑合并导出 | 大盘“标普500点位”含支撑、负伽马及 CTA 加速卖出点；轮动块与操作计划均含压力/支撑区间，且存在普通分析段落 | 点击复盘顶部“导出画线” | 标普固定输出 `// --- 标普500 ---` 和 `SPX,ES1!,ES`，支撑高低点顺序正确，负伽马/加速下跌为红色 2 点窄区间；其余按标的输出；压力在前、支撑在后；普通段落不解析；按钮位于“编辑”左侧 | P1 |
 
 ### I. 交易日与时区逻辑
 

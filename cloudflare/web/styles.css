@@ -471,6 +471,30 @@ h3 {
   flex-wrap: wrap;
 }
 
+.review-list-heading {
+  min-width: 0;
+}
+
+.review-batch-status {
+  margin: 5px 0 0;
+  font-size: 0.82rem;
+  line-height: 1.45;
+}
+
+.review-batch-status.is-success {
+  color: #047857;
+}
+
+.review-batch-status.is-error {
+  color: #b42318;
+}
+
+#completePendingReviewsBtn:disabled {
+  cursor: wait;
+  opacity: 0.68;
+  transform: none;
+}
+
 .panel-link-button {
   min-height: 44px;
   display: inline-flex;
@@ -1705,6 +1729,7 @@ textarea {
 .review-modal.review-loading #editorContent,
 .review-modal.review-loading .review-modal-footer,
 .review-modal.review-loading #reviewActionGroup,
+.review-modal.review-loading #exportActionPlanZonesBtn,
 .review-modal.review-loading #reviewStatusBadge {
   display: none;
 }
@@ -3558,6 +3583,13 @@ textarea[name="reviewerNewsNotes"] {
   justify-content: flex-end;
 }
 
+.action-plan-zone-export-meta {
+  display: grid;
+  gap: 2px;
+  margin-right: auto;
+  font-size: 0.78rem;
+}
+
 .action-plan-detail-backdrop {
   position: absolute;
   inset: 0;
@@ -4305,6 +4337,8 @@ textarea[name="reviewerNewsNotes"] {
 
 .topbar .action-bar .btn-row {
   display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
   gap: 8px;
 }
 

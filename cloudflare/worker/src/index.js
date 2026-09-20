@@ -271,11 +271,11 @@ async function handleApi(request, env, url, appEnv) {
       }
       if (!action && request.method === "POST") {
         const body = await request.json();
-        return json(await saveReviewDraft(env, archiveDate, body), 200, request);
+        return json(await withReviewTimings(env, (timedEnv) => saveReviewDraft(timedEnv, archiveDate, body)), 200, request);
       }
       if (action === "complete" && request.method === "POST") {
         const body = await request.json().catch(() => ({}));
-        return json(await completeReview(env, archiveDate, body), 200, request);
+        return json(await withReviewTimings(env, (timedEnv) => completeReview(timedEnv, archiveDate, body)), 200, request);
       }
       if (action === "snapshot" && request.method === "POST") {
         const body = await request.json().catch(() => ({}));
@@ -658,31 +658,40 @@ async function getFilterLogs(env, url) {
 }
 
 async function getPendingReviews(env, url) {
-  const limit = Number(url.searchParams.get("limit") || "10");
+  const limit = parsePendingReviewLimit(url.searchParams.get("limit"));
   const latestClosedDate = await getLatestClosedNyseTradingDay(env);
   if (!latestClosedDate) {
     return { items: [], latestClosedDate: null };
   }
 
-  const archiveRows = await env.DB.prepare(
-    `SELECT archive_date, review_status, updated_at
+  let query = `SELECT archive_date, review_status, updated_at
      FROM daily_review_archive
      WHERE archive_date <= ?
-       AND COALESCE(review_status, 'initialized') != 'reviewed'
-     ORDER BY archive_date DESC
-     LIMIT ?`,
-  )
-    .bind(latestClosedDate, limit)
-    .all();
+       AND COALESCE(review_status, 'initialized') NOT IN ('reviewed', 'completed')
+     ORDER BY archive_date DESC`;
+  if (limit !== null) query += " LIMIT ?";
+  const statement = env.DB.prepare(query);
+  const archiveRows = limit === null
+    ? await statement.bind(latestClosedDate).all()
+    : await statement.bind(latestClosedDate, limit).all();
 
   return {
     latestClosedDate,
+    latestArchiveDate: await getLatestArchiveDate(env),
     items: (archiveRows.results || []).map((row) => ({
       archiveDate: row.archive_date,
       reviewStatus: normalizeReviewStatus(row.review_status),
       updatedAt: row.updated_at || null,
     })),
   };
+}
+
+function parsePendingReviewLimit(rawValue) {
+  const normalized = String(rawValue ?? "").trim().toLowerCase();
+  if (normalized === "all") return null;
+  const parsed = Number(normalized || "10");
+  if (!Number.isFinite(parsed)) return 10;
+  return Math.min(Math.max(Math.floor(parsed), 1), 500);
 }
 
 async function getNewsHashes(env, url) {
@@ -1052,6 +1061,19 @@ function resolveReviewNoteBlocksWithFallback(primary, fallback, jsonKey, prefix)
   return resolveReviewNoteBlocks(fallback, jsonKey, prefix);
 }
 
+function getBatchReviewReadiness(record = {}) {
+  const missingFields = [];
+  if (!String(record.reviewer_news_notes || "").trim()) missingFields.push("news");
+  if (!normalizeReviewNoteBlocks(record.market_sentiment_blocks_json, "market").length) {
+    missingFields.push("market");
+  }
+  if (!normalizeReviewNoteBlocks(record.sector_rotation_blocks_json, "rotation").length) {
+    missingFields.push("rotation");
+  }
+  if (Number(record.action_plan_count || 0) <= 0) missingFields.push("plan");
+  return { ready: missingFields.length === 0, missingFields };
+}
+
 function pickSubmittedReviewNoteBlocks(body, camelKey, snakeKey) {
   if (Array.isArray(body?.[camelKey])) return body[camelKey];
   if (Array.isArray(body?.[snakeKey])) return body[snakeKey];
@@ -1356,12 +1378,24 @@ async function getReviewBootstrap(env, archiveDate) {
     ).bind(archiveDate),
     env.DB.prepare(`SELECT * FROM daily_news_ai_analysis WHERE analysis_date = ? LIMIT 1`).bind(archiveDate),
     env.DB.prepare(
-      `SELECT archive_date, reviewer_news_notes, market_sentiment_blocks_json, sector_rotation_blocks_json
-       FROM daily_review_archive
-       WHERE archive_date < ? AND review_status = 'reviewed'
-       ORDER BY archive_date DESC
-       LIMIT 1`,
-    ).bind(archiveDate),
+      `SELECT
+         (SELECT market_sentiment_blocks_json
+          FROM daily_review_archive
+          WHERE archive_date < ?
+            AND review_status = 'reviewed'
+            AND LENGTH(TRIM(COALESCE(market_sentiment_blocks_json, ''))) > 2
+            AND LOWER(TRIM(market_sentiment_blocks_json)) != 'null'
+          ORDER BY archive_date DESC
+          LIMIT 1) AS market_sentiment_blocks_json,
+         (SELECT sector_rotation_blocks_json
+          FROM daily_review_archive
+          WHERE archive_date < ?
+            AND review_status = 'reviewed'
+            AND LENGTH(TRIM(COALESCE(sector_rotation_blocks_json, ''))) > 2
+            AND LOWER(TRIM(sector_rotation_blocks_json)) != 'null'
+          ORDER BY archive_date DESC
+          LIMIT 1) AS sector_rotation_blocks_json`,
+    ).bind(archiveDate, archiveDate),
     env.DB.prepare(
       `SELECT p.*, a.name AS account_name, a.currency AS account_currency,
           a.sort_order AS account_sort_order, a.enabled AS account_enabled
@@ -1973,20 +2007,32 @@ async function upsertReviewAccountSnapshot(env, archiveDate, snapshotInput = {},
   return getReviewAccountSnapshot(env, archiveDate);
 }
 
+// D1 的每次 batch 是一次网络往返；分块上限沿用测试基建中已对远程库验证过的值。
+const D1_MAX_BATCH_STATEMENTS = 50;
+
+async function runWriteBatches(env, statements) {
+  for (let index = 0; index < statements.length; index += D1_MAX_BATCH_STATEMENTS) {
+    await env.DB.batch(statements.slice(index, index + D1_MAX_BATCH_STATEMENTS));
+  }
+}
+
 async function syncInvestmentAccountsFromSnapshot(env, snapshot) {
   const accounts = snapshot?.accounts || [];
   const now = isoNow();
-  for (const account of accounts) {
-    if (!account.accountId) continue;
-    if (account.totalAssets == null && account.availableCash == null) continue;
-    await env.DB.prepare(
-      `UPDATE investment_accounts
+  const writeStatement = env.DB.prepare(
+    `UPDATE investment_accounts
        SET total_assets = COALESCE(?, total_assets),
            available_cash = COALESCE(?, available_cash),
            updated_at = ?
        WHERE id = ?`,
-    ).bind(account.totalAssets, account.availableCash, now, account.accountId).run();
+  );
+  const statements = [];
+  for (const account of accounts) {
+    if (!account.accountId) continue;
+    if (account.totalAssets == null && account.availableCash == null) continue;
+    statements.push(writeStatement.bind(account.totalAssets, account.availableCash, now, account.accountId));
   }
+  await runWriteBatches(env, statements);
 }
 
 async function ensureDefaultInvestmentAccounts(env) {
@@ -2699,9 +2745,8 @@ async function replaceAccountLiveActionPlans(env, actionPlans) {
     normalized.push({ ...plan, sortOrder: normalized.length });
   }
   const now = isoNow();
-  for (const plan of normalized) {
-    await env.DB.prepare(
-      `INSERT INTO account_live_action_plans (
+  const writeStatement = env.DB.prepare(
+    `INSERT INTO account_live_action_plans (
         account_id, symbol, action_type, entry_plan, take_profit_plan,
         stop_loss_plan, key_levels, support_levels, resistance_levels,
         current_position, position_amount, thinking, sort_order, market_type, created_at, updated_at
@@ -2720,34 +2765,35 @@ async function replaceAccountLiveActionPlans(env, actionPlans) {
         market_type = excluded.market_type,
         sort_order = excluded.sort_order,
         updated_at = excluded.updated_at`,
-    ).bind(
-      plan.accountId,
-      plan.symbol,
-      plan.actionType,
-      plan.entryPlan,
-      plan.takeProfitPlan,
-      plan.stopLossPlan,
-      plan.keyLevels,
-      plan.supportLevels,
-      plan.resistanceLevels,
-      plan.currentPosition,
-      plan.positionAmount,
-      plan.thinking,
-      plan.sortOrder,
-      plan.marketType,
-      now,
-      now,
-    ).run();
-  }
+  );
+  const statements = normalized.map((plan) => writeStatement.bind(
+    plan.accountId,
+    plan.symbol,
+    plan.actionType,
+    plan.entryPlan,
+    plan.takeProfitPlan,
+    plan.stopLossPlan,
+    plan.keyLevels,
+    plan.supportLevels,
+    plan.resistanceLevels,
+    plan.currentPosition,
+    plan.positionAmount,
+    plan.thinking,
+    plan.sortOrder,
+    plan.marketType,
+    now,
+    now,
+  ));
   if (normalized.length) {
     const conditions = normalized.map(() => "(account_id = ? AND symbol = ?)").join(" OR ");
     const values = normalized.flatMap((plan) => [plan.accountId, plan.symbol]);
-    await env.DB.prepare(
+    statements.push(env.DB.prepare(
       `DELETE FROM account_live_action_plans WHERE NOT (${conditions})`,
-    ).bind(...values).run();
+    ).bind(...values));
   } else {
-    await env.DB.prepare(`DELETE FROM account_live_action_plans`).run();
+    statements.push(env.DB.prepare(`DELETE FROM account_live_action_plans`));
   }
+  await runWriteBatches(env, statements);
   return normalized;
 }
 
@@ -2764,9 +2810,8 @@ async function getAccountLiveActionPlanSymbolCatalog(env) {
 async function replaceReviewActionPlans(env, archiveDate, actionPlans) {
   const normalized = await resolveActionPlanAccountsForSave(env, normalizeActionPlansForSave(actionPlans));
   const now = isoNow();
-  for (const plan of normalized) {
-    await env.DB.prepare(
-      `INSERT INTO daily_review_action_plans (
+  const writeStatement = env.DB.prepare(
+    `INSERT INTO daily_review_action_plans (
         archive_date, account_id, symbol, action_type, entry_plan, take_profit_plan,
         stop_loss_plan, key_levels, support_levels, resistance_levels,
         current_position, position_amount, thinking, market_type, sort_order, created_at, updated_at
@@ -2785,46 +2830,41 @@ async function replaceReviewActionPlans(env, archiveDate, actionPlans) {
         market_type = excluded.market_type,
         sort_order = excluded.sort_order,
         updated_at = excluded.updated_at`,
-    )
-      .bind(
-        archiveDate,
-        plan.accountId,
-        plan.symbol,
-        plan.actionType,
-        plan.entryPlan,
-        plan.takeProfitPlan,
-        plan.stopLossPlan,
-        plan.keyLevels,
-        plan.supportLevels,
-        plan.resistanceLevels,
-        plan.currentPosition,
-        plan.positionAmount,
-        plan.thinking,
-        plan.marketType,
-        plan.sortOrder,
-        now,
-        now,
-      )
-      .run();
-  }
+  );
+  const statements = normalized.map((plan) => writeStatement.bind(
+    archiveDate,
+    plan.accountId,
+    plan.symbol,
+    plan.actionType,
+    plan.entryPlan,
+    plan.takeProfitPlan,
+    plan.stopLossPlan,
+    plan.keyLevels,
+    plan.supportLevels,
+    plan.resistanceLevels,
+    plan.currentPosition,
+    plan.positionAmount,
+    plan.thinking,
+    plan.marketType,
+    plan.sortOrder,
+    now,
+    now,
+  ));
 
   if (normalized.length) {
     const conditions = normalized.map(() => "(account_id = ? AND symbol = ?)").join(" OR ");
     const values = normalized.flatMap((plan) => [plan.accountId, plan.symbol]);
-    await env.DB.prepare(
+    statements.push(env.DB.prepare(
       `DELETE FROM daily_review_action_plans
        WHERE archive_date = ?
          AND NOT (${conditions})`,
-    )
-      .bind(archiveDate, ...values)
-      .run();
+    ).bind(archiveDate, ...values));
   } else {
-    await env.DB.prepare(
+    statements.push(env.DB.prepare(
       `DELETE FROM daily_review_action_plans WHERE archive_date = ?`,
-    )
-      .bind(archiveDate)
-      .run();
+    ).bind(archiveDate));
   }
+  await runWriteBatches(env, statements);
 
   await updateLegacyAssetPlanSummaryIfPresent(env, archiveDate, normalized);
   return normalized;
@@ -2876,7 +2916,38 @@ function normalizeReviewAnalysis(analysis, newsItems) {
   };
 }
 
+// Request-local diagnostic state; never stores review content or account values.
+async function withReviewTimings(env, operation) {
+  const timing = { runId: crypto.randomUUID(), stages: [], current: null };
+  const timedEnv = { ...env, reviewTiming: timing };
+  let success = false;
+  try {
+    const result = await operation(timedEnv);
+    success = true;
+    return result;
+  } finally {
+    beginReviewStage(timedEnv, null);
+    if (env.APP_ENV === "prod") {
+      try { console.info(JSON.stringify({ event: "review_timing", runId: timing.runId, success, stages: timing.stages })); }
+      catch { /* Diagnostics must not change a business result. */ }
+    }
+  }
+}
+
+function beginReviewStage(env, stage, itemCount = null) {
+  const timing = env.reviewTiming;
+  if (!timing) return;
+  const now = performance.now();
+  if (timing.current) timing.stages.push({
+    stage: timing.current.stage,
+    durationMs: Math.round((now - timing.current.start) * 100) / 100,
+    ...(timing.current.itemCount == null ? {} : { itemCount: timing.current.itemCount }),
+  });
+  timing.current = stage ? { stage, start: now, itemCount } : null;
+}
+
 async function saveReviewDraft(env, archiveDate, body) {
+  beginReviewStage(env, "save.validate");
   const existing = await env.DB.prepare(
     `SELECT review_status FROM daily_review_archive WHERE archive_date = ? LIMIT 1`,
   )
@@ -2912,6 +2983,7 @@ async function saveReviewDraft(env, archiveDate, body) {
   const marketBlocksJson = marketBlocks ? JSON.stringify(marketBlocks) : null;
   const sectorBlocksJson = sectorBlocks ? JSON.stringify(sectorBlocks) : null;
 
+  beginReviewStage(env, "save.draft");
   await env.DB.prepare(
     `INSERT INTO daily_review_archive (
       archive_date, review_status, reviewer_news_notes, market_sentiment_blocks_json,
@@ -2946,8 +3018,10 @@ async function saveReviewDraft(env, archiveDate, body) {
 
   let syncedToLive = false;
   if (hasStructuredActionPlans) {
+    beginReviewStage(env, "save.daily_plans", resolvedActionPlans.length);
     const normalizedFromDaily = await replaceReviewActionPlans(env, archiveDate, resolvedActionPlans);
     if (await isLatestArchiveDate(env, archiveDate)) {
+      beginReviewStage(env, "save.live_plans", normalizedFromDaily.length);
       await replaceAccountLiveActionPlans(env, normalizedFromDaily);
       syncedToLive = true;
     }
@@ -2965,29 +3039,70 @@ async function saveReviewDraft(env, archiveDate, body) {
 }
 
 async function completeReview(env, archiveDate, body = {}) {
+  beginReviewStage(env, "complete.guard");
+  if (body.completionSource === "batch") {
+    const latestArchiveDate = await getLatestArchiveDate(env);
+    const latestClosedDate = await getLatestClosedNyseTradingDay(env);
+    if (archiveDate === latestArchiveDate || !latestClosedDate || archiveDate > latestClosedDate) {
+      return { ok: true, skipped: true, reason: "reserved review date", archiveDate };
+    }
+    body = { ...body, onlyIfPending: true };
+  }
   const existing = await env.DB.prepare(
-    `SELECT archive_date FROM daily_review_archive WHERE archive_date = ? LIMIT 1`,
+    `SELECT archive_date, review_status, reviewer_news_notes, trading_summary,
+       market_sentiment_blocks_json, sector_rotation_blocks_json,
+       (SELECT COUNT(*) FROM daily_review_action_plans plans
+        WHERE plans.archive_date = daily_review_archive.archive_date) AS action_plan_count
+     FROM daily_review_archive
+     WHERE archive_date = ?
+     LIMIT 1`,
   )
     .bind(archiveDate)
     .first();
 
-  if (!existing) {
-    await env.DB.prepare(
-      `INSERT INTO daily_review_archive (archive_date, review_status, reviewed_at, updated_at)
-       VALUES (?, 'reviewed', ?, ?)`,
-    )
-      .bind(archiveDate, isoNow(), isoNow())
-      .run();
-  } else {
-    await env.DB.prepare(
-      `UPDATE daily_review_archive
-       SET review_status = 'reviewed', reviewed_at = ?, updated_at = ?
-       WHERE archive_date = ?`,
-    )
-      .bind(isoNow(), isoNow(), archiveDate)
-      .run();
+  if (body.onlyIfPending && !existing) {
+    return { ok: true, skipped: true, reason: "review not found", archiveDate };
+  }
+  if (body.onlyIfPending && normalizeReviewStatus(existing?.review_status) === "reviewed") {
+    return { ok: true, skipped: true, reason: "already reviewed", archiveDate, reviewStatus: "reviewed" };
+  }
+  if (body.completionSource === "batch" && body.autoFill && existing) {
+    beginReviewStage(env, "complete.autofill");
+    // Persist the same defaults shown by the editor; saved fields (including []) win.
+    await saveReviewDraft(env, archiveDate, {
+      reviewStatus: existing.review_status,
+      reviewerNewsNotes: existing.reviewer_news_notes || body.autoFill.reviewerNewsNotes || "",
+      tradingSummary: existing.trading_summary || "",
+      marketSentimentBlocks: resolveReviewNoteBlocksWithFallback(existing, {
+        market_sentiment_blocks_json: JSON.stringify(body.autoFill.marketSentimentBlocks || []),
+      }, "market_sentiment_blocks_json", "market").blocks,
+      sectorRotationBlocks: resolveReviewNoteBlocksWithFallback(existing, {
+        sector_rotation_blocks_json: JSON.stringify(body.autoFill.sectorRotationBlocks || []),
+      }, "sector_rotation_blocks_json", "rotation").blocks,
+    });
+  }
+  if (body.requireCompleteContent && existing) {
+    const readiness = getBatchReviewReadiness(existing);
+    if (!readiness.ready) {
+      return {
+        ok: true,
+        skipped: true,
+        reason: "incomplete review",
+        archiveDate,
+        reviewStatus: normalizeReviewStatus(existing.review_status),
+        missingFields: readiness.missingFields,
+      };
+    }
   }
 
+  if (!existing) {
+    await env.DB.prepare(
+      `INSERT INTO daily_review_archive (archive_date, review_status, updated_at)
+       VALUES (?, 'initialized', ?)`,
+    ).bind(archiveDate, isoNow()).run();
+  }
+
+  beginReviewStage(env, "complete.news");
   const newsWindow = await getNewsWindowForDate(env, archiveDate);
   const analysis = await env.DB.prepare(
     `SELECT source_news_ids FROM daily_news_ai_analysis WHERE analysis_date = ? LIMIT 1`,
@@ -3048,13 +3163,9 @@ async function completeReview(env, archiveDate, body = {}) {
       .all();
   }
 
-  await env.DB.prepare(`DELETE FROM daily_review_archive_news WHERE archive_date = ?`)
-    .bind(archiveDate)
-    .run();
-
-  for (const item of archiveRows.results || []) {
-    await env.DB.prepare(
-      `INSERT INTO daily_review_archive_news (
+  const archivedAt = isoNow();
+  const archiveNewsStatement = env.DB.prepare(
+    `INSERT INTO daily_review_archive_news (
         archive_date, original_news_id, pub_date, title, content, url, source, type,
         rule_passed, rule_reason, processing_status, ai_summary, market_impact,
         importance_stars, related_symbols, news_hash, archived_at
@@ -3076,36 +3187,48 @@ async function completeReview(env, archiveDate, body = {}) {
         related_symbols = excluded.related_symbols,
         news_hash = excluded.news_hash,
         archived_at = excluded.archived_at`,
-    )
-      .bind(
-        archiveDate,
-        item.id || null,
-        item.pub_date || null,
-        item.title || "",
-        item.content || "",
-        item.url || "",
-        item.source || "",
-        normalizeCanonicalNewsType(item.type),
-        item.rule_passed ? 1 : 0,
-        item.rule_reason || "",
-        item.processing_status || "",
-        item.ai_summary || "",
-        item.market_impact || "",
-        Number(item.importance_stars || 0),
-        item.related_symbols || "[]",
-        item.news_hash || null,
-        isoNow(),
-      )
-      .run();
-  }
+  );
+  const archiveStatements = [
+    env.DB.prepare(`DELETE FROM daily_review_archive_news WHERE archive_date = ?`).bind(archiveDate),
+    ...(archiveRows.results || []).map((item) => archiveNewsStatement.bind(
+      archiveDate,
+      item.id || null,
+      item.pub_date || null,
+      item.title || "",
+      item.content || "",
+      item.url || "",
+      item.source || "",
+      normalizeCanonicalNewsType(item.type),
+      item.rule_passed ? 1 : 0,
+      item.rule_reason || "",
+      item.processing_status || "",
+      item.ai_summary || "",
+      item.market_impact || "",
+      Number(item.importance_stars || 0),
+      item.related_symbols || "[]",
+      item.news_hash || null,
+      archivedAt,
+    )),
+  ];
+  await runWriteBatches(env, archiveStatements);
 
   const snapshotInput = body.accountSnapshot || body.account_snapshot || {};
+  beginReviewStage(env, "complete.impact");
   const accountImpactSummary = await buildEstimatedAccountImpactSummary(env, archiveDate);
+  beginReviewStage(env, "complete.snapshot");
   const accountSnapshot = await upsertReviewAccountSnapshot(env, archiveDate, snapshotInput, {
-    snapshotSource: "manual_review",
+    snapshotSource: body.completionSource === "batch" ? "batch_review" : "manual_review",
     accountImpactSummary,
   });
+  beginReviewStage(env, "complete.accounts", accountSnapshot?.accounts?.length || 0);
   await syncInvestmentAccountsFromSnapshot(env, accountSnapshot);
+
+  beginReviewStage(env, "complete.status");
+  await env.DB.prepare(
+    `UPDATE daily_review_archive
+     SET review_status = 'reviewed', reviewed_at = ?, updated_at = ?
+     WHERE archive_date = ?`,
+  ).bind(isoNow(), isoNow(), archiveDate).run();
 
   return { ok: true, archiveDate, reviewStatus: "reviewed", accountSnapshot, accountImpactSummary };
 }
@@ -3794,8 +3917,11 @@ export {
   buildReviewListItems,
   bucketEstimatedImpactPercent,
   deriveReviewDailyThesis,
+  completeReview,
+  getBatchReviewReadiness,
   getReviewBootstrap,
   normalizeReviewNoteBlocks,
+  parsePendingReviewLimit,
   parsePositionWeight,
   previousActionPlanSymbolKeysFromRows,
   resolveReviewNoteBlocksWithFallback,
