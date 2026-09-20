@@ -1754,6 +1754,42 @@ textarea {
   to { transform: rotate(360deg); }
 }
 
+.review-submitting-state {
+  position: absolute;
+  inset: 0;
+  z-index: 6;
+  display: grid;
+  place-items: center;
+  background: rgba(248, 250, 252, 0.6);
+  backdrop-filter: blur(2px);
+}
+
+.review-submitting-card {
+  display: grid;
+  grid-template-columns: auto minmax(0, 320px);
+  align-items: center;
+  gap: 14px;
+  padding: 18px 22px;
+  border-radius: 16px;
+  border: 1px solid rgba(15, 23, 42, 0.1);
+  background: #fff;
+  box-shadow: 0 18px 44px rgba(15, 23, 42, 0.18);
+}
+
+.review-submitting-card > div {
+  display: grid;
+  gap: 4px;
+}
+
+.review-submitting-card strong {
+  font-size: 1rem;
+}
+
+.review-submitting-card small {
+  color: var(--muted);
+  line-height: 1.55;
+}
+
 .review-panel-header {
   display: block;
   margin-bottom: 12px;
@@ -3600,12 +3636,13 @@ textarea[name="reviewerNewsNotes"] {
 .action-plan-detail-panel {
   position: relative;
   z-index: 1;
+  --detail-panel-pad: 18px;
   display: grid;
   gap: 14px;
   width: min(1120px, calc(100vw - 48px));
   max-height: calc(100vh - 48px);
   overflow: auto;
-  padding: 18px;
+  padding: var(--detail-panel-pad);
   border-radius: 22px;
   border: 1px solid rgba(15, 23, 42, 0.1);
   background: rgba(255, 255, 255, 0.98);
@@ -3640,7 +3677,14 @@ textarea[name="reviewerNewsNotes"] {
 }
 
 .action-plan-detail-footer {
+  position: sticky;
+  bottom: calc(var(--detail-panel-pad) * -1);
+  z-index: 2;
   justify-content: flex-end;
+  margin: 0 calc(var(--detail-panel-pad) * -1) calc(var(--detail-panel-pad) * -1);
+  padding: 12px var(--detail-panel-pad) var(--detail-panel-pad);
+  border-top: 1px solid rgba(15, 23, 42, 0.08);
+  background: #fff;
 }
 
 .action-plan-cell-text {
@@ -5082,9 +5126,10 @@ textarea[name="reviewerNewsNotes"] {
   }
 
   .action-plan-detail-panel {
+    --detail-panel-pad: 14px;
     width: calc(100vw - 24px);
     max-height: calc(100vh - 24px);
-    padding: 14px;
+    padding: var(--detail-panel-pad);
   }
 
   .action-plan-detail-head,

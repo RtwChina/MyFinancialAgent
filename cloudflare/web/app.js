@@ -97,6 +97,7 @@ const state = {
   newsFilters: null,
   reviewStep: "news",
   reviewStatus: "initialized",
+  reviewSubmitting: false,
   editMode: false,
   reviewNoteBlocks: {
     marketSentiment: [],
@@ -408,6 +409,7 @@ const reviewStepNav = document.querySelector("#reviewStepNav");
 const reviewStepHint = document.querySelector("#reviewStepHint");
 const reviewOutline = document.querySelector("#reviewOutline");
 const reviewLoadingState = document.querySelector("#reviewLoadingState");
+const reviewSubmittingState = document.querySelector("#reviewSubmittingState");
 const reviewLoadingTitle = document.querySelector("#reviewLoadingTitle");
 const reviewLoadingDetail = document.querySelector("#reviewLoadingDetail");
 const saveDraftBtn = document.querySelector("#saveDraftBtn");
@@ -1086,6 +1088,22 @@ function finishReviewDrawerLoading() {
   reviewLoadingState?.classList.add("hidden");
 }
 
+function setReviewSubmitting(submitting) {
+  state.reviewSubmitting = submitting;
+  reviewSubmittingState?.classList.toggle("hidden", !submitting);
+  if (submitting) {
+    prevStepBtn.disabled = true;
+    nextStepBtn.disabled = true;
+    nextStepBtn.textContent = "提交中…";
+  } else {
+    setReviewStep();
+  }
+}
+
+function scrollReviewsListIntoView() {
+  reviewsList?.closest(".review-table-wrap")?.scrollIntoView({ behavior: "smooth", block: "center" });
+}
+
 async function ensureActionPlanSymbolCatalog(archiveDate = state.activeDate) {
   if (!archiveDate) return state.actionPlanSymbolCatalog || [];
   if (actionPlanSymbolCatalogCache.has(archiveDate)) {
@@ -1221,6 +1239,7 @@ async function openReviewDrawer(archiveDate, options = {}) {
 }
 
 function closeDrawer() {
+  if (state.reviewSubmitting) return;
   reviewOpenSequence += 1;
   reviewOpenController?.abort();
   reviewOpenController = null;
@@ -3623,9 +3642,15 @@ function setReviewStep(stepKey = null) {
   // 已复盘后 step-nav 已隐藏，没有"上方标记"可点，把提示也清掉
   reviewStepHint.textContent = reviewedMode ? "" : REVIEW_STEPS[index]?.hint || "";
   reviewStepHint.classList.toggle("hidden", reviewedMode || !reviewStepHint.textContent);
-  prevStepBtn.disabled = reviewedMode || index <= 0;
-  nextStepBtn.textContent = reviewedMode ? "已复盘" : index === REVIEW_STEPS.length - 1 ? "完成复盘" : "下一步";
-  nextStepBtn.disabled = reviewedMode;
+  prevStepBtn.disabled = state.reviewSubmitting || reviewedMode || index <= 0;
+  nextStepBtn.textContent = state.reviewSubmitting
+    ? "提交中…"
+    : reviewedMode
+      ? "已复盘"
+      : index === REVIEW_STEPS.length - 1
+        ? "完成复盘"
+        : "下一步";
+  nextStepBtn.disabled = state.reviewSubmitting || reviewedMode;
 }
 
 function moveReviewStep(delta) {
@@ -3635,41 +3660,48 @@ function moveReviewStep(delta) {
 }
 
 async function handleNextStep() {
+  if (state.reviewSubmitting) return;
   const currentIndex = REVIEW_STEPS.findIndex((step) => step.key === state.reviewStep);
   if (currentIndex === -1) return;
 
   if (!validateStep(REVIEW_STEPS[currentIndex])) return;
 
   if (currentIndex === REVIEW_STEPS.length - 1) {
-    const saved = await saveReview({ forCompletion: true });
+    setReviewSubmitting(true);
     try {
-      await fetchJson(`/api/reviews/${state.activeDate}/complete`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ accountSnapshot: collectAccountSnapshotPayload() }),
-      });
-    } catch (error) {
-      if (saved) {
-        // Restore the saved draft presentation omitted on the success path.
-        // Presentation failures must not replace the original completion error.
-        try {
-          renderActionPlans();
-          renderStructuredNoteEditors();
-          scheduleAccountImpactPreview(0);
-        } catch (presentationError) {
-          console.warn("Failed to restore saved review presentation", presentationError);
+      const saved = await saveReview({ forCompletion: true });
+      try {
+        await fetchJson(`/api/reviews/${state.activeDate}/complete`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ accountSnapshot: collectAccountSnapshotPayload() }),
+        });
+      } catch (error) {
+        if (saved) {
+          // Restore the saved draft presentation omitted on the success path.
+          // Presentation failures must not replace the original completion error.
+          try {
+            renderActionPlans();
+            renderStructuredNoteEditors();
+            scheduleAccountImpactPreview(0);
+          } catch (presentationError) {
+            console.warn("Failed to restore saved review presentation", presentationError);
+          }
+          try { await loadReviews(); } catch (refreshError) {
+            console.warn("Failed to refresh saved review", refreshError);
+          }
         }
-        try { await loadReviews(); } catch (refreshError) {
-          console.warn("Failed to refresh saved review", refreshError);
-        }
+        throw error;
       }
-      throw error;
+      setReviewStatus("reviewed");
+      setReviewMode("reviewed");
+      if (state.activeBootstrap?.draft) state.activeBootstrap.draft.review_status = "reviewed";
+      await loadReviews();
+    } finally {
+      setReviewSubmitting(false);
     }
-    setReviewStatus("reviewed");
-    setReviewMode("reviewed");
-    if (state.activeBootstrap?.draft) state.activeBootstrap.draft.review_status = "reviewed";
-    await loadReviews();
     closeDrawer();
+    scrollReviewsListIntoView();
     return;
   }
 

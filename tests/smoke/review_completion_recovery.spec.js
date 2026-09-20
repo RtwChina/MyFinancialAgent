@@ -21,6 +21,34 @@ test('list refresh failure after completion does not undo persisted completion',
  }finally{f.h.close();}
 });
 
+test('completion shows progress until the refreshed list is visible',async({page})=>{
+ const f=await mountReview(page);let releaseRefresh;
+ try{
+  const refreshGate=new Promise(resolve=>{releaseRefresh=resolve;});
+  await page.route('http://review.test/api/reviews?*',async route=>{await refreshGate;await route.fallback();});
+  const completion=page.getByRole('button',{name:'完成复盘',exact:true}).click();
+  await expect(page.locator('#reviewSubmittingState')).toBeVisible();
+  await expect(page.locator('#nextStepBtn')).toBeDisabled();
+  releaseRefresh();await completion;
+  await expect(page.locator('#reviewDrawer')).toBeHidden();
+  const refreshedRow=page.locator('#reviewsList tr').filter({hasText:'2026-09-16'});
+  await expect(refreshedRow).toBeInViewport();
+  expect(f.h.snapshot().daily_review_archive.find(x=>x.archive_date==='2026-09-16').review_status).toBe('reviewed');
+ }finally{releaseRefresh?.();f.h.close();}
+});
+
+test('action plan save controls stay visible in a long detail form',async({page})=>{
+ await page.setViewportSize({width:1280,height:720});
+ const f=await mountReview(page);try{
+  await page.getByText('4. 操作计划',{exact:true}).click();
+  await page.locator('#actionPlanAccountGroups tbody tr').first().click();
+  await expect(page.locator('#actionPlanDetailModal')).toBeVisible();
+  const buttonBox=await page.locator('#saveActionPlanDetailBtn').boundingBox();
+  expect(buttonBox).not.toBeNull();
+  expect(buttonBox.y+buttonBox.height).toBeLessThanOrEqual(720);
+ }finally{f.h.close();}
+});
+
 test('two pages completing the same saved day keep baseline results',async({browser})=>{
  const {assertEquivalent}=await import('../helpers/review-completion-compare.mjs');
  const snapshots=[];
@@ -88,24 +116,12 @@ test('two pages overlap completion at the complete-request barrier',async({brows
  assertConverged(outcomes[0],outcomes[1]);
 });
 
-test('rapid consecutive completion clicks preserve baseline requests and data',async({browser})=>{
- const {assertEquivalent,assertConverged}=await import('../helpers/review-completion-compare.mjs');
- const outcomes=[];
- for(const baseline of [true,false]){
-  const context=await browser.newContext();const page=await context.newPage();let f;
-  try{
-   f=await mountReview(page,{baseline});
-   await page.getByRole('button',{name:'完成复盘',exact:true}).dblclick();
-   await expect(page.locator('#reviewDrawer')).toBeHidden();
-   outcomes.push({
-    writes:f.requests.filter(x=>x.body).map(x=>x.path),
-    snapshot:f.h.snapshot(),
-   });
-  }finally{await context.close();f?.h.close();}
- }
- // 完成模式刻意跳过账户影响预览（由 review_completion_performance.spec.js 单独断言）。
- // 这里要守的是双击不改变保存与完成请求的次数和顺序，因此先剔除预览再比对。
- const businessWrites=writes=>writes.filter(path=>!path.endsWith('/account-impact/preview'));
- assertEquivalent(businessWrites(outcomes[0].writes),businessWrites(outcomes[1].writes));
- assertConverged(outcomes[0].snapshot,outcomes[1].snapshot);
+test('rapid consecutive completion clicks submit only once',async({page})=>{
+ const f=await mountReview(page);try{
+  await page.getByRole('button',{name:'完成复盘',exact:true}).dblclick();
+  await expect(page.locator('#reviewDrawer')).toBeHidden();
+  const businessWrites=f.requests.filter(x=>x.body&&!x.path.endsWith('/account-impact/preview')).map(x=>x.path);
+  expect(businessWrites).toEqual(['/api/reviews/2026-09-16','/api/reviews/2026-09-16/complete']);
+  expect(f.h.snapshot().daily_review_archive.find(x=>x.archive_date==='2026-09-16').review_status).toBe('reviewed');
+ }finally{f.h.close();}
 });
