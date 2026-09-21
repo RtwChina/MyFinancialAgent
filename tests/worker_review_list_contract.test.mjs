@@ -395,10 +395,24 @@ test("batch completion protects the newest record even when it is already review
 
 test("batch autofill preserves drafts and explicit empty blocks before archiving; failures stay pending", async () => {
   const writes = [];
+  // saveReviewDraft 现在开头用一次 batch 读齐复盘状态、账户列表和最新归档日；
+  // autofill 分支不传 actionPlans，所以 batch 里没有标的校验。
+  const defaultAccounts = [
+    { id: 1, name: "老虎-美股", currency: "USD", sort_order: 10, enabled: 1 },
+    { id: 2, name: "东方财富-国内", currency: "CNY", sort_order: 20, enabled: 1 },
+    { id: 3, name: "天天基金-国内", currency: "CNY", sort_order: 30, enabled: 1 },
+  ];
+  const batchResultFor = (sql) => {
+    if (sql.includes("FROM daily_review_archive WHERE archive_date")) return { results: [{ review_status: "draft" }] };
+    if (sql.includes("FROM investment_accounts")) return { results: defaultAccounts };
+    if (sql.includes("SELECT MAX(archive_date)")) return { results: [{ latest: "2026-05-12" }] };
+    throw new Error(`unexpected batch sql: ${sql}`);
+  };
   const DB = { prepare(sql) {
     let values = [];
-    return {
-      bind(...args) { values = args; return this; },
+    const stmt = {
+      sql,
+      bind(...args) { values = args; return stmt; },
       async first() {
         if (sql.includes("SELECT MAX")) return { latest: "2026-05-12" };
         return { review_status: "draft", reviewer_news_notes: "自己的新闻点评",
@@ -408,7 +422,8 @@ test("batch autofill preserves drafts and explicit empty blocks before archiving
       async run() { writes.push({ sql, values }); },
       async all() { throw new Error("模拟新闻归档失败"); },
     };
-  } };
+    return stmt;
+  }, async batch(statements) { return statements.map((s) => batchResultFor(s.sql)); } };
   await assert.rejects(completeReview({ DB }, "2026-05-08", {
     completionSource: "batch", autoFill: {
       reviewerNewsNotes: "AI 总结",

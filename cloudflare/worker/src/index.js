@@ -2423,22 +2423,6 @@ async function resolveActionPlanAccountsForSave(env, actionPlans, options = {}) 
   return resolved;
 }
 
-async function assertActionPlanSymbolsManaged(env, actionPlans) {
-  const symbols = [...new Set((actionPlans || []).map((plan) => plan.symbol).filter(Boolean))];
-  if (!symbols.length) return;
-  const placeholders = symbols.map(() => "?").join(", ");
-  const result = await env.DB.prepare(
-    `SELECT symbol FROM tracked_symbols WHERE symbol IN (${placeholders})`,
-  ).bind(...symbols).all();
-  const existing = new Set((result.results || []).map((row) => row.symbol));
-  const missing = symbols.filter((symbol) => !existing.has(symbol));
-  if (missing.length) {
-    const error = new Error(`操作计划标的未在标的管理中：${missing.join(", ")}`);
-    error.statusCode = 400;
-    throw error;
-  }
-}
-
 function normalizeActionPlansForSave(actionPlans) {
   const normalized = [];
   const seen = new Set();
@@ -2489,10 +2473,14 @@ function formatActionPlansMarkdownSummary(actionPlans = []) {
   }).join("\n\n");
 }
 
+// 迁移 017 已删除该列；表结构在实例生命周期内不变，探测一次即可，避免每次保存都发 PRAGMA。
+let legacyAssetPlanColumnPresent;
 async function updateLegacyAssetPlanSummaryIfPresent(env, archiveDate, actionPlans) {
-  const columns = await env.DB.prepare(`PRAGMA table_info(daily_review_archive)`).all();
-  const hasAssetPlan = (columns.results || []).some((column) => column.name === "asset_plan");
-  if (!hasAssetPlan) return;
+  if (legacyAssetPlanColumnPresent === undefined) {
+    const columns = await env.DB.prepare(`PRAGMA table_info(daily_review_archive)`).all();
+    legacyAssetPlanColumnPresent = (columns.results || []).some((column) => column.name === "asset_plan");
+  }
+  if (!legacyAssetPlanColumnPresent) return;
   await env.DB.prepare(
     `UPDATE daily_review_archive SET asset_plan = ?, updated_at = ? WHERE archive_date = ?`,
   ).bind(formatActionPlansMarkdownSummary(actionPlans), isoNow(), archiveDate).run();
@@ -2503,12 +2491,6 @@ async function getLatestArchiveDate(env) {
     `SELECT MAX(archive_date) AS latest FROM daily_review_archive`,
   ).first();
   return row?.latest || null;
-}
-
-async function isLatestArchiveDate(env, archiveDate) {
-  if (!archiveDate) return false;
-  const latest = await getLatestArchiveDate(env);
-  return Boolean(latest) && latest === archiveDate;
 }
 
 function dbAccountLiveActionPlanToApi(row) {
@@ -2807,8 +2789,8 @@ async function getAccountLiveActionPlanSymbolCatalog(env) {
   return getActionPlanSymbolCatalog(env, latest || new Date().toISOString().slice(0, 10));
 }
 
-async function replaceReviewActionPlans(env, archiveDate, actionPlans) {
-  const normalized = await resolveActionPlanAccountsForSave(env, normalizeActionPlansForSave(actionPlans));
+async function replaceReviewActionPlans(env, archiveDate, actionPlans, options = {}) {
+  const normalized = await resolveActionPlanAccountsForSave(env, normalizeActionPlansForSave(actionPlans), options);
   const now = isoNow();
   const writeStatement = env.DB.prepare(
     `INSERT INTO daily_review_action_plans (
@@ -2948,22 +2930,53 @@ function beginReviewStage(env, stage, itemCount = null) {
 
 async function saveReviewDraft(env, archiveDate, body) {
   beginReviewStage(env, "save.validate");
-  const existing = await env.DB.prepare(
-    `SELECT review_status FROM daily_review_archive WHERE archive_date = ? LIMIT 1`,
-  )
-    .bind(archiveDate)
-    .first();
-  const reviewStatus = body.reviewStatus || existing?.review_status || "initialized";
   const hasStructuredActionPlans = Array.isArray(body.actionPlans);
   const normalizedActionPlans = hasStructuredActionPlans
     ? normalizeActionPlansForSave(body.actionPlans)
     : [];
-  const resolvedActionPlans = hasStructuredActionPlans
-    ? await resolveActionPlanAccountsForSave(env, normalizedActionPlans)
+  const planSymbols = hasStructuredActionPlans
+    ? [...new Set(normalizedActionPlans.map((plan) => plan.symbol).filter(Boolean))]
     : [];
-  if (hasStructuredActionPlans) {
-    await assertActionPlanSymbolsManaged(env, resolvedActionPlans);
+
+  // 一次 batch 读齐保存需要的只读数据：复盘状态、账户列表、标的登记、最新归档日。
+  // 原先这些是 4 次串行往返；跨太平洋的 D1 每次约 120ms，合批省下三趟。
+  const reads = [
+    env.DB.prepare(`SELECT review_status FROM daily_review_archive WHERE archive_date = ? LIMIT 1`).bind(archiveDate),
+    env.DB.prepare(`SELECT * FROM investment_accounts ORDER BY sort_order ASC, id ASC`),
+    env.DB.prepare(`SELECT MAX(archive_date) AS latest FROM daily_review_archive`),
+  ];
+  const symbolReadIndex = planSymbols.length ? reads.length : -1;
+  if (planSymbols.length) {
+    const placeholders = planSymbols.map(() => "?").join(", ");
+    reads.push(env.DB.prepare(`SELECT symbol FROM tracked_symbols WHERE symbol IN (${placeholders})`).bind(...planSymbols));
   }
+  const readResults = await env.DB.batch(reads);
+  const existing = (readResults[0].results || [])[0] || null;
+  let accounts = (readResults[1].results || []).map(accountRowToApi);
+  const latestBeforeSave = (readResults[2].results || [])[0]?.latest || null;
+
+  // 校验标的已登记（写入前的业务前置校验，顺序不变）。
+  if (planSymbols.length) {
+    const managed = new Set(((readResults[symbolReadIndex].results) || []).map((row) => row.symbol));
+    const missing = planSymbols.filter((symbol) => !managed.has(symbol));
+    if (missing.length) {
+      const error = new Error(`操作计划标的未在标的管理中：${missing.join(", ")}`);
+      error.statusCode = 400;
+      throw error;
+    }
+  }
+
+  // 默认账户通常已存在，读到就跳过写入；仅全新库缺账户时才回退到补建并重读。
+  const accountNames = new Set(accounts.map((account) => account.name));
+  if (DEFAULT_INVESTMENT_ACCOUNTS.some((account) => !accountNames.has(account.name))) {
+    await ensureDefaultInvestmentAccounts(env);
+    accounts = await listInvestmentAccounts(env, { includeDisabled: true });
+  }
+
+  const reviewStatus = body.reviewStatus || existing?.review_status || "initialized";
+  const resolvedActionPlans = hasStructuredActionPlans
+    ? await resolveActionPlanAccountsForSave(env, normalizedActionPlans, { accounts, ensureDefaults: false })
+    : [];
   const submittedMarketBlocks = pickSubmittedReviewNoteBlocks(
     body,
     "marketSentimentBlocks",
@@ -3019,8 +3032,9 @@ async function saveReviewDraft(env, archiveDate, body) {
   let syncedToLive = false;
   if (hasStructuredActionPlans) {
     beginReviewStage(env, "save.daily_plans", resolvedActionPlans.length);
-    const normalizedFromDaily = await replaceReviewActionPlans(env, archiveDate, resolvedActionPlans);
-    if (await isLatestArchiveDate(env, archiveDate)) {
+    const normalizedFromDaily = await replaceReviewActionPlans(env, archiveDate, resolvedActionPlans, { accounts, ensureDefaults: false });
+    // 写草稿后当前日期一定已存在，最新归档日等价于「不存在更晚的日期」。
+    if (!latestBeforeSave || archiveDate >= latestBeforeSave) {
       beginReviewStage(env, "save.live_plans", normalizedFromDaily.length);
       await replaceAccountLiveActionPlans(env, normalizedFromDaily);
       syncedToLive = true;
