@@ -12,13 +12,11 @@ for(const fixture of [{},{news:200,plans:40},{news:0,plans:0},{news:5,plans:3,so
  });
 }
 
-for(const scenario of ['explicit empty notes','missing symbol','missing account','same symbol two accounts','no prices','duplicate news hash','snake aliases','batch autofill'])test(`compatibility: ${scenario}`,async()=>{
+for(const scenario of ['explicit empty notes','same symbol two accounts','no prices','duplicate news hash','snake aliases','batch autofill'])test(`compatibility: ${scenario}`,async()=>{
  const a=await createHarness({baseline:true,fixture:{news:4,plans:2,historical:true}}),b=await createHarness({fixture:{news:4,plans:2,historical:true}});
  try{
   for(const h of [a,b]){
    if(scenario==='explicit empty notes'){h.payload.marketSentimentBlocks=[];h.payload.sectorRotationBlocks=[];}
-   if(scenario==='missing symbol')h.payload.actionPlans[0].symbol='UNKNOWN';
-   if(scenario==='missing account')h.payload.actionPlans[0].accountId=999;
    if(scenario==='same symbol two accounts')h.payload.actionPlans[1].symbol=h.payload.actionPlans[0].symbol;
    if(scenario==='no prices')h.sqlite.exec('DELETE FROM stock_raw');
    if(scenario==='duplicate news hash')h.sqlite.exec("UPDATE daily_news_ai_analysis SET source_news_ids='[1,1,2,999]'");
@@ -29,6 +27,17 @@ for(const scenario of ['explicit empty notes','missing symbol','missing account'
   for(const url of ['/api/reviews?page=1','/api/reviews/pending?limit=all'])assertEquivalent(await a.request(url),await b.request(url));
   assertEquivalent(await a.request(`/api/reviews/${reviewDate}/complete`,{onlyIfPending:true}),await b.request(`/api/reviews/${reviewDate}/complete`,{onlyIfPending:true}));
  }finally{a.close();b.close();}
+});
+
+test('save trusts submitted account and symbol without existence checks',async()=>{
+ const h=await createHarness();try{
+  h.payload.actionPlans[0].accountId=999;
+  h.payload.actionPlans[0].symbol='UNKNOWN';
+  const result=await h.request(`/api/reviews/${reviewDate}`,h.payload);
+  assert.equal(result.status,200);
+  const saved=h.snapshot().daily_review_action_plans.find(row=>row.archive_date===reviewDate&&row.symbol==='UNKNOWN');
+  assert.equal(saved.account_id,999);
+ }finally{h.close();}
 });
 
 test('manual repeated completion and snake account snapshot preserve results',async()=>{

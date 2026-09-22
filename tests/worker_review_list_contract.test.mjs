@@ -395,24 +395,31 @@ test("batch completion protects the newest record even when it is already review
 
 test("batch autofill preserves drafts and explicit empty blocks before archiving; failures stay pending", async () => {
   const writes = [];
-  // saveReviewDraft 现在开头用一次 batch 读齐复盘状态、账户列表和最新归档日；
-  // autofill 分支不传 actionPlans，所以 batch 里没有标的校验。
-  const defaultAccounts = [
-    { id: 1, name: "老虎-美股", currency: "USD", sort_order: 10, enabled: 1 },
-    { id: 2, name: "东方财富-国内", currency: "CNY", sort_order: 20, enabled: 1 },
-    { id: 3, name: "天天基金-国内", currency: "CNY", sort_order: 30, enabled: 1 },
-  ];
+  // completeReview 先用一次 batch 读齐六份数据，再让 saveReviewDraft 走自己的读/写批次，
+  // 最后把「标记新闻已复盘 + 读取待归档新闻」放进同一批——故障点就落在这一批上。
   const batchResultFor = (sql) => {
-    if (sql.includes("FROM daily_review_archive WHERE archive_date")) return { results: [{ review_status: "draft" }] };
-    if (sql.includes("FROM investment_accounts")) return { results: defaultAccounts };
-    if (sql.includes("SELECT MAX(archive_date)")) return { results: [{ latest: "2026-05-12" }] };
-    throw new Error(`unexpected batch sql: ${sql}`);
+    const flat = sql.replace(/\s+/g, " ");
+    if (flat.includes("action_plan_count")) {
+      return { results: [{ archive_date: "2026-05-08", review_status: "draft",
+        reviewer_news_notes: "自己的新闻点评", trading_summary: "自己的深度总结",
+        market_sentiment_blocks_json: "[]", sector_rotation_blocks_json: null }] };
+    }
+    if (flat.includes("DISTINCT k_date")) return { results: [] };
+    if (flat.includes("source_news_ids")) return { results: [] };
+    if (flat.includes("FROM daily_review_action_plans p")) return { results: [] };
+    if (flat.includes("FROM investment_accounts")) return { results: [] };
+    if (flat.includes("SELECT account_id, symbol")) return { results: [] };
+    if (flat.includes("SELECT review_status FROM daily_review_archive")) return { results: [{ review_status: "draft" }] };
+    if (flat.includes("SELECT MAX(archive_date)")) return { results: [{ latest: "2026-05-12" }] };
+    if (flat.includes("INSERT INTO daily_review_archive")) return { results: [] };
+    if (flat.includes("news_raw_data")) throw new Error("模拟新闻归档失败");
+    throw new Error(`unexpected batch sql: ${flat}`);
   };
   const DB = { prepare(sql) {
-    let values = [];
-    const stmt = {
+    const make = (values) => ({
       sql,
-      bind(...args) { values = args; return stmt; },
+      values,
+      bind: (...args) => make(args),
       async first() {
         if (sql.includes("SELECT MAX")) return { latest: "2026-05-12" };
         return { review_status: "draft", reviewer_news_notes: "自己的新闻点评",
@@ -421,9 +428,16 @@ test("batch autofill preserves drafts and explicit empty blocks before archiving
       },
       async run() { writes.push({ sql, values }); },
       async all() { throw new Error("模拟新闻归档失败"); },
-    };
-    return stmt;
-  }, async batch(statements) { return statements.map((s) => batchResultFor(s.sql)); } };
+    });
+    return make([]);
+  }, async batch(statements) {
+    // 先算结果再记账：批次中途抛错等同整批回滚，不应留下任何写入痕迹。
+    const results = statements.map((statement) => batchResultFor(statement.sql));
+    for (const statement of statements) {
+      if (!/^\s*SELECT/i.test(statement.sql)) writes.push({ sql: statement.sql, values: statement.values });
+    }
+    return results;
+  } };
   await assert.rejects(completeReview({ DB }, "2026-05-08", {
     completionSource: "batch", autoFill: {
       reviewerNewsNotes: "AI 总结",

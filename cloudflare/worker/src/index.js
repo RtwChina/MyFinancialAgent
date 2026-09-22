@@ -30,11 +30,6 @@ const ACTION_PLAN_POSITIONS = ["0%", "0-5%", "5%-10%", "10%-15%", "15%-20%", "20
 const DEFAULT_ACTION_PLAN_ACTION = "持仓观察";
 const DEFAULT_ACTION_PLAN_POSITION = "0-5%";
 const ZERO_POSITION_ACTIONS = new Set(["准备开仓", "已清仓复盘"]);
-const DEFAULT_INVESTMENT_ACCOUNTS = [
-  { name: "老虎-美股", broker: "老虎", accountType: "stock", region: "US", currency: "USD", sortOrder: 10 },
-  { name: "东方财富-国内", broker: "东方财富", accountType: "stock", region: "CN", currency: "CNY", sortOrder: 20 },
-  { name: "天天基金-国内", broker: "天天基金", accountType: "fund", region: "CN", currency: "CNY", sortOrder: 30 },
-];
 const PROTECTED_INVESTMENT_ACCOUNT_NAMES = new Set(["老虎-美股", "东方财富-国内", "天天基金-国内"]);
 const MARKET_ACCOUNT_FALLBACKS = {
   "美股": "老虎-美股",
@@ -1286,7 +1281,7 @@ async function previewReviewAccountImpact(env, archiveDate, body = {}) {
   const normalizedPlans = await resolveActionPlanAccountsForSave(
     env,
     normalizeActionPlansForSave(inputPlans),
-    { ensureDefaults: false, accounts: investmentAccounts },
+    { accounts: investmentAccounts },
   );
   const accounts = await buildEstimatedAccountImpactSummaryForPlans(
     env,
@@ -1945,15 +1940,18 @@ function isSnapshotEligibleAccount(account = {}) {
   return account.enabled !== false && account.name !== "未分配账户";
 }
 
-function snapshotRowToApi(row) {
-  if (!row) return null;
-  const accounts = parseJsonArray(row.accounts_snapshot)
+function snapshotAccountsFromJson(accountsJson) {
+  return parseJsonArray(accountsJson)
     .map((item) => normalizeAccountSnapshotEntry(item))
     .filter((item) => item.accountId || item.accountName);
+}
+
+function snapshotRowToApi(row) {
+  if (!row) return null;
   return {
     id: row.id == null ? null : Number(row.id),
     archiveDate: row.archive_date,
-    accounts,
+    accounts: snapshotAccountsFromJson(row.accounts_snapshot),
     snapshotSource: row.snapshot_source || "manual_review",
     notes: row.notes || "",
     createdAt: row.created_at || null,
@@ -1968,8 +1966,8 @@ async function getReviewAccountSnapshot(env, archiveDate) {
   return snapshotRowToApi(row);
 }
 
-async function upsertReviewAccountSnapshot(env, archiveDate, snapshotInput = {}, options = {}) {
-  const accounts = await listInvestmentAccounts(env, { includeDisabled: true, ensureDefaults: true });
+function buildReviewAccountSnapshotStatement(env, archiveDate, snapshotInput = {}, options = {}) {
+  const accounts = options.accounts || [];
   const accountMap = new Map(accounts.map((account) => [Number(account.id), account]));
   const inputAccounts = Array.isArray(snapshotInput.accounts)
     ? snapshotInput.accounts
@@ -1987,7 +1985,9 @@ async function upsertReviewAccountSnapshot(env, archiveDate, snapshotInput = {},
       return impact ? { ...item, impact: impactSummaryToSnapshotImpact(impact) } : item;
     });
   const now = isoNow();
-  await env.DB.prepare(
+  const accountsJson = JSON.stringify(normalizedAccounts);
+  // RETURNING 让写入与回读合成一条语句：既省掉一次跨洋往返，id 与 created_at 又仍是库里的真值。
+  const statement = env.DB.prepare(
     `INSERT INTO review_account_snapshots (
       archive_date, accounts_snapshot, snapshot_source, notes, created_at, updated_at
     ) VALUES (?, ?, ?, ?, ?, ?)
@@ -1995,29 +1995,32 @@ async function upsertReviewAccountSnapshot(env, archiveDate, snapshotInput = {},
       accounts_snapshot = excluded.accounts_snapshot,
       snapshot_source = excluded.snapshot_source,
       notes = excluded.notes,
-      updated_at = excluded.updated_at`,
+      updated_at = excluded.updated_at
+    RETURNING *`,
   ).bind(
     archiveDate,
-    JSON.stringify(normalizedAccounts),
+    accountsJson,
     options.snapshotSource || snapshotInput.snapshotSource || snapshotInput.snapshot_source || "manual_review",
     String(snapshotInput.notes || "").trim(),
     now,
     now,
-  ).run();
-  return getReviewAccountSnapshot(env, archiveDate);
+  );
+  return { statement, accountsJson };
 }
 
-// D1 的每次 batch 是一次网络往返；分块上限沿用测试基建中已对远程库验证过的值。
-const D1_MAX_BATCH_STATEMENTS = 50;
+// D1 的每次 batch 是一次网络往返。官方 Limits 只约束单条语句（绑定参数 100 个、SQL 100KB），
+// 未给出单批条数上限，这里取 100 是为了让常见规模的复盘正好落在一批内，同时留出余量。
+const D1_MAX_BATCH_STATEMENTS = 100;
 
 async function runWriteBatches(env, statements) {
+  const results = [];
   for (let index = 0; index < statements.length; index += D1_MAX_BATCH_STATEMENTS) {
-    await env.DB.batch(statements.slice(index, index + D1_MAX_BATCH_STATEMENTS));
+    results.push(...await env.DB.batch(statements.slice(index, index + D1_MAX_BATCH_STATEMENTS)));
   }
+  return results;
 }
 
-async function syncInvestmentAccountsFromSnapshot(env, snapshot) {
-  const accounts = snapshot?.accounts || [];
+function buildInvestmentAccountSyncStatements(env, snapshotAccounts = []) {
   const now = isoNow();
   const writeStatement = env.DB.prepare(
     `UPDATE investment_accounts
@@ -2027,41 +2030,15 @@ async function syncInvestmentAccountsFromSnapshot(env, snapshot) {
        WHERE id = ?`,
   );
   const statements = [];
-  for (const account of accounts) {
+  for (const account of snapshotAccounts) {
     if (!account.accountId) continue;
     if (account.totalAssets == null && account.availableCash == null) continue;
     statements.push(writeStatement.bind(account.totalAssets, account.availableCash, now, account.accountId));
   }
-  await runWriteBatches(env, statements);
-}
-
-async function ensureDefaultInvestmentAccounts(env) {
-  const now = isoNow();
-  const statements = DEFAULT_INVESTMENT_ACCOUNTS.map((account) => (
-    env.DB.prepare(
-      `INSERT INTO investment_accounts (
-        name, broker, account_type, region, currency, enabled, sort_order, notes, created_at, updated_at
-      )
-       SELECT ?, ?, ?, ?, ?, 1, ?, ?, ?, ?
-       WHERE NOT EXISTS (SELECT 1 FROM investment_accounts WHERE name = ?)`,
-    ).bind(
-      account.name,
-      account.broker || "",
-      account.accountType || "stock",
-      account.region || "",
-      account.currency || "CNY",
-      Number(account.sortOrder || 0),
-      account.notes || "",
-      now,
-      now,
-      account.name,
-    )
-  ));
-  await env.DB.batch(statements);
+  return statements;
 }
 
 async function listInvestmentAccounts(env, options = {}) {
-  if (options.ensureDefaults === true) await ensureDefaultInvestmentAccounts(env);
   const includeDisabled = options.includeDisabled !== false;
   const result = await env.DB.prepare(
     `SELECT *
@@ -2396,7 +2373,6 @@ function getFallbackActionPlanAccountId(accounts, marketType) {
 }
 
 async function resolveActionPlanAccountsForSave(env, actionPlans, options = {}) {
-  if (options.ensureDefaults !== false) await ensureDefaultInvestmentAccounts(env);
   const accounts = Object.hasOwn(options, "accounts")
     ? options.accounts
     : await listInvestmentAccounts(env, { includeDisabled: true });
@@ -2713,7 +2689,7 @@ async function deleteAccountLiveActionPlan(env, id) {
   return { ok: true, deletedId: id };
 }
 
-async function replaceAccountLiveActionPlans(env, actionPlans) {
+function buildAccountLiveActionPlanStatements(env, actionPlans) {
   const normalizedInput = (Array.isArray(actionPlans) ? actionPlans : [])
     .map((plan, idx) => normalizeActionPlanItem(plan, idx))
     .filter(Boolean)
@@ -2775,6 +2751,11 @@ async function replaceAccountLiveActionPlans(env, actionPlans) {
   } else {
     statements.push(env.DB.prepare(`DELETE FROM account_live_action_plans`));
   }
+  return { statements, normalized };
+}
+
+async function replaceAccountLiveActionPlans(env, actionPlans) {
+  const { statements, normalized } = buildAccountLiveActionPlanStatements(env, actionPlans);
   await runWriteBatches(env, statements);
   return normalized;
 }
@@ -2789,8 +2770,8 @@ async function getAccountLiveActionPlanSymbolCatalog(env) {
   return getActionPlanSymbolCatalog(env, latest || new Date().toISOString().slice(0, 10));
 }
 
-async function replaceReviewActionPlans(env, archiveDate, actionPlans, options = {}) {
-  const normalized = await resolveActionPlanAccountsForSave(env, normalizeActionPlansForSave(actionPlans), options);
+function buildReviewActionPlanStatements(env, archiveDate, actionPlans) {
+  const normalized = normalizeActionPlansForSave(actionPlans);
   const now = isoNow();
   const writeStatement = env.DB.prepare(
     `INSERT INTO daily_review_action_plans (
@@ -2846,8 +2827,12 @@ async function replaceReviewActionPlans(env, archiveDate, actionPlans, options =
       `DELETE FROM daily_review_action_plans WHERE archive_date = ?`,
     ).bind(archiveDate));
   }
-  await runWriteBatches(env, statements);
+  return { statements, normalized };
+}
 
+async function replaceReviewActionPlans(env, archiveDate, actionPlans) {
+  const { statements, normalized } = buildReviewActionPlanStatements(env, archiveDate, actionPlans);
+  await runWriteBatches(env, statements);
   await updateLegacyAssetPlanSummaryIfPresent(env, archiveDate, normalized);
   return normalized;
 }
@@ -2934,49 +2919,15 @@ async function saveReviewDraft(env, archiveDate, body) {
   const normalizedActionPlans = hasStructuredActionPlans
     ? normalizeActionPlansForSave(body.actionPlans)
     : [];
-  const planSymbols = hasStructuredActionPlans
-    ? [...new Set(normalizedActionPlans.map((plan) => plan.symbol).filter(Boolean))]
-    : [];
-
-  // 一次 batch 读齐保存需要的只读数据：复盘状态、账户列表、标的登记、最新归档日。
-  // 原先这些是 4 次串行往返；跨太平洋的 D1 每次约 120ms，合批省下三趟。
-  const reads = [
+  // 保存入口信任页面提交的 accountId 和 symbol，不额外查询账户、补建默认账户或校验标的。
+  // 一次 batch 只读取复盘状态与最新归档日，用于保持状态及决定是否同步实时计划。
+  const readResults = await env.DB.batch([
     env.DB.prepare(`SELECT review_status FROM daily_review_archive WHERE archive_date = ? LIMIT 1`).bind(archiveDate),
-    env.DB.prepare(`SELECT * FROM investment_accounts ORDER BY sort_order ASC, id ASC`),
     env.DB.prepare(`SELECT MAX(archive_date) AS latest FROM daily_review_archive`),
-  ];
-  const symbolReadIndex = planSymbols.length ? reads.length : -1;
-  if (planSymbols.length) {
-    const placeholders = planSymbols.map(() => "?").join(", ");
-    reads.push(env.DB.prepare(`SELECT symbol FROM tracked_symbols WHERE symbol IN (${placeholders})`).bind(...planSymbols));
-  }
-  const readResults = await env.DB.batch(reads);
+  ]);
   const existing = (readResults[0].results || [])[0] || null;
-  let accounts = (readResults[1].results || []).map(accountRowToApi);
-  const latestBeforeSave = (readResults[2].results || [])[0]?.latest || null;
-
-  // 校验标的已登记（写入前的业务前置校验，顺序不变）。
-  if (planSymbols.length) {
-    const managed = new Set(((readResults[symbolReadIndex].results) || []).map((row) => row.symbol));
-    const missing = planSymbols.filter((symbol) => !managed.has(symbol));
-    if (missing.length) {
-      const error = new Error(`操作计划标的未在标的管理中：${missing.join(", ")}`);
-      error.statusCode = 400;
-      throw error;
-    }
-  }
-
-  // 默认账户通常已存在，读到就跳过写入；仅全新库缺账户时才回退到补建并重读。
-  const accountNames = new Set(accounts.map((account) => account.name));
-  if (DEFAULT_INVESTMENT_ACCOUNTS.some((account) => !accountNames.has(account.name))) {
-    await ensureDefaultInvestmentAccounts(env);
-    accounts = await listInvestmentAccounts(env, { includeDisabled: true });
-  }
-
+  const latestBeforeSave = (readResults[1].results || [])[0]?.latest || null;
   const reviewStatus = body.reviewStatus || existing?.review_status || "initialized";
-  const resolvedActionPlans = hasStructuredActionPlans
-    ? await resolveActionPlanAccountsForSave(env, normalizedActionPlans, { accounts, ensureDefaults: false })
-    : [];
   const submittedMarketBlocks = pickSubmittedReviewNoteBlocks(
     body,
     "marketSentimentBlocks",
@@ -2996,8 +2947,8 @@ async function saveReviewDraft(env, archiveDate, body) {
   const marketBlocksJson = marketBlocks ? JSON.stringify(marketBlocks) : null;
   const sectorBlocksJson = sectorBlocks ? JSON.stringify(sectorBlocks) : null;
 
-  beginReviewStage(env, "save.draft");
-  await env.DB.prepare(
+  beginReviewStage(env, "save.write", normalizedActionPlans.length);
+  const draftStatement = env.DB.prepare(
     `INSERT INTO daily_review_archive (
       archive_date, review_status, reviewer_news_notes, market_sentiment_blocks_json,
       sector_rotation_blocks_json, trading_summary, updated_at
@@ -3026,26 +2977,33 @@ async function saveReviewDraft(env, archiveDate, body) {
       isoNow(),
       submittedMarketBlocks ? 1 : 0,
       submittedSectorBlocks ? 1 : 0,
-    )
-    .run();
+    );
 
+  // 正文、当日计划、实时计划写在同一批里：跨太平洋的 D1 每次往返约 120ms，
+  // 分开写就是三趟。同批还让三者要么全成功、要么全回滚。
+  const statements = [draftStatement];
+  let normalizedFromDaily = [];
   let syncedToLive = false;
   if (hasStructuredActionPlans) {
-    beginReviewStage(env, "save.daily_plans", resolvedActionPlans.length);
-    const normalizedFromDaily = await replaceReviewActionPlans(env, archiveDate, resolvedActionPlans, { accounts, ensureDefaults: false });
+    const daily = buildReviewActionPlanStatements(env, archiveDate, normalizedActionPlans);
+    normalizedFromDaily = daily.normalized;
+    statements.push(...daily.statements);
     // 写草稿后当前日期一定已存在，最新归档日等价于「不存在更晚的日期」。
     if (!latestBeforeSave || archiveDate >= latestBeforeSave) {
-      beginReviewStage(env, "save.live_plans", normalizedFromDaily.length);
-      await replaceAccountLiveActionPlans(env, normalizedFromDaily);
+      statements.push(...buildAccountLiveActionPlanStatements(env, normalizedFromDaily).statements);
       syncedToLive = true;
     }
+  }
+  await runWriteBatches(env, statements);
+  if (hasStructuredActionPlans) {
+    await updateLegacyAssetPlanSummaryIfPresent(env, archiveDate, normalizedFromDaily);
   }
 
   return {
     ok: true,
     archiveDate,
     reviewStatus,
-    actionPlanCount: resolvedActionPlans.length,
+    actionPlanCount: normalizedActionPlans.length,
     marketSentimentBlocks: marketBlocks || [],
     sectorRotationBlocks: sectorBlocks || [],
     syncedToLive,
@@ -3062,17 +3020,50 @@ async function completeReview(env, archiveDate, body = {}) {
     }
     body = { ...body, onlyIfPending: true };
   }
-  const existing = await env.DB.prepare(
-    `SELECT archive_date, review_status, reviewer_news_notes, trading_summary,
-       market_sentiment_blocks_json, sector_rotation_blocks_json,
-       (SELECT COUNT(*) FROM daily_review_action_plans plans
-        WHERE plans.archive_date = daily_review_archive.archive_date) AS action_plan_count
-     FROM daily_review_archive
-     WHERE archive_date = ?
-     LIMIT 1`,
-  )
-    .bind(archiveDate)
-    .first();
+  beginReviewStage(env, "complete.read");
+  // 这六条读语句互不依赖，合成一批只走一次跨洋往返。即使随后命中早返回分支，
+  // 代价仍是一次往返，与逐条读时相同。
+  const reads = await env.DB.batch([
+    env.DB.prepare(
+      `SELECT archive_date, review_status, reviewer_news_notes, trading_summary,
+         market_sentiment_blocks_json, sector_rotation_blocks_json,
+         (SELECT COUNT(*) FROM daily_review_action_plans plans
+          WHERE plans.archive_date = daily_review_archive.archive_date) AS action_plan_count
+       FROM daily_review_archive
+       WHERE archive_date = ?
+       LIMIT 1`,
+    ).bind(archiveDate),
+    env.DB.prepare(
+      `SELECT DISTINCT k_date FROM stock_raw WHERE k_date <= ? ORDER BY k_date DESC LIMIT 2`,
+    ).bind(archiveDate),
+    env.DB.prepare(
+      `SELECT source_news_ids FROM daily_news_ai_analysis WHERE analysis_date = ? LIMIT 1`,
+    ).bind(archiveDate),
+    env.DB.prepare(
+      `SELECT p.*, a.name AS account_name, a.currency AS account_currency,
+          a.sort_order AS account_sort_order, a.enabled AS account_enabled
+       FROM daily_review_action_plans p
+       LEFT JOIN investment_accounts a ON a.id = p.account_id
+       WHERE p.archive_date = ?
+       ORDER BY COALESCE(a.sort_order, 999) ASC, p.sort_order ASC, p.symbol ASC`,
+    ).bind(archiveDate),
+    env.DB.prepare(`SELECT * FROM investment_accounts ORDER BY sort_order ASC, id ASC`),
+    env.DB.prepare(
+      `SELECT account_id, symbol
+       FROM daily_review_action_plans
+       WHERE archive_date = (
+         SELECT MAX(archive_date)
+         FROM daily_review_action_plans
+         WHERE archive_date < ?
+       )`,
+    ).bind(archiveDate),
+  ]);
+  const existing = (reads[0].results || [])[0] || null;
+  const newsWindow = buildNewsWindowFromRows(reads[1].results || [], archiveDate);
+  const analysis = (reads[2].results || [])[0] || null;
+  const actionPlans = (reads[3].results || []).map(dbActionPlanToApi);
+  const investmentAccounts = (reads[4].results || []).map(accountRowToApi);
+  const previousSymbolsByAccount = previousActionPlanSymbolKeysFromRows(reads[5].results || []);
 
   if (body.onlyIfPending && !existing) {
     return { ok: true, skipped: true, reason: "review not found", archiveDate };
@@ -3117,65 +3108,49 @@ async function completeReview(env, archiveDate, body = {}) {
   }
 
   beginReviewStage(env, "complete.news");
-  const newsWindow = await getNewsWindowForDate(env, archiveDate);
-  const analysis = await env.DB.prepare(
-    `SELECT source_news_ids FROM daily_news_ai_analysis WHERE analysis_date = ? LIMIT 1`,
-  )
-    .bind(archiveDate)
-    .first();
   const sourceNewsIds = parseStoredIds(analysis?.source_news_ids);
-  if (sourceNewsIds.length) {
-    const placeholders = sourceNewsIds.map(() => "?").join(", ");
-    await env.DB.prepare(
-      `UPDATE news_raw_data
-       SET processing_status = 'reviewed'
-       WHERE id IN (${placeholders})`,
-    )
-      .bind(...sourceNewsIds)
-      .run();
-  } else {
-    await env.DB.prepare(
-      `UPDATE news_raw_data
-       SET processing_status = 'reviewed'
-       WHERE pub_date >= ? AND pub_date <= ?
+  const newsSelectColumns = `id, pub_date, title, content, url, source, type, rule_passed, rule_reason,
+         processing_status, ai_summary, market_impact, importance_stars, related_symbols, news_hash`;
+  const newsWindowFilter = `pub_date >= ? AND pub_date <= ?
            AND COALESCE(importance_stars, 0) >= 3
            AND (
              COALESCE(rule_passed, 0) = 1
              OR type IN ('index', 'sector', 'stock')
              OR COALESCE(ai_summary, '') != ''
-           )`,
-    )
-      .bind(newsWindow.start, newsWindow.end)
-      .run();
-  }
-  let archiveRows;
+           )`;
+  let markStatement;
+  let archiveSelectStatement;
   if (sourceNewsIds.length) {
     const placeholders = sourceNewsIds.map(() => "?").join(", ");
-    archiveRows = await env.DB.prepare(
-      `SELECT id, pub_date, title, content, url, source, type, rule_passed, rule_reason,
-         processing_status, ai_summary, market_impact, importance_stars, related_symbols, news_hash
+    markStatement = env.DB.prepare(
+      `UPDATE news_raw_data SET processing_status = 'reviewed' WHERE id IN (${placeholders})`,
+    ).bind(...sourceNewsIds);
+    archiveSelectStatement = env.DB.prepare(
+      `SELECT ${newsSelectColumns}
        FROM news_raw_data
        WHERE id IN (${placeholders})
        ORDER BY pub_date DESC, id DESC`,
-    )
-      .bind(...sourceNewsIds)
-      .all();
+    ).bind(...sourceNewsIds);
   } else {
-    const archiveQuery = `SELECT id, pub_date, title, content, url, source, type, rule_passed, rule_reason,
-           processing_status, ai_summary, market_impact, importance_stars, related_symbols, news_hash
-         FROM news_raw_data
-         WHERE pub_date >= ? AND pub_date <= ?
-           AND COALESCE(importance_stars, 0) >= 3
-           AND (
-             COALESCE(rule_passed, 0) = 1
-             OR type IN ('index', 'sector', 'stock')
-             OR COALESCE(ai_summary, '') != ''
-           )
-         ORDER BY pub_date DESC, id DESC`;
-    archiveRows = await env.DB.prepare(archiveQuery)
-      .bind(newsWindow.start, newsWindow.end)
-      .all();
+    markStatement = env.DB.prepare(
+      `UPDATE news_raw_data SET processing_status = 'reviewed' WHERE ${newsWindowFilter}`,
+    ).bind(newsWindow.start, newsWindow.end);
+    archiveSelectStatement = env.DB.prepare(
+      `SELECT ${newsSelectColumns}
+       FROM news_raw_data
+       WHERE ${newsWindowFilter}
+       ORDER BY pub_date DESC, id DESC`,
+    ).bind(newsWindow.start, newsWindow.end);
   }
+  // 批内按提交顺序执行，所以 SELECT 读到的 processing_status 已经是 'reviewed'，
+  // 与拆成两趟时归档的内容一致。价格查询与这两条无依赖，顺带搭同一趟车。
+  const planSymbols = [...new Set(actionPlans.map((plan) => plan.symbol).filter(Boolean))];
+  const priceStatements = planSymbols.length
+    ? prepareLatestPricePointStatements(env, planSymbols, archiveDate)
+    : [];
+  const newsResults = await env.DB.batch([markStatement, archiveSelectStatement, ...priceStatements]);
+  const archiveRows = { results: newsResults[1].results || [] };
+  const priceMap = latestPricePointMapFromBatchResults(newsResults.slice(2));
 
   const archivedAt = isoNow();
   const archiveNewsStatement = env.DB.prepare(
@@ -3224,25 +3199,43 @@ async function completeReview(env, archiveDate, body = {}) {
       archivedAt,
     )),
   ];
-  await runWriteBatches(env, archiveStatements);
-
   const snapshotInput = body.accountSnapshot || body.account_snapshot || {};
   beginReviewStage(env, "complete.impact");
-  const accountImpactSummary = await buildEstimatedAccountImpactSummary(env, archiveDate);
-  beginReviewStage(env, "complete.snapshot");
-  const accountSnapshot = await upsertReviewAccountSnapshot(env, archiveDate, snapshotInput, {
-    snapshotSource: body.completionSource === "batch" ? "batch_review" : "manual_review",
-    accountImpactSummary,
-  });
-  beginReviewStage(env, "complete.accounts", accountSnapshot?.accounts?.length || 0);
-  await syncInvestmentAccountsFromSnapshot(env, accountSnapshot);
+  const accountImpactSummary = actionPlans.length
+    ? buildAccountImpactSummaryFromPlans({
+      actionPlans,
+      accounts: investmentAccounts,
+      priceMap,
+      previousSymbolsByAccount,
+    })
+    : [];
+  const { statement: snapshotStatement, accountsJson } = buildReviewAccountSnapshotStatement(
+    env,
+    archiveDate,
+    snapshotInput,
+    {
+      accounts: investmentAccounts,
+      snapshotSource: body.completionSource === "batch" ? "batch_review" : "manual_review",
+      accountImpactSummary,
+    },
+  );
+  const snapshotAccounts = snapshotAccountsFromJson(accountsJson);
 
-  beginReviewStage(env, "complete.status");
-  await env.DB.prepare(
-    `UPDATE daily_review_archive
-     SET review_status = 'reviewed', reviewed_at = ?, updated_at = ?
-     WHERE archive_date = ?`,
-  ).bind(isoNow(), isoNow(), archiveDate).run();
+  // 新闻归档、账户快照、账户资产回写、复盘状态一次写完：跨太平洋的 D1 每次往返约 120ms，
+  // 拆开就是四趟。同批也意味着这四段要么全成功、要么全回滚，不会留下「新闻归档了但状态没改」的半成品。
+  beginReviewStage(env, "complete.write", archiveStatements.length);
+  const writeStatements = [
+    ...archiveStatements,
+    snapshotStatement,
+    ...buildInvestmentAccountSyncStatements(env, snapshotAccounts),
+    env.DB.prepare(
+      `UPDATE daily_review_archive
+       SET review_status = 'reviewed', reviewed_at = ?, updated_at = ?
+       WHERE archive_date = ?`,
+    ).bind(isoNow(), isoNow(), archiveDate),
+  ];
+  const writeResults = await runWriteBatches(env, writeStatements);
+  const accountSnapshot = snapshotRowToApi((writeResults[archiveStatements.length]?.results || [])[0]);
 
   return { ok: true, archiveDate, reviewStatus: "reviewed", accountSnapshot, accountImpactSummary };
 }
