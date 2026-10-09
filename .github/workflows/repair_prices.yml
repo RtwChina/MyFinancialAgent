@@ -2,12 +2,17 @@ name: 修复股票空价格数据
 
 on:
   schedule:
-    # 每 2 小时执行一次
-    - cron: '0 */2 * * *'
+    # 每 2 小时兜底一次；错开整点减少 GitHub 排队延迟
+    - cron: '37 */2 * * *'
+  # 采集任务结束后立即跟随执行一次，保证修复总在采集之后
+  workflow_run:
+    workflows: ["采集股票价格数据"]
+    types: [completed]
   workflow_dispatch:
 
 jobs:
   repair-prices:
+    if: ${{ github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success' }}
     runs-on: ubuntu-latest
 
     steps:
