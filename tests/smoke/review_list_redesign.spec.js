@@ -1,5 +1,5 @@
 import { test, expect } from '@playwright/test';
-import { execFileSync } from 'node:child_process';
+import { queryLocalSql } from '../helpers/market-review-local.mjs';
 
 const BASE_URL = process.env.BASE_URL || 'http://127.0.0.1:8787';
 const REVIEWED_DATE = '2026-05-08';
@@ -7,18 +7,23 @@ const PENDING_DATE = '2026-05-10';
 const IMPACT_PREVIOUS_DATE = '2026-05-11';
 const IMPACT_DATE = '2026-05-12';
 
+// Same isolated local test D1 the 8787 Worker reads; rows keep wrangler's pretty JSON for text assertions.
 function d1(command) {
-  return execFileSync(
-    'npx',
-    ['wrangler', 'd1', 'execute', 'my-financial-agent', '--local', '--command', command],
-    { cwd: `${process.cwd()}/cloudflare`, encoding: 'utf8' },
-  );
+  return JSON.stringify(queryLocalSql(command), null, 2);
 }
 
 function seedTrackedSymbol(symbol) {
   d1(`INSERT INTO tracked_symbols (symbol, yahoo_symbol, display_name, symbol_type, aliases, is_active, sort_order, created_at, updated_at)
       VALUES ('${symbol}', '${symbol}', '${symbol}', 'stock', '["${symbol}"]', 1, 7600, datetime('now'), datetime('now'))
       ON CONFLICT(symbol) DO UPDATE SET is_active=1, updated_at=datetime('now');`);
+}
+
+// The shared test DB holds many newer fixture days, so locate days by filtering rather than by list position.
+async function showReviewDates(page, from, to = from) {
+  await page.locator('#filtersForm input[name="from"]').fill(from);
+  await page.locator('#filtersForm input[name="to"]').fill(to);
+  await page.locator('#filtersForm').getByRole('button', { name: '查询' }).click();
+  await expect(page.locator('#reviewsList tr', { hasText: from }).first()).toBeVisible();
 }
 
 function ensureAccountSnapshotTable() {
@@ -78,6 +83,7 @@ test('review list uses trading-desk columns and primary edit action', async ({ p
   await expect(page.locator('.review-table')).not.toContainText('北京时间 05/15 21:30 - 05/16 04:00');
   await expect(page.locator('.review-table th', { hasText: '状态' })).toHaveCount(0);
 
+  await showReviewDates(page, REVIEWED_DATE, PENDING_DATE);
   const reviewedRow = page.locator('#reviewsList tr', { hasText: REVIEWED_DATE });
   await expect(reviewedRow).toContainText('老虎-美股');
   await expect(reviewedRow).toContainText('已记录');
@@ -123,6 +129,7 @@ test('review drawer opens immediately while bootstrap loads and defers optional 
   });
 
   await page.goto(BASE_URL, { waitUntil: 'load' });
+  await showReviewDates(page, REVIEWED_DATE);
   const reviewedRow = page.locator('#reviewsList tr', { hasText: REVIEWED_DATE });
   await expect(reviewedRow).toBeVisible();
   await reviewedRow.getByRole('button', { name: '查看' }).click();
@@ -239,6 +246,7 @@ test('review detail previews account impact and completed review reads frozen sn
   }));
 
   await page.goto(BASE_URL, { waitUntil: 'load' });
+  await showReviewDates(page, IMPACT_DATE);
   await page.locator('#reviewsList tr', { hasText: IMPACT_DATE }).getByRole('button', { name: '查看' }).click();
   await page.getByText('个股操作', { exact: true }).click();
   const tigerGroup = page.locator('.action-plan-group', { hasText: '老虎-美股' });

@@ -59,6 +59,7 @@ npm-debug.log*
 
 # 测试
 .tests/
+tests/.wrangler-state/
 .pytest_cache/
 .coverage
 htmlcov/

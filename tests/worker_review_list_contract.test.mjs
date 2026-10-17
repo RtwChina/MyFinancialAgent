@@ -17,7 +17,6 @@ import {
   parsePendingReviewLimit,
   parsePositionWeight,
   previousActionPlanSymbolKeysFromRows,
-  resolveReviewNoteBlocksWithFallback,
 } from "../cloudflare/worker/src/index.js";
 
 test("pending review limit supports an explicit all mode and bounds numeric requests", () => {
@@ -32,27 +31,32 @@ test("pending review limit supports an explicit all mode and bounds numeric requ
 test("batch review requires every mandatory review section before completion", () => {
   const complete = getBatchReviewReadiness({
     reviewer_news_notes: "今日主线明确。",
-    market_sentiment_blocks_json: JSON.stringify([{ title: "大盘", children: [] }]),
-    sector_rotation_blocks_json: JSON.stringify([{ title: "板块", children: [] }]),
+    market_review_json: JSON.stringify({ version: 1, blocks: [{ id: "gspc", type: "symbol", symbol: "GSPC", children: [] }], conflicts: [] }),
+    market_sentiment_blocks_json: null,
+    sector_rotation_blocks_json: null,
     action_plan_count: 1,
   });
   assert.deepEqual(complete, { ready: true, missingFields: [] });
 
   const incomplete = getBatchReviewReadiness({
     reviewer_news_notes: "已有新闻总结",
-    market_sentiment_blocks_json: null,
-    sector_rotation_blocks_json: "[]",
+    market_review_json: JSON.stringify({ version: 1, blocks: [], conflicts: [] }),
+    market_sentiment_blocks_json: JSON.stringify([{ title: "冻结旧大盘", children: [] }]),
+    sector_rotation_blocks_json: JSON.stringify([{ title: "冻结旧轮动", children: [] }]),
     action_plan_count: 0,
   });
   assert.deepEqual(incomplete, {
     ready: false,
-    missingFields: ["market", "rotation", "plan"],
+    missingFields: ["market", "plan"],
   });
 });
 
-function createBootstrapDb({ previousReview = null } = {}) {
+function createBootstrapDb({ historyRows = [] } = {}) {
   const batchCalls = [];
   const resultFor = (sql) => {
+    if (sql.includes("FROM daily_review_symbol_levels")) return { results: [] };
+    if (sql.includes("market_review_json IS NOT NULL")) return { results: historyRows };
+    if (sql.includes("SELECT * FROM tracked_symbols ORDER BY")) return { results: [] };
     if (sql.includes("FROM investment_accounts ORDER BY")) {
       return { results: [{ id: 1, name: "老虎-美股", currency: "USD", enabled: 1, sort_order: 10 }] };
     }
@@ -77,12 +81,6 @@ function createBootstrapDb({ previousReview = null } = {}) {
       return { results: [{ k_date: "2026-08-05" }, { k_date: "2026-08-04" }] };
     }
     if (sql.includes("FROM daily_news_ai_analysis")) return { results: [] };
-    if (sql.includes("AS market_sentiment_blocks_json") && sql.includes("AS sector_rotation_blocks_json")) {
-      return { results: [previousReview || {
-        market_sentiment_blocks_json: null,
-        sector_rotation_blocks_json: null,
-      }] };
-    }
     if (sql.includes("FROM daily_review_action_plans p")) return { results: [] };
     if (sql.includes("FROM review_account_snapshots")) {
       return { results: [{
@@ -276,28 +274,34 @@ test("review bootstrap uses batched read stages and reuses its account snapshot"
   const result = await getReviewBootstrap({ DB }, "2026-08-05");
 
   assert.equal(DB.batchCalls.length, 2);
-  assert.equal(DB.batchCalls[0].length, 9);
+  assert.equal(DB.batchCalls[0].length, 12);
   assert.equal(DB.batchCalls.flat().some((statement) => /\bINSERT\b/i.test(statement.sql)), false);
   assert.equal(result.prices.usStock[0].symbol, "MU");
   assert.equal(result.accountImpactSummary[0].rangeLabel, "1~2%");
   assert.deepEqual(result.account_impact_summary, result.accountImpactSummary);
 });
 
-test("review bootstrap can fall back to independently selected nonempty market and rotation notes", async () => {
+test("review bootstrap inherits independently dated market and rotation notes in the first read batch", async () => {
   const DB = createBootstrapDb({
-    previousReview: {
-      market_sentiment_blocks_json: JSON.stringify([{ title: "更早的大盘内容" }]),
-      sector_rotation_blocks_json: JSON.stringify([{ title: "较近的板块内容" }]),
-    },
+    historyRows: [
+      { archive_date: "2026-08-04", review_status: "reviewed", market_review_json: null, market_sentiment_blocks_json: null,
+        sector_rotation_blocks_json: JSON.stringify([{ id: "r", title: "较近的板块内容", children: [] }]) },
+      { archive_date: "2026-08-03", review_status: "reviewed", market_review_json: null,
+        market_sentiment_blocks_json: JSON.stringify([{ id: "m", title: "更早的大盘内容", children: [] }]), sector_rotation_blocks_json: null },
+    ],
   });
   const result = await getReviewBootstrap({ DB }, "2026-08-05");
 
-  assert.equal(result.structuredNotes.marketSentiment.blocks[0].title, "更早的大盘内容");
-  assert.equal(result.structuredNotes.sectorRotation.blocks[0].title, "较近的板块内容");
-  const fallbackStatement = DB.batchCalls[0][5];
-  assert.equal(fallbackStatement.params.length, 2);
-  assert.equal(fallbackStatement.sql.includes("LENGTH(TRIM(COALESCE(market_sentiment_blocks_json"), true);
-  assert.equal(fallbackStatement.sql.includes("LENGTH(TRIM(COALESCE(sector_rotation_blocks_json"), true);
+  const market = result.structuredNotes.marketReview;
+  assert.equal(market.source, "inherited");
+  assert.deepEqual(market.blocks.map((block) => [block.legacyOrigin.group, block.title]), [["market", "更早的大盘内容"], ["rotation", "较近的板块内容"]]);
+  assert.deepEqual(market.sourceDates, ["2026-08-03", "2026-08-04"]);
+  assert.equal(result.structuredNotes.marketSentiment, undefined);
+  const historyStatement = DB.batchCalls[0].find((statement) => statement.sql.includes("market_review_json IS NOT NULL")
+    && !statement.sql.includes("daily_review_symbol_levels"));
+  assert.deepEqual(historyStatement.params, Array(5).fill("2026-08-05"));
+  assert.equal(historyStatement.sql.includes("market_review_json IS NULL"), true);
+  assert.equal(DB.batchCalls.length, 2);
 });
 
 test("review list reuses the joined account snapshot without per-row database reads", async () => {
@@ -340,49 +344,6 @@ test("review note blocks preserve arbitrary titles", () => {
   assert.equal(blocks[0].children[1].body.includes("**重点**"), true);
 });
 
-test("empty initialized review notes fall back to previous reviewed notes", () => {
-  const resolved = resolveReviewNoteBlocksWithFallback(
-    {
-      review_status: "initialized",
-      market_sentiment_blocks_json: null,
-    },
-    {
-      archive_date: "2026-05-15",
-      market_sentiment_blocks_json: JSON.stringify([
-        { title: "黄金", children: [{ title: "战争影响", body: "避险需求升温。" }] },
-      ]),
-    },
-    "market_sentiment_blocks_json",
-    "market",
-  );
-
-  assert.equal(resolved.source, "saved");
-  assert.equal(resolved.blocks.length, 1);
-  assert.equal(resolved.blocks[0].title, "黄金");
-});
-
-test("empty initialized review notes prefer previous saved structured notes", () => {
-  const resolved = resolveReviewNoteBlocksWithFallback(
-    {
-      review_status: "initialized",
-      market_sentiment_blocks_json: null,
-    },
-    {
-      archive_date: "2026-05-15",
-      market_sentiment_blocks_json: JSON.stringify([
-        { title: "标普500点位", children: [{ title: "CTA流动性", body: "横盘 sell。" }] },
-      ]),
-    },
-    "market_sentiment_blocks_json",
-    "market",
-  );
-
-  assert.equal(resolved.source, "saved");
-  assert.equal(resolved.blocks[0].title, "标普500点位");
-  assert.equal(resolved.blocks[0].children[0].title, "CTA流动性");
-});
-
-
 test("batch completion protects the newest record even when it is already reviewed", async () => {
   const DB = { prepare(sql) {
     assert.match(sql, /SELECT MAX/);
@@ -393,25 +354,24 @@ test("batch completion protects the newest record even when it is already review
   assert.equal(result.reason, "reserved review date");
 });
 
-test("batch autofill preserves drafts and explicit empty blocks before archiving; failures stay pending", async () => {
+async function runBatchAutofill(record) {
   const writes = [];
-  // completeReview 先用一次 batch 读齐六份数据，再让 saveReviewDraft 走自己的读/写批次，
+  // completeReview 先用一次 batch 读齐数据，再让 saveReviewDraft 走自己的读/写批次，
   // 最后把「标记新闻已复盘 + 读取待归档新闻」放进同一批——故障点就落在这一批上。
   const batchResultFor = (sql) => {
     const flat = sql.replace(/\s+/g, " ");
-    if (flat.includes("action_plan_count")) {
-      return { results: [{ archive_date: "2026-05-08", review_status: "draft",
-        reviewer_news_notes: "自己的新闻点评", trading_summary: "自己的深度总结",
-        market_sentiment_blocks_json: "[]", sector_rotation_blocks_json: null }] };
-    }
+    if (flat.includes("action_plan_count")) return { results: [record] };
+    if (flat.includes("daily_review_symbol_levels")) return { results: [] };
+    if (flat.includes("market_review_json IS NOT NULL")) return { results: [] };
+    if (flat.includes("FROM tracked_symbols")) return { results: [{ id: 1, symbol: "GSPC", display_name: "标普500", is_active: 1 }] };
     if (flat.includes("DISTINCT k_date")) return { results: [] };
     if (flat.includes("source_news_ids")) return { results: [] };
     if (flat.includes("FROM daily_review_action_plans p")) return { results: [] };
     if (flat.includes("FROM investment_accounts")) return { results: [] };
     if (flat.includes("SELECT account_id, symbol")) return { results: [] };
-    if (flat.includes("SELECT review_status FROM daily_review_archive")) return { results: [{ review_status: "draft" }] };
+    if (flat.includes("SELECT * FROM daily_review_archive WHERE")) return { results: [record] };
     if (flat.includes("SELECT MAX(archive_date)")) return { results: [{ latest: "2026-05-12" }] };
-    if (flat.includes("INSERT INTO daily_review_archive")) return { results: [] };
+    if (flat.includes("INSERT INTO daily_review_archive")) return { results: [{ market_review_json: null }] };
     if (flat.includes("news_raw_data")) throw new Error("模拟新闻归档失败");
     throw new Error(`unexpected batch sql: ${flat}`);
   };
@@ -422,9 +382,7 @@ test("batch autofill preserves drafts and explicit empty blocks before archiving
       bind: (...args) => make(args),
       async first() {
         if (sql.includes("SELECT MAX")) return { latest: "2026-05-12" };
-        return { review_status: "draft", reviewer_news_notes: "自己的新闻点评",
-          trading_summary: "自己的深度总结", market_sentiment_blocks_json: "[]",
-          sector_rotation_blocks_json: null };
+        return record;
       },
       async run() { writes.push({ sql, values }); },
       async all() { throw new Error("模拟新闻归档失败"); },
@@ -441,14 +399,31 @@ test("batch autofill preserves drafts and explicit empty blocks before archiving
   await assert.rejects(completeReview({ DB }, "2026-05-08", {
     completionSource: "batch", autoFill: {
       reviewerNewsNotes: "AI 总结",
-      marketSentimentBlocks: [{ title: "旧大盘", children: [] }],
-      sectorRotationBlocks: [{ title: "旧板块", children: [] }],
+      marketReview: { blocks: [{ id: "auto-gspc", type: "symbol", symbol: "GSPC", children: [] }], levels: [] },
     },
   }), /模拟新闻归档失败/);
+  return writes;
+}
+
+test("batch autofill keeps own news, summary and explicit legacy empty market over defaults; failures stay pending", async () => {
+  const draft = { archive_date: "2026-05-08", review_status: "draft", reviewer_news_notes: "自己的新闻点评",
+    trading_summary: "自己的深度总结", market_review_json: null, market_sentiment_blocks_json: "[]", sector_rotation_blocks_json: "[]" };
+  const writes = await runBatchAutofill(draft);
+  // 只有草稿保存的文档写入（价位行为空不生成语句），失败批次中的新闻归档未留下写入。
   assert.equal(writes.length, 1);
+  assert.match(writes[0].sql, /INSERT INTO daily_review_archive/);
   assert.equal(writes[0].values[1], "draft");
   assert.equal(writes[0].values[2], "自己的新闻点评");
-  assert.equal(writes[0].values[3], "[]");
-  assert.equal(JSON.parse(writes[0].values[4])[0].title, "旧板块");
-  assert.equal(writes[0].values[5], "自己的深度总结");
+  assert.deepEqual(JSON.parse(writes[0].values[3]).blocks, []);
+  assert.equal(writes[0].values[4], "自己的深度总结");
+  assert.equal(writes[0].values[6], 2);
+
+  const empty = await runBatchAutofill({ ...draft, reviewer_news_notes: "", market_sentiment_blocks_json: null, sector_rotation_blocks_json: null });
+  // 默认结构首次物化：文档 + 默认主题的空价位行，两者都在草稿保存这一批。
+  assert.equal(empty.length, 2);
+  assert.equal(empty[0].values[2], "AI 总结");
+  assert.deepEqual(JSON.parse(empty[0].values[3]).blocks.map((block) => block.id), ["auto-gspc"]);
+  assert.equal(empty[0].values[6], 1);
+  assert.match(empty[1].sql, /INSERT INTO daily_review_symbol_levels/);
+  assert.deepEqual(JSON.parse(empty[1].values[3]), [{ symbol: "GSPC", supportLevels: "", resistanceLevels: "" }]);
 });

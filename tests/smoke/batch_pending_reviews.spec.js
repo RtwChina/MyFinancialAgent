@@ -1,4 +1,5 @@
 import { test, expect } from '@playwright/test';
+import { createMarketReview, serializeMarketReview } from '../../cloudflare/web/market-review-model.js';
 
 const BASE_URL = process.env.BASE_URL || 'http://127.0.0.1:8787';
 const executablePath = process.env.PLAYWRIGHT_EXECUTABLE_PATH;
@@ -18,8 +19,9 @@ test('batch review fills historical dates, reserves latest date, and continues a
       latestArchiveDate: '2026-05-12', draft: { review_status: 'initialized' },
       analysis: { daily_major_events: '[大盘] 当天新闻总结' }, news: [],
       structuredNotes: {
-        marketSentiment: { blocks: [{ title: '沿用大盘', children: [] }] },
-        sectorRotation: { blocks: [{ title: '沿用板块', children: [] }] },
+        marketReview: { blocks: [{ id: 'inherited-gspc', type: 'symbol', symbol: 'GSPC', children: [
+          { id: 'inherited-gspc-thinking', kind: 'thinking', title: '思考', body: '沿用市场' },
+        ] }] },
       },
     }),
   }));
@@ -37,15 +39,21 @@ test('batch review fills historical dates, reserves latest date, and continues a
   await page.route(/\/api\/reviews\/\d{4}-\d{2}-\d{2}\/complete$/, async (route) => {
     const archiveDate = route.request().url().match(/reviews\/(\d{4}-\d{2}-\d{2})\/complete$/)?.[1];
     requestedDates.push(archiveDate);
-    expect(route.request().postDataJSON()).toEqual(expect.objectContaining({
+    const body = route.request().postDataJSON();
+    expect(body).toEqual(expect.objectContaining({
       onlyIfPending: true,
       autoFill: expect.objectContaining({
         reviewerNewsNotes: expect.stringContaining('当天新闻总结'),
-        marketSentimentBlocks: [expect.objectContaining({ title: '沿用大盘' })],
-        sectorRotationBlocks: [expect.objectContaining({ title: '沿用板块' })],
+        marketReview: {
+          blocks: [expect.objectContaining({ id: 'inherited-gspc', symbol: 'GSPC', children: [
+            expect.objectContaining({ id: 'inherited-gspc-thinking', kind: 'thinking', body: '沿用市场' }),
+          ] })],
+          levels: [],
+        },
       }),
       completionSource: 'batch',
     }));
+    for (const field of ['marketSentimentBlocks', 'sectorRotationBlocks']) expect(body.autoFill).not.toHaveProperty(field);
     if (archiveDate === '2026-05-07') {
       await route.fulfill({ status: 500, contentType: 'application/json', body: JSON.stringify({ error: '模拟失败' }) });
       return;
@@ -111,7 +119,9 @@ test('batch persisted autofill preserves empty notes and continues past a failed
  const f=await mountReview(page,{fixture:{historical:true,news:3,plans:2}});
  try{
   await page.locator('#closeDrawerBtn').click();
-  f.h.sqlite.exec("INSERT INTO daily_review_archive (archive_date,review_status) VALUES ('2026-09-13','initialized'),('2026-09-14','initialized'); UPDATE daily_review_archive SET market_sentiment_blocks_json='[]' WHERE archive_date='2026-09-16'");
+  f.h.sqlite.exec("INSERT INTO daily_review_archive (archive_date,review_status) VALUES ('2026-09-13','initialized'),('2026-09-14','initialized'); ");
+  const explicitEmpty=serializeMarketReview(createMarketReview({blocks:[]}));
+  f.h.sqlite.prepare("UPDATE daily_review_archive SET market_review_json=? WHERE archive_date='2026-09-16'").run(explicitEmpty);
   await page.route('http://review.test/api/reviews/2026-09-13/complete',r=>r.fulfill({status:500,contentType:'application/json',body:'{"error":"injected failure"}'}));
   await page.getByRole('button',{name:'复盘全部待处理',exact:true}).click();
   await expect(page.locator('#batchReviewStatus')).toContainText('失败 1 个');
@@ -119,7 +129,8 @@ test('batch persisted autofill preserves empty notes and continues past a failed
   expect(rows.find(x=>x.archive_date==='2026-09-17').review_status).toBe('initialized');
   expect(rows.find(x=>x.archive_date==='2026-09-13').review_status).toBe('initialized');
   expect(rows.find(x=>x.archive_date==='2026-09-14').review_status).toBe('reviewed');
-  expect(rows.find(x=>x.archive_date==='2026-09-16').market_sentiment_blocks_json).toBe('[]');
+  expect(rows.find(x=>x.archive_date==='2026-09-16').market_review_json).toBe(explicitEmpty);
+  expect(JSON.parse(explicitEmpty).blocks).toEqual([]);
   expect(f.h.snapshot().review_account_snapshots.every(x=>x.snapshot_source==='batch_review')).toBe(true);
   expect(f.requests.filter(x=>x.path.endsWith('/complete')).map(x=>x.path)).toEqual(['/api/reviews/2026-09-14/complete','/api/reviews/2026-09-16/complete']);
  }finally{f.h.close();}

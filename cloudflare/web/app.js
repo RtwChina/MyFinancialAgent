@@ -1,4 +1,5 @@
-import { buildZoneExport } from "./zone-export.js?v=20260904-sp500-template";
+import { buildZoneExport } from "./zone-export.js?v=20261016-market-review";
+import { MARKET_REVIEW_PRESETS, createMarketReview, assembleMarketReview, serializeMarketReview, createSymbolMarketBlock, changeMarketBlockSymbol, linkLegacyMarketBlock, searchMarketReviewSymbols, addMarketChild, updateMarketChildTitle, deleteMarketChild, patchMarketReviewLevels } from "./market-review-model.js";
 
 // ===== snarkdown (inline, ~1KB) — Markdown → HTML =====
 const _sdTags={'':['\x3cem>','</em>'],_:['\x3cstrong>','</strong>'],'*':['\x3cstrong>','</strong>'],'~':['\x3cs>','</s>'],'\n':['\x3cbr />'],' ':['\x3cbr />'],'-':['\x3chr />']};
@@ -99,12 +100,23 @@ const state = {
   reviewStatus: "initialized",
   reviewSubmitting: false,
   editMode: false,
-  reviewNoteBlocks: {
-    marketSentiment: [],
-    sectorRotation: [],
-  },
+  marketReview: createMarketReview(),
+  symbolLevels: {},
+  dirtySymbolLevels: {},
+  // 本次草稿刚关联的历史块：服务端要求关联时原文逐项不变，保存前锁定编辑。
+  pendingLegacyLinks: new Set(),
+  selectedMarketBlockId: null,
+  marketSymbolCatalog: [],
+  marketSymbolPickerFilter: "all",
+  marketSymbolPickerMode: "add",
+  marketCatalogFailed: false,
+  // Unfinished custom titles stay visible without feeding invalid data to the pure model.
+  marketChildTitleDrafts: {},
   actionPlans: [],
   accountLiveActionPlans: [],
+  liveSymbolLevels: {},
+  persistedLiveSymbolLevels: {},
+  livePlanBaselines: new Map(),
   fundSummary: null,
   investmentAccounts: [],
   selectedActionPlanIndex: -1,
@@ -189,7 +201,7 @@ function mountActionPlanEditor(rootEl, context = {}) {
     state.activeActionPlanEditor.destroy();
   }
   state.actionPlanEditorMode = ctx.mode;
-  state.actionPlans = ctx.plans.slice();
+  state.actionPlans = projectActionPlanLevels(ctx.plans.slice(), activeSymbolLevels());
   state.selectedActionPlanIndex = state.actionPlans.length ? 0 : -1;
   state.actionPlanSymbolCatalog = ctx.symbolCatalog.slice();
   if (ctx.accounts.length) {
@@ -246,13 +258,76 @@ function isActionPlanEditorReadOnly() {
 
 function notifyActionPlanLocalChange() {
   const ctx = getActiveActionPlanEditorContext();
+  if (ctx) ctx.plans = state.actionPlans.slice();
   if (ctx?.callbacks?.onLocalChange) ctx.callbacks.onLocalChange(state.actionPlans.slice());
+}
+
+function activeSymbolLevels() {
+  return isLiveActionPlanMode() ? state.liveSymbolLevels : state.symbolLevels;
+}
+
+function projectActionPlanLevels(plans, levels) {
+  for (const plan of plans) {
+    const row = levels[plan.symbol] || {};
+    // Plans are display projections, never a third price write source.
+    plan.supportLevels = row.supportLevels ?? "";
+    plan.resistanceLevels = row.resistanceLevels ?? "";
+  }
+  return plans;
+}
+
+function sharedLevelsHint(symbol, plans = state.actionPlans) {
+  const names = [...new Set(plans.filter((plan) => plan.symbol === symbol).map(accountNameForPlan))];
+  return `仅价位共用${names.length ? `：${names.join("、")}` : ""}；不是交易同步，动作、仓位、金额和交易计划仍按账户独立。`;
+}
+
+function refreshActionPlanLevelInputs(symbol = actionPlanSymbolSelect?.value || actionPlanSymbolInput?.value) {
+  const row = activeSymbolLevels()[symbol] || {};
+  for (const [input, field] of [[actionPlanSupportLevelsInput, "supportLevels"], [actionPlanResistanceLevelsInput, "resistanceLevels"]]) {
+    const value = row[field] ?? "";
+    if (input && input.value !== value) input.value = value;
+  }
+}
+
+function updateSharedSymbolLevels(symbol, fields, { supplement = false, live = isLiveActionPlanMode() } = {}) {
+  const levels = live ? state.liveSymbolLevels : state.symbolLevels;
+  const changed = Object.fromEntries(Object.entries(fields).filter(([field, value]) => value !== (levels[symbol]?.[field] ?? "")));
+  if (!symbol || !Object.keys(changed).length) return false;
+  const result = patchMarketReviewLevels(live ? createMarketReview() : state.marketReview, levels, [{ symbol, ...changed }], {
+    catalog: state.marketSymbolCatalog,
+    supplement: !live && supplement,
+  });
+  if (live) state.liveSymbolLevels = result.symbolLevels;
+  else {
+    state.marketReview = result.marketReview;
+    state.symbolLevels = result.symbolLevels;
+    state.dirtySymbolLevels[symbol] = { ...(state.dirtySymbolLevels[symbol] || {}), ...changed };
+    renderStructuredNoteEditors();
+    if (!marketReviewDetail.classList.contains("hidden")) {
+      if (supplement) renderMarketDetail();
+      else {
+        const block = selectedMarketBlock();
+        for (const input of document.querySelectorAll('#marketDetailFields textarea[data-market-kind="support"], #marketDetailFields textarea[data-market-kind="resistance"]')) {
+          const body = block?.children.find((child) => child.id === input.dataset.marketChildId)?.body ?? "";
+          if (input.value !== body) input.value = body;
+        }
+      }
+    }
+  }
+  projectActionPlanLevels(state.actionPlans, result.symbolLevels);
+  if (live) projectActionPlanLevels(state.accountLiveActionPlans, result.symbolLevels);
+  notifyActionPlanLocalChange();
+  renderActionPlanRowsOnly();
+  if (!actionPlanDetailModal?.classList.contains("hidden")) {
+    refreshActionPlanLevelInputs();
+    updateActionPlanDetailHeading();
+  }
+  return true;
 }
 
 const REVIEW_STEPS = [
   { key: "news", label: "新闻总结", field: "reviewerNewsNotes", optional: false, hint: "先看 AI 日总结和重点新闻，再写下你自己的主线判断与点评。" },
-  { key: "market", label: "大盘盘点", field: "marketSentiment", optional: false, hint: "只写真正影响大盘的变量，比如美元、利率、VIX 和风险偏好。" },
-  { key: "rotation", label: "板块轮动", field: "sectorRotation", optional: false, hint: "把大宗商品和板块强弱写清楚，说明谁领涨、谁承压、资金往哪边走。" },
+  { key: "market", label: "市场与板块", field: "marketReview", optional: false, hint: "选择市场或板块标的，记录支撑、压力与主线判断。" },
   { key: "plan", label: "操作计划", field: "actionPlans", optional: false, hint: "针对核心标的和仓位，给出明确计划、触发条件和风险线。" },
   { key: "thinking", label: "深度总结", field: "tradingSummary", optional: true, hint: "最后补深度反思。可选，但如果写了，最好落到可执行的下一步。" },
 ];
@@ -528,6 +603,7 @@ actionPlanAccountSelect?.addEventListener("change", () => {
 });
 actionPlanSymbolSelect?.addEventListener("change", () => {
   setActionPlanSymbolValue(actionPlanSymbolSelect.value, { notify: false });
+  refreshActionPlanLevelInputs();
 });
 actionPlanSymbolPickerTrigger?.addEventListener("click", () => toggleActionPlanSymbolPicker());
 actionPlanSymbolPicker?.addEventListener("click", (event) => {
@@ -588,14 +664,21 @@ function syncPositionBucketFromAmount() {
 ].filter(Boolean).forEach((el) => {
   el.addEventListener("input", () => autoResizeTextarea(el));
 });
-
-document.querySelectorAll("[data-note-add-section]").forEach((button) => {
-  button.addEventListener("click", () => addReviewNoteSection(button.dataset.noteAddSection));
-});
+for (const [input, field] of [[actionPlanSupportLevelsInput, "supportLevels"], [actionPlanResistanceLevelsInput, "resistanceLevels"]]) {
+  input?.addEventListener("input", () => {
+    if (isActionPlanEditorReadOnly()) return;
+    const symbol = actionPlanSymbolSelect?.value || actionPlanSymbolInput?.value;
+    updateSharedSymbolLevels(symbol, { [field]: input.value }, { supplement: true });
+  });
+}
 
 saveDraftBtn.addEventListener("click", async () => {
   if (!state.activeDate) return;
-  await saveReview();
+  try {
+    if (await saveReview() === true) setReviewFooterMessage("复盘已保存");
+  } catch (error) {
+    setReviewFooterMessage(`保存失败，草稿已保留：${error.message}`, { error: true });
+  }
 });
 
 initializeBtn.addEventListener("click", () => {
@@ -606,7 +689,11 @@ initializeBtn.addEventListener("click", () => {
 
 prevStepBtn.addEventListener("click", () => moveReviewStep(-1));
 nextStepBtn.addEventListener("click", async () => {
-  await handleNextStep();
+  try {
+    await handleNextStep();
+  } catch (error) {
+    setReviewFooterMessage(`完成失败，草稿已保留：${error.message}`, { error: true });
+  }
 });
 
 closeNewsDetailBtn.addEventListener("click", closeNewsDetail);
@@ -620,6 +707,16 @@ document.addEventListener("keydown", (event) => {
   if (event.key === "Escape") {
     if (actionPlanZoneExportModal && !actionPlanZoneExportModal.classList.contains("hidden")) {
       closeActionPlanZoneExport();
+      return;
+    }
+    if (!marketSymbolPicker.classList.contains("hidden")) {
+      event.preventDefault();
+      closeMarketSymbolPicker();
+      return;
+    }
+    if (!marketReviewDetail.classList.contains("hidden")) {
+      event.preventDefault();
+      closeMarketDetail();
       return;
     }
     if (!newsDetailModal.classList.contains("hidden")) closeNewsDetail();
@@ -1026,8 +1123,10 @@ async function completeAllPendingReviews() {
             completionSource: "batch",
             autoFill: {
               reviewerNewsNotes: buildDefaultNewsBrief(data.analysis, data.news || []),
-              marketSentimentBlocks: resolveBootstrapNoteBlocks(data, "marketSentiment"),
-              sectorRotationBlocks: resolveBootstrapNoteBlocks(data, "sectorRotation"),
+              marketReview: {
+                blocks: JSON.parse(serializeMarketReview(createMarketReview(data.structuredNotes?.marketReview || {}))).blocks,
+                levels: [],
+              },
             },
           }),
         });
@@ -1198,10 +1297,18 @@ async function openReviewDrawer(archiveDate, options = {}) {
   renderAnalysis(effectiveAnalysis, data.news);
   renderNewsPicker(data.news);
   state.accountImpactSummary = normalizeAccountImpactSummary(data.accountImpactSummary || data.account_impact_summary || []);
-  state.reviewNoteBlocks = {
-    marketSentiment: resolveBootstrapNoteBlocks(data, "marketSentiment"),
-    sectorRotation: resolveBootstrapNoteBlocks(data, "sectorRotation"),
-  };
+  state.symbolLevels = structuredClone(data.symbolLevels || {});
+  state.dirtySymbolLevels = {};
+  state.pendingLegacyLinks = new Set();
+  state.marketReview = assembleMarketReview(createMarketReview(data.structuredNotes?.marketReview || {}), state.symbolLevels);
+  state.marketChildTitleDrafts = {};
+  state.selectedMarketBlockId = state.marketReview.blocks[0]?.id || null;
+  state.marketSymbolCatalog = (data.marketReviewSymbols || []).map(normalizeActionPlanSymbolItem);
+  state.marketCatalogFailed = !Array.isArray(data.marketReviewSymbols);
+  closeMarketDetail({ restoreFocus: false });
+  closeMarketSymbolPicker({ restoreFocus: false });
+  setReviewFooterMessage("");
+  setMarketReviewMessage(state.marketCatalogFailed ? "标的目录读取失败，暂不能添加或更换标的；草稿已保留，可保存后重新打开复盘。" : "");
 
   applyFormValues({
     reviewerNewsNotes: data.draft?.reviewer_news_notes || data.draft?.news_brief || buildDefaultNewsBrief(data.analysis, data.news),
@@ -1235,7 +1342,6 @@ async function openReviewDrawer(archiveDate, options = {}) {
       console.warn("Failed to load action plan symbol catalog", error);
     });
   }
-  scheduleStructuredNoteTextareaResize();
 }
 
 function closeDrawer() {
@@ -1253,20 +1359,25 @@ function closeDrawer() {
     closeActionPlanDetail();
   }
   finishReviewDrawerLoading();
+  closeMarketDetail({ restoreFocus: false });
+  closeMarketSymbolPicker({ restoreFocus: false });
   reviewDrawer.classList.add("hidden");
 }
 
 async function saveReview({ forCompletion = false } = {}) {
+  validateMarketChildTitlesForSave();
   if (!actionPlanDetailModal?.classList.contains("hidden")) {
     if (syncSelectedActionPlanFromEditor() === false) return;
   }
   const payload = Object.fromEntries(new FormData(reviewForm).entries());
   payload.reviewStatus = state.activeBootstrap?.draft?.review_status || "initialized";
-  payload.actionPlans = normalizeActionPlans(state.actionPlans);
-  payload.marketSentimentBlocks = normalizeReviewNoteBlocks(state.reviewNoteBlocks.marketSentiment);
-  payload.sectorRotationBlocks = normalizeReviewNoteBlocks(state.reviewNoteBlocks.sectorRotation);
+  payload.actionPlans = normalizeActionPlans(state.actionPlans).map(({ supportLevels, resistanceLevels, ...plan }) => plan);
+  payload.marketReview = {
+    blocks: JSON.parse(serializeMarketReview(state.marketReview)).blocks,
+    levels: Object.entries(state.dirtySymbolLevels).map(([symbol, fields]) => ({ symbol, ...fields })),
+  };
 
-  await fetchJson(`/api/reviews/${state.activeDate}`, {
+  const response = await fetchJson(`/api/reviews/${state.activeDate}`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(payload),
@@ -1280,15 +1391,21 @@ async function saveReview({ forCompletion = false } = {}) {
       ...(state.activeBootstrap?.draft || {}),
       review_status: payload.reviewStatus,
       reviewer_news_notes: payload.reviewerNewsNotes,
-      market_sentiment_blocks: payload.marketSentimentBlocks,
-      sector_rotation_blocks: payload.sectorRotationBlocks,
       trading_summary: payload.tradingSummary,
     },
+    structuredNotes: { ...state.activeBootstrap?.structuredNotes, marketReview: response.marketReview },
+    symbolLevels: response.symbolLevels,
     actionPlans: payload.actionPlans,
   };
-  state.reviewNoteBlocks.marketSentiment = payload.marketSentimentBlocks;
-  state.reviewNoteBlocks.sectorRotation = payload.sectorRotationBlocks;
-  state.actionPlans = payload.actionPlans;
+  state.symbolLevels = structuredClone(response.symbolLevels || {});
+  state.marketReview = assembleMarketReview(createMarketReview(response.marketReview), state.symbolLevels);
+  state.dirtySymbolLevels = {};
+  state.pendingLegacyLinks = new Set();
+  if (!marketReviewDetail.classList.contains("hidden")) renderMarketDetail();
+  state.actionPlans = projectActionPlanLevels(normalizeActionPlans(response.actionPlans || payload.actionPlans), state.symbolLevels);
+  state.activeBootstrap.actionPlans = state.actionPlans;
+  notifyActionPlanLocalChange();
+  if (!actionPlanDetailModal?.classList.contains("hidden")) refreshActionPlanLevelInputs();
   state.selectedActionPlanIndex = state.actionPlans.length ? Math.max(0, state.selectedActionPlanIndex) : -1;
   if (!forCompletion) {
     renderActionPlans();
@@ -1499,231 +1616,468 @@ function buildImpactMeter(summary) {
   return meter;
 }
 
-function makeReviewNoteId(prefix = "note") {
-  return `${prefix}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+const marketReviewDetail = document.querySelector("#marketReviewDetail");
+const marketSymbolPicker = document.querySelector("#marketSymbolPicker");
+const marketReviewRows = document.querySelector("#marketReviewRows");
+let marketDetailReturnFocus = null;
+let marketPickerReturnFocus = null;
+
+function isMarketReviewReadOnly() {
+  return state.reviewStatus === "reviewed" && !state.editMode;
 }
 
-function normalizeReviewNoteBlocks(value = []) {
-  const source = Array.isArray(value) ? value : [];
-  return source
-    .map((section) => {
-      const title = String(section?.title || "").trim();
-      const children = (Array.isArray(section?.children) ? section.children : [])
-        .map((child) => {
-          const childTitle = String(child?.title || "").trim();
-          const body = String(child?.body || "").trim();
-          if (!childTitle && !body) return null;
-          return {
-            id: String(child?.id || makeReviewNoteId("sub")),
-            title: childTitle || "未命名维度",
-            body,
-          };
-        })
-        .filter(Boolean);
-      if (!title && !children.length) return null;
-      return {
-        id: String(section?.id || makeReviewNoteId("section")),
-        title: title || "未命名主题",
-        children,
-      };
-    })
-    .filter(Boolean);
+// Save/complete feedback lives in the drawer footer so it stays visible on every step.
+function setReviewFooterMessage(message, { error = false } = {}) {
+  const node = document.querySelector("#reviewFooterMessage");
+  node.textContent = message;
+  node.classList.toggle("error", Boolean(message) && error);
+  node.classList.toggle("hidden", !message);
 }
 
-function reviewNoteBlocksHaveContent(blocks = []) {
-  return normalizeReviewNoteBlocks(blocks).some((section) => (
-    String(section.title || "").trim()
-    || (section.children || []).some((child) => String(child.title || child.body || "").trim())
-  ));
+function setMarketReviewMessage(message) {
+  document.querySelector("#marketReviewMessage").textContent = message;
+  document.querySelector(".market-catalog-status").classList.toggle("hidden", !message);
 }
 
-function resolveBootstrapNoteBlocks(data, camelKey) {
-  const structured = data.structuredNotes?.[camelKey]?.blocks;
-  if (Array.isArray(structured)) return normalizeReviewNoteBlocks(structured);
-  return [];
+function marketBlockLabel(block) {
+  return block.identity?.displayCode || block.symbol || block.title || "未关联主题";
+}
+
+function isMarketBlockLocked(block) {
+  return !block || block.type !== "symbol" || state.pendingLegacyLinks.has(block.id);
+}
+
+const LEGACY_GROUP_LABELS = { market: "大盘盘点", rotation: "大宗商品与板块轮动" };
+
+function legacyOriginText(origin) {
+  if (!origin) return "";
+  return `历史来源：${origin.date} ${LEGACY_GROUP_LABELS[origin.group] || origin.group} 第 ${Number(origin.index) + 1} 项「${origin.title || "无标题"}」`;
+}
+
+function levelSourceText(source = {}) {
+  if (source.type === "plan") return `${source.date} ${findAccountById(source.accountId)?.name || `账户 ${source.accountId}`} 操作计划`;
+  if (source.type === "levels") return `${source.date} 共用价位`;
+  return `${source.date} 市场原文`;
+}
+
+function renderMarketLevelConflicts(block) {
+  const container = document.querySelector("#marketLevelConflicts");
+  const conflicts = block.type === "symbol" ? (state.marketReview.conflicts || []).filter((item) => item.symbol === block.symbol) : [];
+  container.classList.toggle("hidden", !conflicts.length);
+  if (!conflicts.length) { container.innerHTML = ""; return; }
+  const fieldLabel = { supportLevels: "支撑位", resistanceLevels: "压力位" };
+  const entry = (label, value) => `<li><span class="market-conflict-source">${escapeHtml(label)}</span><pre>${escapeHtml(value || "（空）")}</pre></li>`;
+  container.innerHTML = `<summary>历史价位来源差异 ${conflicts.length} 项（仅供核对，不会自动改写）</summary>${conflicts.map((conflict) => {
+    const current = state.symbolLevels[block.symbol]?.[conflict.field] ?? "";
+    return `<section class="market-conflict"><h4>${escapeHtml(fieldLabel[conflict.field] || conflict.field)}</h4><ul>
+      ${entry(`首次采用 · ${levelSourceText(conflict.selectedSource)}`, conflict.selectedValue)}
+      ${conflict.alternatives.map((item) => entry(`未采纳 · ${levelSourceText(item.source)}`, item.value)).join("")}
+      ${entry(current === conflict.selectedValue ? "当前值（与首次采用一致）" : "当前值", current)}
+    </ul></section>`;
+  }).join("")}`;
+}
+
+function marketBlockAnchor(id) {
+  return `review-market-${id}`;
+}
+
+function selectedMarketBlock() {
+  return state.marketReview.blocks.find((block) => block.id === state.selectedMarketBlockId);
+}
+
+function marketChildTitle(child) {
+  return Object.hasOwn(state.marketChildTitleDrafts, child.id) ? state.marketChildTitleDrafts[child.id] : child.title;
+}
+
+function replaceMarketDraftBlock(block) {
+  state.marketReview.blocks = state.marketReview.blocks.map((item) => item.id === block.id ? block : item);
+}
+
+function focusMarketChild(childId) {
+  const input = [...document.querySelectorAll('#marketDetailFields [data-market-title], #marketDetailFields textarea')]
+    .find((field) => field.dataset.marketChildId === childId);
+  input?.focus({ preventScroll: true });
+  input?.scrollIntoView({ block: "nearest" });
+}
+
+function validateMarketChildTitlesForSave() {
+  for (const block of state.marketReview.blocks) {
+    if (block.type !== "symbol") continue;
+    for (const child of block.children) {
+      if (child.kind !== "custom") continue;
+      const title = marketChildTitle(child);
+      if (!title.trim() || Object.hasOwn(state.marketChildTitleDrafts, child.id)) {
+        openMarketDetail(block.id, null, child.id);
+        const message = !title.trim() ? "自定义标题不能为空，请填写标题后再保存。" : "自定义标题尚未更新，请重新编辑标题后再保存。";
+        document.querySelector("#marketDetailMessage").textContent = message;
+        focusMarketChild(child.id);
+        throw new Error(message);
+      }
+    }
+  }
 }
 
 function renderStructuredNoteEditors() {
-  renderStructuredNoteEditor("marketSentiment", document.querySelector("#marketSentimentBlockEditor"));
-  renderStructuredNoteEditor("sectorRotation", document.querySelector("#sectorRotationBlockEditor"));
+  const blocks = state.marketReview.blocks;
+  const readOnly = isMarketReviewReadOnly();
+  if (!blocks.some((block) => block.id === state.selectedMarketBlockId)) state.selectedMarketBlockId = blocks[0]?.id || null;
+  marketReviewRows.innerHTML = blocks.map((block) => {
+    const value = (kind) => (block.children || []).filter((child) => child.kind === kind).map((child) => child.body || "").join("\n");
+    return `<tr id="${escapeAttribute(marketBlockAnchor(block.id))}" data-market-block-id="${escapeAttribute(block.id)}" class="${block.id === state.selectedMarketBlockId ? "selected" : ""}" tabindex="0" aria-label="查看 ${escapeAttribute(marketBlockLabel(block))} 详情" aria-selected="${block.id === state.selectedMarketBlockId}">
+      <td class="action-plan-target-cell"><strong class="action-plan-symbol">${escapeHtml(marketBlockLabel(block))}</strong><small class="market-symbol-name">${escapeHtml(block.identity?.displayName || block.title || "")}</small>${block.type === "legacy" ? `<small class="market-legacy-badge">未关联历史原文 · ${escapeHtml(block.legacyOrigin?.date || "")}</small>` : ""}</td>
+      <td>${renderActionPlanTextCell(value("support"), "action-plan-levels")}</td>
+      <td>${renderActionPlanTextCell(value("resistance"), "action-plan-levels")}</td>
+      <td>${renderActionPlanTextCell(value("thinking"))}</td>
+      <td>${renderActionPlanTextCell((block.children || []).filter((child) => !["support", "resistance", "thinking"].includes(child.kind)).map((child) => `${marketChildTitle(child)}：${child.body || ""}`).join("\n"))}</td>
+    </tr>`;
+  }).join("");
+  marketReviewRows.querySelectorAll("tr").forEach((row) => {
+    row.addEventListener("click", () => openMarketDetail(row.dataset.marketBlockId, row));
+    row.addEventListener("keydown", (event) => {
+      if (event.key === "Enter" || event.key === " ") {
+        event.preventDefault();
+        openMarketDetail(row.dataset.marketBlockId, row);
+      }
+    });
+  });
+  marketReviewRows.querySelectorAll("[data-full-text]").forEach((cell) => {
+    cell.addEventListener("mouseenter", showActionPlanCellTooltip);
+    cell.addEventListener("mousemove", positionActionPlanCellTooltip);
+    cell.addEventListener("mouseleave", hideActionPlanCellTooltip);
+  });
+  bindHorizontalWheelScroll(marketReviewRows.closest(".action-plan-table-wrap"));
+  const index = blocks.findIndex((block) => block.id === state.selectedMarketBlockId);
+  document.querySelector("#marketReviewEmpty").classList.toggle("hidden", blocks.length > 0);
+  document.querySelector("#addMarketBlockBtn").disabled = readOnly || state.marketCatalogFailed;
+  document.querySelector("#marketAutoSortBtn").disabled = readOnly || blocks.length < 2;
+  document.querySelector("#marketMoveUpBtn").disabled = readOnly || index <= 0;
+  document.querySelector("#marketMoveDownBtn").disabled = readOnly || index < 0 || index >= blocks.length - 1;
+  document.querySelector("#marketDeleteBlockBtn").disabled = readOnly || index < 0;
   renderReviewOutline();
 }
 
-function renderStructuredNoteEditor(field, container) {
-  if (!container) return;
-  const readOnly = state.reviewStatus === "reviewed" && !state.editMode;
-  const blocks = normalizeReviewNoteBlocks(state.reviewNoteBlocks[field] || []);
-  state.reviewNoteBlocks[field] = blocks;
-  container.innerHTML = "";
-  container.classList.toggle("is-readonly", readOnly);
-  if (!blocks.length) {
-    const empty = document.createElement("div");
-    empty.className = "empty-state structured-note-empty";
-    empty.textContent = readOnly ? "暂无内容" : "还没有内容，先添加一个一级块。";
-    container.appendChild(empty);
-    return;
-  }
-  blocks.forEach((section, sectionIndex) => {
-    const sectionEl = document.createElement("article");
-    sectionEl.className = "structured-note-section";
-    sectionEl.id = getReviewNoteSectionAnchor(field, sectionIndex);
-    const head = document.createElement("div");
-    head.className = "structured-note-section-head";
-    const indexEl = document.createElement("span");
-    indexEl.className = "structured-note-section-index";
-    indexEl.textContent = String(sectionIndex + 1);
-    head.appendChild(indexEl);
-    const titleInput = document.createElement("input");
-    titleInput.value = section.title;
-    titleInput.placeholder = "一级标题";
-    titleInput.readOnly = readOnly;
-    titleInput.addEventListener("input", () => updateReviewNoteSectionTitle(field, sectionIndex, titleInput.value));
-    head.appendChild(titleInput);
-    const sectionTools = buildReviewNoteTools([
-      ["删除", () => deleteReviewNoteSection(field, sectionIndex), false],
-    ], readOnly);
-    if (!readOnly) {
-      sectionTools.prepend(buildReviewNoteDragHandle({
-        label: "拖动一级排序",
-        type: "section",
-        field,
-        sectionIndex,
-      }));
-    }
-    head.appendChild(sectionTools);
-    sectionEl.appendChild(head);
-
-    const childList = document.createElement("div");
-    childList.className = "structured-note-subsections";
-    (section.children || []).forEach((child, childIndex) => {
-      childList.appendChild(buildReviewNoteSubsection(field, sectionIndex, childIndex, child, readOnly));
-    });
-    sectionEl.appendChild(childList);
-
-    if (!readOnly) {
-      const addChild = document.createElement("button");
-      addChild.type = "button";
-      addChild.className = "ghost compact-button structured-note-add-sub";
-      addChild.textContent = "+ 二级";
-      addChild.addEventListener("click", () => addReviewNoteSubsection(field, sectionIndex));
-      sectionEl.appendChild(addChild);
-    }
-    container.appendChild(sectionEl);
-  });
+function openMarketDetail(id, source = null, childId = null) {
+  if (!state.marketReview.blocks.some((block) => block.id === id)) return;
+  state.selectedMarketBlockId = id;
+  marketDetailReturnFocus = source || document.activeElement;
+  renderStructuredNoteEditors();
+  marketReviewDetail.classList.remove("hidden");
+  renderMarketDetail();
+  hideActionPlanCellTooltip();
+  requestAnimationFrame(() => childId ? focusMarketChild(childId) : document.querySelector("#closeMarketDetailBtn").focus());
 }
 
-function buildReviewNoteSubsection(field, sectionIndex, childIndex, child, readOnly) {
-  // 对齐 demo .note-sub 结构：<div class="note-sub"><div class="note-sub-head"><b><span class="note-sub-tools"></span></div><p></p></div>
-  // input/textarea 仍保留以维持编辑能力，readOnly 时通过 CSS 让其视觉等同 <b>/<p>
-  const wrapper = document.createElement("div");
-  wrapper.className = "note-sub";
-  wrapper.id = getReviewNoteSubsectionAnchor(field, sectionIndex, childIndex);
-  const head = document.createElement("div");
-  head.className = "note-sub-head";
-  const input = document.createElement("input");
-  input.value = child.title;
-  input.placeholder = "二级标题";
-  input.readOnly = readOnly;
-  input.addEventListener("input", () => updateReviewNoteSubsection(field, sectionIndex, childIndex, { title: input.value }));
-  head.appendChild(input);
-  const siblings = state.reviewNoteBlocks[field]?.[sectionIndex]?.children || [];
-  const tools = document.createElement("span");
-  tools.className = "note-sub-tools";
-  if (!readOnly && siblings.length > 1) {
-    tools.appendChild(buildReviewNoteDragHandle({
-      label: "拖动二级排序",
-      type: "subsection",
-      field,
-      sectionIndex,
-      childIndex,
-    }));
+function closeMarketDetail({ restoreFocus = true } = {}) {
+  marketReviewDetail.classList.add("hidden");
+  if (restoreFocus) {
+    const row = document.getElementById(marketBlockAnchor(state.selectedMarketBlockId));
+    (marketDetailReturnFocus?.isConnected ? marketDetailReturnFocus : row)?.focus({ preventScroll: true });
   }
-  const deleteBtn = document.createElement("button");
-  deleteBtn.type = "button";
-  deleteBtn.className = "compact-button danger";
-  deleteBtn.textContent = "删除";
-  deleteBtn.disabled = readOnly;
-  deleteBtn.addEventListener("click", () => deleteReviewNoteSubsection(field, sectionIndex, childIndex));
-  tools.appendChild(deleteBtn);
-  head.appendChild(tools);
-  const textarea = document.createElement("textarea");
-  textarea.rows = 2;
-  textarea.placeholder = "正文";
-  textarea.dataset.noMd = "";
-  textarea.value = child.body || "";
-  textarea.readOnly = readOnly;
-  const resizeNoteTextarea = () => scheduleTextareaResize(textarea);
-  textarea.addEventListener("input", () => {
-    updateReviewNoteSubsection(field, sectionIndex, childIndex, { body: textarea.value });
-    resizeNoteTextarea();
-  });
-  textarea.addEventListener("change", resizeNoteTextarea);
-  textarea.addEventListener("paste", resizeNoteTextarea);
-  textarea.addEventListener("compositionend", resizeNoteTextarea);
-  textarea.addEventListener("focus", resizeNoteTextarea);
-  wrapper.append(head, textarea);
-  scheduleTextareaResize(textarea);
-  return wrapper;
 }
 
-function buildReviewNoteTools(items, readOnly) {
-  const tools = document.createElement("div");
-  tools.className = "structured-note-tools";
-  items.forEach(([label, handler, disabled]) => {
+function renderMarketChildMenu(block, readOnly) {
+  const select = document.querySelector("#marketChildKindSelect");
+  const previous = select.value;
+  const kinds = [...Object.entries(MARKET_REVIEW_PRESETS), ["custom", "自定义"]];
+  select.innerHTML = kinds.map(([kind, title]) => `<option value="${kind}" ${kind !== "custom" && block.children.some((child) => child.kind === kind) ? "disabled" : ""}>${escapeHtml(title)}</option>`).join("");
+  const available = [...select.options].filter((option) => !option.disabled);
+  select.value = available.some((option) => option.value === previous) ? previous : available[0].value;
+  select.disabled = readOnly;
+  document.querySelector("#addMarketChildBtn").disabled = readOnly;
+}
+
+function addSelectedMarketChild() {
+  const block = selectedMarketBlock();
+  if (isMarketBlockLocked(block) || isMarketReviewReadOnly()) return;
+  const kind = document.querySelector("#marketChildKindSelect").value;
+  const id = `market-child-${crypto.randomUUID()}`;
+  try {
+    const changed = addMarketChild(block, { kind, title: kind === "custom" ? "自定义分析" : "", id });
+    replaceMarketDraftBlock(assembleMarketReview(createMarketReview({ blocks: [changed] }), state.symbolLevels).blocks[0]);
+    renderStructuredNoteEditors();
+    renderMarketDetail();
+    focusMarketChild(id);
+  } catch (error) {
+    document.querySelector("#marketDetailMessage").textContent = error.message;
+  }
+}
+
+function deleteSelectedMarketChild(childId) {
+  const block = selectedMarketBlock();
+  if (isMarketBlockLocked(block) || isMarketReviewReadOnly()) return;
+  const index = block.children.findIndex((child) => child.id === childId);
+  if (index < 0) return;
+  if (!window.confirm(`删除“${marketChildTitle(block.children[index])}”二级内容？不会删除操作计划中的价位。`)) return;
+  try {
+    const changed = deleteMarketChild(block, childId);
+    replaceMarketDraftBlock(changed);
+    delete state.marketChildTitleDrafts[childId];
+    renderStructuredNoteEditors();
+    renderMarketDetail();
+    const nextId = changed.children[Math.min(index, changed.children.length - 1)]?.id;
+    if (nextId) focusMarketChild(nextId);
+    else document.querySelector("#marketChildKindSelect").focus();
+  } catch (error) {
+    document.querySelector("#marketDetailMessage").textContent = error.message;
+  }
+}
+
+function renderMarketDetail() {
+  const block = selectedMarketBlock();
+  if (!block) { closeMarketDetail(); return; }
+  const readOnly = isMarketReviewReadOnly() || isMarketBlockLocked(block);
+  const legacy = block.type === "legacy";
+  const pendingLink = state.pendingLegacyLinks.has(block.id);
+  document.querySelector("#marketDetailTitle").textContent = legacy ? `未关联历史原文 · ${block.title || "无标题"}` : `${marketBlockLabel(block)} · ${block.identity?.displayName || block.title || ""}`;
+  document.querySelector("#marketSharedLevelsHint").textContent = block.type === "symbol" ? sharedLevelsHint(block.symbol) : "";
+  const metricsContainer = document.querySelector("#marketDetailMetrics");
+  metricsContainer.classList.toggle("hidden", block.type !== "symbol");
+  const metrics = block.type === "symbol" ? findActionPlanSymbol(block.symbol)?.metrics || {} : {};
+  for (const [name, value] of [["latest-price", formatMetricNumber(metrics.latestPrice)], ["day-change", formatMetricPercent(metrics.dayChangePercent)]]) {
+    const metric = metricsContainer.querySelector(`[data-metric="${name}"]`);
+    metric.querySelector("strong").textContent = value;
+    metric.classList.toggle("metric-up", value.startsWith("+"));
+    metric.classList.toggle("metric-down", value.startsWith("-"));
+  }
+  const hasLevels = block.children.some((child) => child.kind === "support" || child.kind === "resistance");
+  const changeButton = document.querySelector("#changeMarketSymbolBtn");
+  changeButton.textContent = legacy ? "关联标的" : "更换标的";
+  changeButton.disabled = legacy ? isMarketReviewReadOnly() || state.marketCatalogFailed : readOnly || hasLevels || state.marketCatalogFailed;
+  document.querySelector("#marketChangeSymbolHint").textContent = legacy
+    ? "未关联历史原标题与正文只读；可删除，或关联一个尚未使用的标的（原文保留为自定义二级，不写入共用价位）。"
+    : pendingLink ? "已关联历史原文，请先保存复盘，再编辑该主题。"
+      : hasLevels ? "含支撑位或压力位二级的主题不能更换标的（空正文也不能更换）。" : "更换标的保留当前二级正文。";
+  const origin = document.querySelector("#marketLegacyOrigin");
+  origin.textContent = legacyOriginText(block.legacyOrigin);
+  origin.classList.toggle("hidden", !block.legacyOrigin);
+  renderMarketLevelConflicts(block);
+  document.querySelector("#finishMarketDetailBtn").textContent = readOnly ? "关闭详情" : "完成编辑";
+  const invalidTitle = block.type === "symbol" && block.children.some((child) => child.kind === "custom" && !marketChildTitle(child).trim());
+  document.querySelector("#marketDetailMessage").textContent = invalidTitle ? "自定义标题不能为空，请填写标题后再保存。" : "";
+  renderMarketChildMenu(block, readOnly);
+  const fields = document.querySelector("#marketDetailFields");
+  fields.innerHTML = "";
+  block.children.forEach((child) => {
+    const card = document.createElement("section");
+    const isLevel = child.kind === "support" || child.kind === "resistance";
+    card.className = `market-detail-field ${isLevel ? "market-level-card" : "market-wide-card"}`;
+    const header = document.createElement("div");
+    header.className = "market-child-header";
+    if (child.kind === "custom") {
+      const label = document.createElement("label");
+      label.className = "market-child-title-label";
+      const caption = document.createElement("span");
+      caption.className = "field-title";
+      caption.textContent = "自定义标题";
+      const titleInput = document.createElement("input");
+      titleInput.type = "text";
+      titleInput.dataset.marketTitle = "";
+      titleInput.dataset.marketChildId = child.id;
+      titleInput.value = marketChildTitle(child);
+      titleInput.readOnly = readOnly;
+      titleInput.setAttribute("aria-label", "自定义标题");
+      titleInput.setAttribute("aria-describedby", "marketDetailMessage");
+      titleInput.setAttribute("aria-invalid", String(!readOnly && !titleInput.value.trim()));
+      titleInput.addEventListener("input", () => {
+        const current = selectedMarketBlock();
+        if (isMarketBlockLocked(current) || isMarketReviewReadOnly()) return;
+        state.marketChildTitleDrafts[child.id] = titleInput.value;
+        titleInput.setAttribute("aria-invalid", String(!titleInput.value.trim()));
+        const message = document.querySelector("#marketDetailMessage");
+        if (titleInput.value.trim()) {
+          try {
+            replaceMarketDraftBlock(updateMarketChildTitle(current, child.id, titleInput.value));
+            delete state.marketChildTitleDrafts[child.id];
+            message.textContent = "";
+          } catch (error) {
+            message.textContent = error.message;
+          }
+        } else message.textContent = "自定义标题不能为空，请填写标题后再保存。";
+        input.setAttribute("aria-label", titleInput.value || "自定义正文");
+        renderStructuredNoteEditors();
+      });
+      label.append(caption, titleInput);
+      header.appendChild(label);
+    } else {
+      const title = document.createElement("span");
+      title.className = "field-title";
+      title.textContent = child.title;
+      header.appendChild(title);
+    }
+    const actions = document.createElement("div");
+    actions.className = "market-child-actions";
     const button = document.createElement("button");
     button.type = "button";
     button.className = "ghost compact-button";
-    button.textContent = label;
-    button.disabled = readOnly || disabled;
-    button.addEventListener("click", handler);
-    tools.appendChild(button);
+    button.textContent = "删除";
+    button.dataset.marketChildAction = "delete";
+    button.dataset.marketChildId = child.id;
+    button.setAttribute("aria-label", `删除 ${marketChildTitle(child)}`);
+    button.disabled = readOnly;
+    button.addEventListener("click", () => deleteSelectedMarketChild(child.id));
+    actions.appendChild(button);
+    header.appendChild(actions);
+    const input = document.createElement("textarea");
+    input.dataset.marketKind = child.kind;
+    input.dataset.marketChildId = child.id;
+    input.dataset.noMd = "";
+    input.rows = isLevel ? 4 : 3;
+    input.value = child.body || "";
+    input.readOnly = readOnly;
+    if (isLevel) input.disabled = readOnly;
+    input.setAttribute("aria-label", marketChildTitle(child) || "自定义正文");
+    input.addEventListener("input", () => {
+      const current = selectedMarketBlock();
+      if (isMarketBlockLocked(current) || isMarketReviewReadOnly()) return;
+      const currentChild = current.children.find((item) => item.id === child.id);
+      if (!currentChild) return;
+      if (isLevel) {
+        const key = child.kind === "support" ? "supportLevels" : "resistanceLevels";
+        updateSharedSymbolLevels(current.symbol, { [key]: input.value }, { supplement: false, live: false });
+      } else {
+        currentChild.body = input.value;
+        renderStructuredNoteEditors();
+      }
+      autoResizeTextarea(input);
+    });
+    card.append(header, input);
+    fields.appendChild(card);
+    scheduleTextareaResize(input);
   });
-  return tools;
 }
 
-let reviewNoteDragState = null;
+function openMarketSymbolPicker(mode = "add") {
+  if (isMarketReviewReadOnly() || state.marketCatalogFailed) return;
+  state.marketSymbolPickerMode = mode;
+  state.marketSymbolPickerFilter = "all";
+  marketPickerReturnFocus = document.activeElement;
+  document.querySelector("#marketSymbolSearchInput").value = "";
+  document.querySelector("#marketSymbolPickerTitle").textContent = { add: "添加市场标的", change: "更换市场标的", link: "关联历史原文到标的" }[mode];
+  marketSymbolPicker.classList.remove("hidden");
+  renderMarketSymbolPicker();
+  requestAnimationFrame(() => document.querySelector("#marketSymbolSearchInput").focus());
+}
 
-function buildReviewNoteDragHandle({ label, type, field, sectionIndex, childIndex = null }) {
-  const button = document.createElement("button");
-  button.type = "button";
-  button.className = "drag-handle";
-  button.title = label;
-  button.setAttribute("aria-label", label);
-  button.innerHTML = `<span aria-hidden="true"><i></i><i></i><i></i><i></i><i></i><i></i></span>`;
-  button.addEventListener("mousedown", (event) => {
-    const itemEl = button.closest(type === "section" ? ".structured-note-section" : ".note-sub");
-    if (!itemEl) return;
-    reviewNoteDragState = {
-      type,
-      field,
-      sectionIndex,
-      childIndex,
-      itemEl,
-      containerEl: type === "section"
-        ? itemEl.parentElement
-        : itemEl.closest(".structured-note-subsections"),
-      selector: type === "section" ? ".structured-note-section" : ".note-sub",
-      dropTarget: null,
-      dropAfter: false,
-    };
-    itemEl.classList.add("is-dragging");
-    event.preventDefault();
+function closeMarketSymbolPicker({ restoreFocus = true } = {}) {
+  marketSymbolPicker.classList.add("hidden");
+  if (restoreFocus && marketPickerReturnFocus?.isConnected) marketPickerReturnFocus.focus({ preventScroll: true });
+}
+
+function renderMarketSymbolPicker() {
+  const filters = [{ key: "all", label: "全部" }, ...ACTION_PLAN_SYMBOL_GROUPS];
+  document.querySelector("#marketSymbolFilterRow").innerHTML = filters.map((group) => `<button type="button" class="action-plan-symbol-filter ${state.marketSymbolPickerFilter === group.key ? "active" : ""}" data-market-filter="${escapeAttribute(group.key)}">${escapeHtml(group.label)}</button>`).join("");
+  const query = document.querySelector("#marketSymbolSearchInput").value;
+  const options = searchMarketReviewSymbols(state.marketSymbolCatalog, query).filter((item) => state.marketSymbolPickerFilter === "all" || actionPlanSymbolGroupKey(item) === state.marketSymbolPickerFilter);
+  document.querySelector("#marketSymbolResultList").innerHTML = options.length ? ACTION_PLAN_SYMBOL_GROUPS.map((group) => {
+    const items = options.filter((item) => actionPlanSymbolGroupKey(item) === group.key);
+    if (!items.length) return "";
+    return `<section class="action-plan-symbol-result-group"><div class="action-plan-symbol-result-group-head"><span>${escapeHtml(group.label)}</span><span>${items.length} 个</span></div>${items.map((item) => `<button type="button" class="action-plan-symbol-result" data-market-symbol="${escapeAttribute(item.symbol)}"><span class="action-plan-symbol-result-code">${escapeHtml(item.displayCode || item.symbol)}</span><span class="action-plan-symbol-result-name"><strong>${escapeHtml(item.displayName || item.display_name || item.symbol)}</strong><small>${escapeHtml([item.marketType || item.market_type, item.symbolType || item.symbol_type].filter(Boolean).join(" · "))}</small></span></button>`).join("")}</section>`;
+  }).join("") : '<div class="action-plan-symbol-empty">没有匹配的启用标的</div>';
+}
+
+function chooseMarketSymbol(symbol) {
+  if (isMarketReviewReadOnly()) return;
+  const duplicate = state.marketReview.blocks.find((block) => block.type === "symbol" && block.symbol === symbol && (state.marketSymbolPickerMode === "add" || block.id !== state.selectedMarketBlockId));
+  if (duplicate) {
+    closeMarketSymbolPicker({ restoreFocus: false });
+    setMarketReviewMessage(`${symbol} 已存在，已定位首个主题，原内容未修改。`);
+    openMarketDetail(duplicate.id);
+    document.getElementById(marketBlockAnchor(duplicate.id))?.scrollIntoView({ block: "nearest" });
+    return;
+  }
+  try {
+    if (state.marketSymbolPickerMode === "add") {
+      const block = createSymbolMarketBlock({ symbol, catalog: state.marketSymbolCatalog, blocks: state.marketReview.blocks, id: `market-${crypto.randomUUID()}` });
+      state.marketReview.blocks.push(assembleMarketReview(createMarketReview({ blocks: [block] }), state.symbolLevels).blocks[0]);
+      state.selectedMarketBlockId = block.id;
+    } else if (state.marketSymbolPickerMode === "link") {
+      const block = selectedMarketBlock();
+      const linked = linkLegacyMarketBlock(block, { symbol, catalog: state.marketSymbolCatalog, blocks: state.marketReview.blocks });
+      replaceMarketDraftBlock(linked);
+      state.pendingLegacyLinks.add(linked.id);
+    } else {
+      const block = selectedMarketBlock();
+      const changed = changeMarketBlockSymbol(block, { symbol, catalog: state.marketSymbolCatalog, blocks: state.marketReview.blocks });
+      state.marketReview.blocks = state.marketReview.blocks.map((item) => item.id === block.id ? changed : item);
+    }
+    closeMarketSymbolPicker({ restoreFocus: false });
+    setMarketReviewMessage("");
+    openMarketDetail(state.selectedMarketBlockId);
+  } catch (error) {
+    setMarketReviewMessage(error.message);
+  }
+}
+
+function moveMarketBlock(delta) {
+  if (isMarketReviewReadOnly()) return;
+  const blocks = state.marketReview.blocks;
+  const index = blocks.findIndex((block) => block.id === state.selectedMarketBlockId);
+  const next = index + delta;
+  if (index < 0 || next < 0 || next >= blocks.length) return;
+  const [block] = blocks.splice(index, 1);
+  blocks.splice(next, 0, block);
+  renderStructuredNoteEditors();
+}
+
+function sortMarketBlocks() {
+  if (isMarketReviewReadOnly()) return;
+  const rank = (block) => {
+    const item = state.marketSymbolCatalog.find((item) => item.symbol === block.symbol);
+    const group = ACTION_PLAN_SYMBOL_GROUPS.findIndex((group) => group.key === actionPlanSymbolGroupKey(item || {}));
+    return { group: item ? group : ACTION_PLAN_SYMBOL_GROUPS.length, order: Number(item?.sort_order ?? item?.sortOrder ?? 0), symbol: block.symbol || "" };
+  };
+  state.marketReview.blocks.sort((a, b) => {
+    const left = rank(a), right = rank(b);
+    return left.group - right.group || left.order - right.order || left.symbol.localeCompare(right.symbol);
   });
-  return button;
+  renderStructuredNoteEditors();
 }
 
-function getReviewNoteSectionAnchor(field, sectionIndex) {
-  return `review-note-${field}-${sectionIndex}`;
+function deleteSelectedMarketBlock() {
+  const block = selectedMarketBlock();
+  const prompt = block?.type === "legacy" ? `删除未关联历史原文“${block.title || "无标题"}”？保存复盘后该原文从本日移除。` : `删除“${block ? marketBlockLabel(block) : ""}”及其全部二级内容？`;
+  if (!block || isMarketReviewReadOnly() || !window.confirm(prompt)) return;
+  const index = state.marketReview.blocks.indexOf(block);
+  state.marketReview.blocks.splice(index, 1);
+  for (const child of block.children) delete state.marketChildTitleDrafts[child.id];
+  state.selectedMarketBlockId = state.marketReview.blocks[Math.min(index, state.marketReview.blocks.length - 1)]?.id || null;
+  closeMarketDetail({ restoreFocus: false });
+  renderStructuredNoteEditors();
 }
 
-function getReviewNoteSubsectionAnchor(field, sectionIndex, childIndex) {
-  return `review-note-${field}-${sectionIndex}-${childIndex}`;
+function trapMarketDialogFocus(event, root) {
+  if (event.key !== "Tab" || root.classList.contains("hidden")) return;
+  const items = [...root.querySelectorAll('button:not(:disabled), input:not(:disabled), select:not(:disabled), textarea:not(:disabled), [tabindex="0"]')];
+  const first = items[0], last = items[items.length - 1];
+  if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last?.focus(); }
+  else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first?.focus(); }
 }
 
-const REVIEW_OUTLINE_GROUPS = [
-  { step: "market", field: "marketSentiment", label: "大盘盘点" },
-  { step: "rotation", field: "sectorRotation", label: "大宗商品与板块轮动" },
-];
+marketReviewDetail.addEventListener("keydown", (event) => trapMarketDialogFocus(event, marketReviewDetail));
+marketSymbolPicker.addEventListener("keydown", (event) => trapMarketDialogFocus(event, marketSymbolPicker));
+document.querySelector("#addMarketBlockBtn").addEventListener("click", () => openMarketSymbolPicker());
+document.querySelector("#changeMarketSymbolBtn").addEventListener("click", () => openMarketSymbolPicker(selectedMarketBlock()?.type === "legacy" ? "link" : "change"));
+document.querySelector("#addMarketChildBtn").addEventListener("click", addSelectedMarketChild);
+document.querySelector("#closeMarketDetailBtn").addEventListener("click", () => closeMarketDetail());
+document.querySelector("#finishMarketDetailBtn").addEventListener("click", () => closeMarketDetail());
+document.querySelector("#marketDetailBackdrop").addEventListener("click", () => closeMarketDetail());
+document.querySelector("#closeMarketSymbolPickerBtn").addEventListener("click", () => closeMarketSymbolPicker());
+document.querySelector("#marketSymbolPickerBackdrop").addEventListener("click", () => closeMarketSymbolPicker());
+document.querySelector("#marketSymbolSearchInput").addEventListener("input", renderMarketSymbolPicker);
+document.querySelector("#marketSymbolFilterRow").addEventListener("click", (event) => {
+  const button = event.target.closest("[data-market-filter]");
+  if (!button) return;
+  state.marketSymbolPickerFilter = button.dataset.marketFilter;
+  renderMarketSymbolPicker();
+});
+document.querySelector("#marketSymbolResultList").addEventListener("click", (event) => {
+  const button = event.target.closest("[data-market-symbol]");
+  if (button) chooseMarketSymbol(button.dataset.marketSymbol);
+});
+document.querySelector("#marketMoveUpBtn").addEventListener("click", () => moveMarketBlock(-1));
+document.querySelector("#marketMoveDownBtn").addEventListener("click", () => moveMarketBlock(1));
+document.querySelector("#marketAutoSortBtn").addEventListener("click", sortMarketBlocks);
+document.querySelector("#marketDeleteBlockBtn").addEventListener("click", deleteSelectedMarketBlock);
 
 function renderReviewOutline() {
   if (!reviewOutline) return;
@@ -1756,15 +2110,8 @@ function renderReviewOutline() {
         level: "section",
         step: group.step,
         targetId: section.targetId,
+        blockId: section.blockId,
       }));
-      (section.children || []).forEach((child) => {
-        groupEl.appendChild(buildReviewOutlineButton({
-          label: child.label,
-          level: "child",
-          step: group.step,
-          targetId: child.targetId,
-        }));
-      });
     });
     reviewOutline.appendChild(groupEl);
   });
@@ -1785,19 +2132,15 @@ function buildReviewOutlineGroups() {
     items: [],
   });
 
-  REVIEW_OUTLINE_GROUPS.forEach((group) => {
-    const blocks = normalizeReviewNoteBlocks(state.reviewNoteBlocks[group.field] || []);
-    if (!blocks.length) return;
-    groups.push({
-      step: group.step,
-      label: group.label,
-      targetId: null,
-      items: blocks.map((section, sectionIndex) => ({
-        label: `${sectionIndex + 1}. ${section.title || "未命名主题"}`,
-        targetId: getReviewNoteSectionAnchor(group.field, sectionIndex),
-        children: [],
-      })),
-    });
+  groups.push({
+    step: "market",
+    label: "市场与板块",
+    targetId: "marketReviewGroup",
+    items: state.marketReview.blocks.map((block, index) => ({
+      label: `${index + 1}. ${marketBlockLabel(block)} · ${block.identity?.displayName || block.title || ""}`,
+      targetId: marketBlockAnchor(block.id),
+      blockId: block.id,
+    })),
   });
 
   const actionPlanItems = buildActionPlanOutlineItems();
@@ -1824,161 +2167,27 @@ function buildActionPlanOutlineItems() {
       return {
         label: account.name || "未分配账户",
         targetId: getActionPlanAccountAnchor(account),
-        children: [],
       };
     })
     .filter(Boolean);
 }
 
-function buildReviewOutlineButton({ label, level, step, targetId }) {
+function buildReviewOutlineButton({ label, level, step, targetId, blockId }) {
   const button = document.createElement("button");
   button.type = "button";
   button.className = `review-outline-item ${level}`;
   button.textContent = label;
   button.title = label;
+  if (blockId) button.dataset.marketBlockId = blockId;
   button.addEventListener("click", () => {
     if (step) setReviewStep(step);
+    if (blockId) openMarketDetail(blockId, button);
     window.requestAnimationFrame(() => {
       const target = targetId ? document.getElementById(targetId) : document.querySelector(`.review-step-panel[data-step="${step}"]`);
       target?.scrollIntoView({ behavior: "smooth", block: "start" });
     });
   });
   return button;
-}
-
-function clearReviewNoteDropMarkers() {
-  document.querySelectorAll(".structured-note-drop-before, .structured-note-drop-after").forEach((node) => {
-    node.classList.remove("structured-note-drop-before", "structured-note-drop-after");
-  });
-}
-
-document.addEventListener("mousemove", (event) => {
-  if (!reviewNoteDragState?.itemEl || !reviewNoteDragState.containerEl) return;
-  const target = document.elementFromPoint(event.clientX, event.clientY)?.closest(reviewNoteDragState.selector);
-  if (!target || target === reviewNoteDragState.itemEl || target.parentElement !== reviewNoteDragState.containerEl) return;
-  const rect = target.getBoundingClientRect();
-  reviewNoteDragState.dropTarget = target;
-  reviewNoteDragState.dropAfter = event.clientY > rect.top + rect.height / 2;
-  clearReviewNoteDropMarkers();
-  target.classList.add(reviewNoteDragState.dropAfter ? "structured-note-drop-after" : "structured-note-drop-before");
-});
-
-document.addEventListener("mouseup", () => {
-  const dragState = reviewNoteDragState;
-  if (!dragState) return;
-  if (dragState.dropTarget) {
-    const targetIndex = Array.from(dragState.containerEl.querySelectorAll(dragState.selector)).indexOf(dragState.dropTarget);
-    const nextIndex = dragState.dropAfter ? targetIndex + 1 : targetIndex;
-    if (dragState.type === "section") {
-      moveReviewNoteSectionTo(dragState.field, dragState.sectionIndex, nextIndex);
-    } else {
-      moveReviewNoteSubsectionTo(dragState.field, dragState.sectionIndex, dragState.childIndex, nextIndex);
-    }
-  }
-  dragState.itemEl.classList.remove("is-dragging");
-  reviewNoteDragState = null;
-  clearReviewNoteDropMarkers();
-});
-
-function addReviewNoteSection(field) {
-  if (!field || (state.reviewStatus === "reviewed" && !state.editMode)) return;
-  const blocks = normalizeReviewNoteBlocks(state.reviewNoteBlocks[field] || []);
-  blocks.push({
-    id: makeReviewNoteId("section"),
-    title: "未命名主题",
-    children: [{ id: makeReviewNoteId("sub"), title: "核心判断", body: "" }],
-  });
-  state.reviewNoteBlocks[field] = blocks;
-  renderStructuredNoteEditors();
-}
-
-function deleteReviewNoteSection(field, sectionIndex) {
-  const blocks = normalizeReviewNoteBlocks(state.reviewNoteBlocks[field] || []);
-  const section = blocks[sectionIndex];
-  if (!section) return;
-  if (!window.confirm(`删除“${section.title}”及其全部二级内容？`)) return;
-  blocks.splice(sectionIndex, 1);
-  state.reviewNoteBlocks[field] = blocks;
-  renderStructuredNoteEditors();
-}
-
-function moveReviewNoteSection(field, sectionIndex, delta) {
-  const blocks = normalizeReviewNoteBlocks(state.reviewNoteBlocks[field] || []);
-  const targetIndex = sectionIndex + delta;
-  if (targetIndex < 0 || targetIndex >= blocks.length) return;
-  const [item] = blocks.splice(sectionIndex, 1);
-  blocks.splice(targetIndex, 0, item);
-  state.reviewNoteBlocks[field] = blocks;
-  renderStructuredNoteEditors();
-}
-
-function moveReviewNoteSectionTo(field, sectionIndex, targetIndex) {
-  const blocks = normalizeReviewNoteBlocks(state.reviewNoteBlocks[field] || []);
-  if (sectionIndex < 0 || sectionIndex >= blocks.length) return;
-  let insertIndex = Math.max(0, Math.min(targetIndex, blocks.length));
-  if (insertIndex > sectionIndex) insertIndex -= 1;
-  if (insertIndex === sectionIndex) return;
-  const [item] = blocks.splice(sectionIndex, 1);
-  blocks.splice(insertIndex, 0, item);
-  state.reviewNoteBlocks[field] = blocks;
-  renderStructuredNoteEditors();
-}
-
-function updateReviewNoteSectionTitle(field, sectionIndex, title) {
-  const blocks = state.reviewNoteBlocks[field] || [];
-  if (!blocks[sectionIndex]) return;
-  blocks[sectionIndex].title = title;
-  renderReviewOutline();
-}
-
-function addReviewNoteSubsection(field, sectionIndex) {
-  const blocks = normalizeReviewNoteBlocks(state.reviewNoteBlocks[field] || []);
-  if (!blocks[sectionIndex]) return;
-  blocks[sectionIndex].children.push({ id: makeReviewNoteId("sub"), title: "未命名维度", body: "" });
-  state.reviewNoteBlocks[field] = blocks;
-  renderStructuredNoteEditors();
-}
-
-function deleteReviewNoteSubsection(field, sectionIndex, childIndex) {
-  const blocks = normalizeReviewNoteBlocks(state.reviewNoteBlocks[field] || []);
-  const child = blocks[sectionIndex]?.children?.[childIndex];
-  if (!child) return;
-  if (!window.confirm(`删除“${child.title}”？`)) return;
-  blocks[sectionIndex].children.splice(childIndex, 1);
-  state.reviewNoteBlocks[field] = blocks;
-  renderStructuredNoteEditors();
-}
-
-function moveReviewNoteSubsection(field, sectionIndex, childIndex, delta) {
-  const blocks = normalizeReviewNoteBlocks(state.reviewNoteBlocks[field] || []);
-  const children = blocks[sectionIndex]?.children || [];
-  const targetIndex = childIndex + delta;
-  if (targetIndex < 0 || targetIndex >= children.length) return;
-  const [item] = children.splice(childIndex, 1);
-  children.splice(targetIndex, 0, item);
-  state.reviewNoteBlocks[field] = blocks;
-  renderStructuredNoteEditors();
-}
-
-function moveReviewNoteSubsectionTo(field, sectionIndex, childIndex, targetIndex) {
-  const blocks = normalizeReviewNoteBlocks(state.reviewNoteBlocks[field] || []);
-  const children = blocks[sectionIndex]?.children || [];
-  if (childIndex < 0 || childIndex >= children.length) return;
-  let insertIndex = Math.max(0, Math.min(targetIndex, children.length));
-  if (insertIndex > childIndex) insertIndex -= 1;
-  if (insertIndex === childIndex) return;
-  const [item] = children.splice(childIndex, 1);
-  children.splice(insertIndex, 0, item);
-  state.reviewNoteBlocks[field] = blocks;
-  renderStructuredNoteEditors();
-}
-
-function updateReviewNoteSubsection(field, sectionIndex, childIndex, patch) {
-  const blocks = state.reviewNoteBlocks[field] || [];
-  const child = blocks[sectionIndex]?.children?.[childIndex];
-  if (!child) return;
-  Object.assign(child, patch);
-  if (Object.prototype.hasOwnProperty.call(patch, "title")) renderReviewOutline();
 }
 
 function buildChip(label, variant = "") {
@@ -2028,9 +2237,9 @@ function defaultActionPlanPositionForAction(actionType) {
 }
 
 function normalizeActionPlan(item = {}, sortOrder = 0) {
-  const supportLevels = String(item.supportLevels || item.support_levels || "").trim();
-  const resistanceLevels = String(item.resistanceLevels || item.resistance_levels || "").trim();
-  const keyLevels = String(item.keyLevels || item.key_levels || "").trim();
+  const supportLevels = String(item.supportLevels ?? item.support_levels ?? "");
+  const resistanceLevels = String(item.resistanceLevels ?? item.resistance_levels ?? "");
+  const keyLevels = String(item.keyLevels ?? item.key_levels ?? "");
   const marketType = ["美股", "大A"].includes(item.marketType || item.market_type) ? (item.marketType || item.market_type) : "美股";
   const fallbackAccount = getDefaultAccountForMarket(marketType);
   const accountId = Number(item.accountId ?? item.account_id ?? fallbackAccount?.id ?? 0) || null;
@@ -2046,13 +2255,13 @@ function normalizeActionPlan(item = {}, sortOrder = 0) {
     actionType: normalizeActionPlanAction(item.actionType || item.action_type),
     currentPosition: normalizeActionPlanPosition(item.currentPosition || item.current_position || defaultActionPlanPositionForAction(item.actionType || item.action_type)),
     positionAmount,
-    entryPlan: String(item.entryPlan || item.entry_plan || "").trim(),
-    takeProfitPlan: String(item.takeProfitPlan || item.take_profit_plan || "").trim(),
-    stopLossPlan: String(item.stopLossPlan || item.stop_loss_plan || "").trim(),
+    entryPlan: String(item.entryPlan ?? item.entry_plan ?? ""),
+    takeProfitPlan: String(item.takeProfitPlan ?? item.take_profit_plan ?? ""),
+    stopLossPlan: String(item.stopLossPlan ?? item.stop_loss_plan ?? ""),
     supportLevels,
     resistanceLevels,
-    keyLevels: keyLevels || formatSupportResistanceLevels(supportLevels, resistanceLevels),
-    thinking: String(item.thinking || "").trim(),
+    keyLevels,
+    thinking: String(item.thinking ?? ""),
     marketType,
     sortOrder,
   };
@@ -2087,27 +2296,12 @@ function closeActionPlanZoneExport() {
   if (actionPlanZoneExportCopyStatus) actionPlanZoneExportCopyStatus.textContent = "";
 }
 
-async function openActionPlanZoneExport({ includeRotation = true } = {}) {
-  const originalLabel = exportActionPlanZonesBtn?.textContent || "导出画线";
-  if (includeRotation && exportActionPlanZonesBtn) {
-    exportActionPlanZonesBtn.disabled = true;
-    exportActionPlanZonesBtn.textContent = "正在识别…";
-  }
-  let symbolCatalog = state.actionPlanSymbolCatalog || [];
-  if (includeRotation && state.activeDate) {
-    try {
-      symbolCatalog = await ensureActionPlanSymbolCatalog(state.activeDate);
-    } catch (error) {
-      console.warn("Failed to load symbol catalog for zone export", error);
-    }
-  }
+function openActionPlanZoneExport({ includeRotation = true } = {}) {
   const result = buildZoneExport({
-    marketBlocks: includeRotation ? state.reviewNoteBlocks.marketSentiment : [],
-    rotationBlocks: includeRotation ? state.reviewNoteBlocks.sectorRotation : [],
+    marketReviewBlocks: includeRotation ? state.marketReview.blocks : [],
+    symbolLevels: activeSymbolLevels(),
     actionPlans: state.actionPlans,
-    symbolCatalog,
     includeMarket: includeRotation,
-    includeRotation,
   });
   const output = result.text;
   if (actionPlanZoneExportOutput) {
@@ -2131,10 +2325,6 @@ async function openActionPlanZoneExport({ includeRotation = true } = {}) {
   }
   if (actionPlanZoneExportCopyStatus) actionPlanZoneExportCopyStatus.textContent = "";
   actionPlanZoneExportModal?.classList.remove("hidden");
-  if (includeRotation && exportActionPlanZonesBtn) {
-    exportActionPlanZonesBtn.disabled = false;
-    exportActionPlanZonesBtn.textContent = originalLabel;
-  }
   requestAnimationFrame(() => {
     if (output) {
       actionPlanZoneExportOutput?.focus();
@@ -2181,16 +2371,6 @@ function autoResizeTextarea(el) {
 
 function scheduleTextareaResize(el) {
   window.requestAnimationFrame(() => autoResizeTextarea(el));
-}
-
-function resizeStructuredNoteTextareas() {
-  reviewForm.querySelectorAll(".note-sub textarea").forEach(autoResizeTextarea);
-}
-
-function scheduleStructuredNoteTextareaResize() {
-  window.requestAnimationFrame(() => {
-    window.requestAnimationFrame(resizeStructuredNoteTextareas);
-  });
 }
 
 function resizeActionPlanTextareas() {
@@ -2259,7 +2439,8 @@ function formatChineseMonthDay(dateString) {
 }
 
 function renderActionPlanTextCell(value, className = "") {
-  const text = String(value || "").trim();
+  const raw = String(value ?? "");
+  const text = className === "action-plan-levels" ? raw : raw.trim();
   const shouldShowTooltip = text.length > 18 || text.includes("\n");
   const tooltipAttr = shouldShowTooltip ? ` data-full-text="${escapeAttribute(text)}"` : "";
   return `<div class="action-plan-cell-text ${className}"${tooltipAttr}>${escapeHtml(text)}</div>`;
@@ -2861,11 +3042,11 @@ function fillActionPlanEditor(plan) {
   if (actionPlanPositionSelect) actionPlanPositionSelect.value = normalizeActionPlanPosition(plan.currentPosition);
   if (actionPlanPositionAmountInput) {
     actionPlanPositionAmountInput.value = plan.positionAmount != null
-      ? Number((plan.positionAmount / 10000).toFixed(4))
+      ? Number((plan.positionAmount / 10000).toFixed(6))
       : "";
+    actionPlanPositionAmountInput.dataset.loadedValue = actionPlanPositionAmountInput.value;
   }
-  if (actionPlanSupportLevelsInput) actionPlanSupportLevelsInput.value = plan.supportLevels || "";
-  if (actionPlanResistanceLevelsInput) actionPlanResistanceLevelsInput.value = plan.resistanceLevels || "";
+  refreshActionPlanLevelInputs(plan.symbol);
   if (actionPlanEntryInput) actionPlanEntryInput.value = plan.entryPlan || "";
   if (actionPlanTakeProfitInput) actionPlanTakeProfitInput.value = plan.takeProfitPlan || "";
   if (actionPlanStopLossInput) actionPlanStopLossInput.value = plan.stopLossPlan || "";
@@ -2894,6 +3075,7 @@ function syncZeroPositionForAction() {
 }
 
 function syncSelectedActionPlanFromEditor() {
+  if (isActionPlanEditorReadOnly()) return false;
   const index = state.selectedActionPlanIndex;
   if (index < 0 || index >= state.actionPlans.length) return;
   const actionType = actionPlanActionSelect.value;
@@ -2916,8 +3098,10 @@ function syncSelectedActionPlanFromEditor() {
   const positionAmountWan = positionAmountRaw == null || positionAmountRaw === ""
     ? null
     : (Number.isFinite(Number(positionAmountRaw)) ? Number(positionAmountRaw) : null);
-  const positionAmount = positionAmountWan == null ? null : Math.round(positionAmountWan * 10000 * 100) / 100;
   const previousPlan = state.actionPlans[index];
+  const positionAmount = positionAmountRaw === actionPlanPositionAmountInput?.dataset.loadedValue
+    ? previousPlan.positionAmount
+    : positionAmountWan == null ? null : Math.round(positionAmountWan * 10000 * 100) / 100;
   const nextPlan = normalizeActionPlan({
     ...previousPlan,
     accountId: selectedAccountId,
@@ -2926,9 +3110,7 @@ function syncSelectedActionPlanFromEditor() {
     actionType,
     currentPosition,
     positionAmount,
-    marketType: marketTypeForAccount(account),
-    supportLevels: actionPlanSupportLevelsInput.value,
-    resistanceLevels: actionPlanResistanceLevelsInput.value,
+    marketType: Number(previousPlan.accountId) === selectedAccountId ? previousPlan.marketType : marketTypeForAccount(account),
     entryPlan: actionPlanEntryInput.value,
     takeProfitPlan: actionPlanTakeProfitInput.value,
     stopLossPlan: actionPlanStopLossInput.value,
@@ -2941,6 +3123,11 @@ function syncSelectedActionPlanFromEditor() {
   ) {
     pendingNewActionPlan.plan = nextPlan;
   }
+  updateSharedSymbolLevels(selectedSymbol, {
+    supportLevels: actionPlanSupportLevelsInput.value,
+    resistanceLevels: actionPlanResistanceLevelsInput.value,
+  }, { supplement: true });
+  projectActionPlanLevels(state.actionPlans, activeSymbolLevels());
   syncLegacyAssetPlanField();
   notifyActionPlanLocalChange();
   renderActionPlanRowsOnly();
@@ -2964,6 +3151,8 @@ function updateActionPlanDetailHeading() {
   if (actionPlanDetailSubtitle) {
     actionPlanDetailSubtitle.textContent = fundsPart ? `${accountName} · ${fundsPart}` : accountName;
   }
+  const hint = document.querySelector("#actionPlanSharedLevelsHint");
+  if (hint) hint.textContent = sharedLevelsHint(symbol);
 }
 
 function openActionPlanDetail(index) {
@@ -3636,7 +3825,6 @@ function setReviewStep(stepKey = null) {
     panel.classList.toggle("hidden", !shouldShow);
     panel.classList.toggle("review-step-panel-active", panel.dataset.step === state.reviewStep);
   });
-  scheduleStructuredNoteTextareaResize();
 
   const index = REVIEW_STEPS.findIndex((step) => step.key === state.reviewStep);
   // 已复盘后 step-nav 已隐藏，没有"上方标记"可点，把提示也清掉
@@ -3670,6 +3858,7 @@ async function handleNextStep() {
     setReviewSubmitting(true);
     try {
       const saved = await saveReview({ forCompletion: true });
+      if (saved !== true) return;
       try {
         await fetchJson(`/api/reviews/${state.activeDate}/complete`, {
           method: "POST",
@@ -3718,10 +3907,7 @@ function getStepValue(step) {
     return state.actionPlans.length ? formatActionPlansMarkdown(state.actionPlans) : "";
   }
   if (step.key === "market") {
-    return reviewNoteBlocksHaveContent(state.reviewNoteBlocks.marketSentiment) ? "structured" : "";
-  }
-  if (step.key === "rotation") {
-    return reviewNoteBlocksHaveContent(state.reviewNoteBlocks.sectorRotation) ? "structured" : "";
+    return state.marketReview.blocks.length ? "structured" : "";
   }
   return String(reviewForm.elements.namedItem(step.field)?.value || "").trim();
 }
@@ -3770,9 +3956,8 @@ function validateStep(step, showAlert = true) {
     }
     return true;
   }
-  if (step.key === "market" || step.key === "rotation") {
-    const field = step.key === "market" ? "marketSentiment" : "sectorRotation";
-    if (!reviewNoteBlocksHaveContent(state.reviewNoteBlocks[field])) {
+  if (step.key === "market") {
+    if (!state.marketReview.blocks.length) {
       if (showAlert) window.alert(`请先完成“${step.label}”这一步。`);
       return false;
     }
@@ -3813,6 +3998,7 @@ function setReviewMode(status, options = {}) {
   applyActionPlanReadOnly(readOnly);
   renderActionPlans({ refreshImpact: options.refreshImpact !== false });
   renderStructuredNoteEditors();
+  if (!marketReviewDetail.classList.contains("hidden")) renderMarketDetail();
   // 非编辑状态（已复盘且未点编辑）整个隐藏保存按钮，而不是 disabled 灰显
   saveDraftBtn.classList.toggle("hidden", readOnly);
   saveDraftBtn.disabled = readOnly;
@@ -4597,6 +4783,23 @@ function renderFundSummarySymbolRow(symbol, accounts, currency) {
   `;
 }
 
+function acceptAccountLivePlans(data) {
+  const plans = normalizeActionPlans(data.items || []);
+  // The real live GET already projects the latest shared values. Some versions
+  // expose only items; construct the same map without reading old evidence columns.
+  const levels = structuredClone(data.symbolLevels || {});
+  for (const plan of plans) {
+    if (!Object.hasOwn(levels, plan.symbol)) levels[plan.symbol] = {
+      supportLevels: plan.supportLevels,
+      resistanceLevels: plan.resistanceLevels,
+    };
+  }
+  state.liveSymbolLevels = levels;
+  state.persistedLiveSymbolLevels = structuredClone(levels);
+  state.accountLiveActionPlans = projectActionPlanLevels(plans, levels);
+  state.livePlanBaselines = new Map(plans.filter((plan) => plan.id).map((plan) => [Number(plan.id), structuredClone(plan)]));
+}
+
 async function loadAccounts(forceRefresh = false) {
   if (!accountLivePlans) return;
   if (accountsSummary) accountsSummary.textContent = "正在加载账户与标的...";
@@ -4608,7 +4811,7 @@ async function loadAccounts(forceRefresh = false) {
       fetchJson("/api/account-live-action-plans/symbols"),
     ]);
     state.investmentAccounts = normalizeInvestmentAccounts(data.items || []);
-    state.accountLiveActionPlans = normalizeActionPlans(liveData.items || []);
+    acceptAccountLivePlans(liveData);
     state.actionPlanSymbolCatalog = symbolData.items || [];
     state.accountsLoaded = true;
     state.accountLivePlansLoaded = true;
@@ -4626,7 +4829,7 @@ async function loadAccountLivePlans(forceRefresh = false) {
       fetchJson("/api/account-live-action-plans"),
       fetchJson("/api/account-live-action-plans/symbols"),
     ]);
-    state.accountLiveActionPlans = normalizeActionPlans(liveData.items || []);
+    acceptAccountLivePlans(liveData);
     state.actionPlanSymbolCatalog = symbolData.items || state.actionPlanSymbolCatalog || [];
     state.accountLivePlansLoaded = true;
     renderAccountLiveActionPlans();
@@ -4829,35 +5032,44 @@ function updateAccountsSummaryText(accountCount, enabledCount, planCount) {
 }
 
 function accountLivePlanPayload(plan) {
-  return {
+  const baseline = state.livePlanBaselines.get(Number(plan.id));
+  const candidate = {
     accountId: Number(plan.accountId || 0),
     symbol: plan.symbol,
     actionType: plan.actionType,
     entryPlan: plan.entryPlan,
     takeProfitPlan: plan.takeProfitPlan,
     stopLossPlan: plan.stopLossPlan,
-    supportLevels: plan.supportLevels,
-    resistanceLevels: plan.resistanceLevels,
-    keyLevels: plan.keyLevels,
     currentPosition: plan.currentPosition,
     positionAmount: plan.positionAmount ?? null,
     thinking: plan.thinking,
     marketType: plan.marketType,
     sortOrder: Number(plan.sortOrder || 0),
   };
+  const payload = baseline
+    ? Object.fromEntries(Object.entries(candidate).filter(([field, value]) => value !== baseline[field]))
+    : candidate;
+  const persisted = state.persistedLiveSymbolLevels[plan.symbol] || {};
+  const current = state.liveSymbolLevels[plan.symbol] || {};
+  for (const field of ["supportLevels", "resistanceLevels"]) {
+    if ((current[field] ?? "") !== (persisted[field] ?? "")) payload[field] = current[field] ?? "";
+  }
+  // keyLevels is independent raw evidence; price changes never recalculate it.
+  return payload;
 }
 
 async function saveAccountLivePlan(plan) {
+  if (!plan.accountId || !plan.symbol) throw new Error("账户和标的不能为空");
   const payload = accountLivePlanPayload(plan);
-  if (!payload.accountId || !payload.symbol) {
-    throw new Error("账户和标的不能为空");
-  }
   const isExisting = Number(plan.id || 0) > 0;
+  if (isExisting && !Object.keys(payload).length) return;
   await fetchJson(isExisting ? `/api/account-live-action-plans/${plan.id}` : "/api/account-live-action-plans", {
     method: isExisting ? "PUT" : "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(payload),
   });
+  // Only a successful write can replace the persistent baseline. Rejection
+  // leaves shared drafts and the original baseline available for an exact retry.
   await loadAccountLivePlans(true);
   await refreshOpenLatestReviewActionPlans();
 }
@@ -4878,7 +5090,7 @@ async function persistAccountLivePlanOrder(plans) {
     await fetchJson(`/api/account-live-action-plans/${plan.id}`, {
       method: "PUT",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(accountLivePlanPayload(plan)),
+      body: JSON.stringify({ sortOrder: Number(plan.sortOrder || 0) }),
     });
   }
   await loadAccountLivePlans(true);
@@ -4888,12 +5100,25 @@ async function persistAccountLivePlanOrder(plans) {
 async function refreshOpenLatestReviewActionPlans() {
   if (!state.activeDate || reviewDrawer?.classList.contains("hidden")) return;
   if (!state.latestArchiveDate || state.activeDate !== state.latestArchiveDate) return;
-  if (getActiveActionPlanEditorContext()?.mode === "live") return;
+  const date = state.activeDate;
   try {
-    const data = await fetchJson(`/api/reviews/${state.activeDate}/bootstrap`);
+    const data = await fetchJson(`/api/reviews/${date}/bootstrap`);
+    if (date !== state.activeDate || date !== state.latestArchiveDate) return;
     state.activeBootstrap = data;
-    state.actionPlans = normalizeActionPlans(data.actionPlans || []);
-    state.activeActionPlanEditor?.refresh?.(state.actionPlans);
+    state.symbolLevels = structuredClone(data.symbolLevels || {});
+    state.marketReview = assembleMarketReview(createMarketReview(data.structuredNotes?.marketReview || {}), state.symbolLevels);
+    state.dirtySymbolLevels = {};
+  state.pendingLegacyLinks = new Set();
+    const plans = projectActionPlanLevels(normalizeActionPlans(data.actionPlans || []), state.symbolLevels);
+    if (isLiveActionPlanMode()) {
+      if (state.activeActionPlanEditor?.context) state.activeActionPlanEditor.context.plans = plans;
+    } else {
+      state.actionPlans = plans;
+      state.activeActionPlanEditor?.refresh?.(plans);
+      if (!actionPlanDetailModal?.classList.contains("hidden")) refreshActionPlanLevelInputs();
+    }
+    renderStructuredNoteEditors();
+    if (!marketReviewDetail.classList.contains("hidden")) renderMarketDetail();
     scheduleAccountImpactPreview(0);
   } catch (error) {
     console.warn("Failed to refresh latest review action plans", error);

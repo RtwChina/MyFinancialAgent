@@ -1,5 +1,5 @@
 import { test, expect } from '@playwright/test';
-import { execFileSync } from 'node:child_process';
+import { queryLocalSql } from '../helpers/market-review-local.mjs';
 
 const BASE_URL = process.env.BASE_URL || 'http://127.0.0.1:8787';
 const executablePath = process.env.PLAYWRIGHT_EXECUTABLE_PATH;
@@ -9,36 +9,20 @@ const EMPTY_EXPORT_DATE = '2026-02-19';
 if (executablePath) test.use({ launchOptions: { executablePath } });
 test.describe.configure({ timeout: 120_000 });
 
+// Same isolated local test D1 the 8787 Worker reads; rows keep wrangler's pretty JSON for text assertions.
 function d1(command) {
-  return execFileSync(
-    'npx',
-    ['wrangler', 'd1', 'execute', 'DB', '--local', '--config', 'wrangler.toml', '--command', command],
-    {
-      cwd: process.cwd(),
-      encoding: 'utf8',
-      env: {
-        ...process.env,
-        WRANGLER_LOG_PATH: '/private/tmp/myfinancialagent-zone-export-test.log',
-        WRANGLER_SEND_METRICS: 'false',
-      },
-    },
-  );
+  return JSON.stringify(queryLocalSql(command), null, 2);
 }
 
 function sqlQuote(value) {
   return `'${String(value).replaceAll("'", "''")}'`;
 }
 
+// Existing rows (e.g. migration-seeded MSFT) are shared with other suites; only ensure availability.
 function trackedSymbolUpsertSql(symbol, displayName = symbol) {
   return `INSERT INTO tracked_symbols (symbol, yahoo_symbol, display_name, symbol_type, aliases, is_active, sort_order, created_at, updated_at)
       VALUES (${sqlQuote(symbol)}, ${sqlQuote(symbol)}, ${sqlQuote(displayName)}, 'stock', ${sqlQuote(JSON.stringify([symbol, displayName]))}, 1, 8120, datetime('now'), datetime('now'))
-      ON CONFLICT(symbol) DO UPDATE SET
-        yahoo_symbol=excluded.yahoo_symbol,
-        display_name=excluded.display_name,
-        symbol_type=excluded.symbol_type,
-        aliases=excluded.aliases,
-        is_active=1,
-      updated_at=datetime('now');`;
+      ON CONFLICT(symbol) DO UPDATE SET is_active=1;`;
 }
 
 function seedTrackedSymbols(items) {
@@ -56,41 +40,50 @@ async function filterReviewsByDate(page, date) {
   await form.getByRole('button', { name: '查询' }).click();
 }
 
-test('review header zone export merges rotation and action-plan ranges pressure first', async ({ page, request }) => {
+test('review header zone export merges market and action-plan ranges pressure first', async ({ page, request }) => {
   seedTrackedSymbols([
     ['MSFT', '微软'],
     ['AVGO', '博通'],
     ['QQQ', '纳斯达克100ETF'],
   ]);
+  // GSPC comes from the migrations; upserting it here would rewrite its index type and Yahoo code for other suites.
   d1(`DELETE FROM daily_review_action_plans WHERE archive_date=${sqlQuote(EXPORT_DATE)};
+      DELETE FROM daily_review_symbol_levels WHERE archive_date=${sqlQuote(EXPORT_DATE)};
       DELETE FROM daily_review_archive WHERE archive_date=${sqlQuote(EXPORT_DATE)};`);
 
   const accountsJson = await (await request.get(`${BASE_URL}/api/investment-accounts`)).json();
   const tiger = accountsJson.items.find((item) => item.name === '老虎-美股');
   expect(tiger).toBeTruthy();
 
+  const levelChildren = (symbol) => [
+    { id: `${symbol}-support`, kind: 'support', title: '支撑位' },
+    { id: `${symbol}-resistance`, kind: 'resistance', title: '压力位' },
+  ];
   const saveResponse = await request.post(`${BASE_URL}/api/reviews/${EXPORT_DATE}`, {
     data: {
       reviewStatus: 'draft',
       reviewerNewsNotes: '导出测试：新闻总结。',
-      marketSentimentBlocks: [{
-        title: '标普500点位',
-        children: [
-          { title: 'CTA流动性', body: '横盘：buy\n加速卖出触发：跌破 7620 / 7356 / 6884' },
-          { title: '支撑位', body: '7310-7350（小）\n7200–7250（强） 防守' },
-          { title: '负伽马', body: '6475（破了该点位后就会出现较大的抛压）' },
-          { title: '压力位', body: '7500-7550（不应从大盘导出）' },
-          { title: '判断', body: '7000-7100（不应导出）' },
+      marketReview: {
+        blocks: [
+          { id: 'export-gspc', type: 'symbol', symbol: 'GSPC', children: [
+            ...levelChildren('GSPC'),
+            { id: 'GSPC-cta', kind: 'cta', title: 'CTA 流动性', body: '横盘：buy\n加速卖出触发：跌破 7620 / 7356 / 6884' },
+            { id: 'GSPC-gamma', kind: 'custom', title: '负伽马', body: '6475（破了该点位后就会出现较大的抛压）' },
+            { id: 'GSPC-view', kind: 'custom', title: '判断', body: '7000-7100（不应导出）' },
+          ] },
+          { id: 'export-qqq', type: 'symbol', symbol: 'QQQ', children: [
+            ...levelChildren('QQQ'),
+            { id: 'QQQ-metric', kind: 'custom', title: '关键指标', body: '600-620（不应导出）' },
+          ] },
         ],
-      }],
-      sectorRotationBlocks: [{
-        title: '纳斯达克 QQQ',
-        children: [
-          { title: '支撑位 (Support):', body: '671–681（小）' },
-          { title: '压力位', body: '734–744（小）\n693–724（强）注意反弹承压' },
-          { title: '关键指标', body: '600-620（不应导出）' },
+        levels: [
+          { symbol: 'GSPC', supportLevels: '7310-7350（小）\n7200–7250（强） 防守', resistanceLevels: '7500-7550（不应从大盘导出）' },
+          { symbol: 'QQQ', supportLevels: '671–681（小）', resistanceLevels: '734–744（小）\n693–724（强）注意反弹承压' },
+          // Plan prices are shared per symbol and must travel in levels, exactly like the browser client sends them.
+          { symbol: 'MSFT', supportLevels: '381 – 392（中） 长线\n无法解析这一行\n360-375（强）', resistanceLevels: '397-430（超强） 突破右侧' },
+          { symbol: 'AVGO', supportLevels: '433.5-392.25 反向小数区间', resistanceLevels: '' },
         ],
-      }],
+      },
       tradingSummary: '',
       actionPlans: [
         {
@@ -195,6 +188,7 @@ test('review header zone export merges rotation and action-plan ranges pressure 
 test('action plan zone export shows an empty state when no range can be parsed', async ({ page, request }) => {
   seedTrackedSymbol('MSFT', '微软');
   d1(`DELETE FROM daily_review_action_plans WHERE archive_date=${sqlQuote(EMPTY_EXPORT_DATE)};
+      DELETE FROM daily_review_symbol_levels WHERE archive_date=${sqlQuote(EMPTY_EXPORT_DATE)};
       DELETE FROM daily_review_archive WHERE archive_date=${sqlQuote(EMPTY_EXPORT_DATE)};`);
 
   const accountsJson = await (await request.get(`${BASE_URL}/api/investment-accounts`)).json();
@@ -205,8 +199,7 @@ test('action plan zone export shows an empty state when no range can be parsed',
     data: {
       reviewStatus: 'draft',
       reviewerNewsNotes: '空导出测试。',
-      marketSentiment: '空导出测试。',
-      sectorRotation: '空导出测试。',
+      marketReview: { blocks: [], levels: [{ symbol: 'MSFT', supportLevels: '等待结构确认', resistanceLevels: '' }] },
       tradingSummary: '',
       actionPlans: [{
         accountId: tiger.id,

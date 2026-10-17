@@ -4,7 +4,7 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>My Financial Agent</title>
-    <link rel="stylesheet" href="/styles.css?v=20260904-sp500-template" />
+    <link rel="stylesheet" href="/styles.css?v=20261017-market-review-5" />
   </head>
   <body>
     <div class="shell">
@@ -512,26 +512,33 @@
             </section>
 
             <section class="review-step-panel hidden" data-step="market">
-              <div class="review-field wide structured-note-field">
-                <div class="structured-note-head">
+              <div id="marketReviewGroup" class="review-field wide action-plan-field market-review-field">
+                <div class="action-plan-head market-review-head">
                   <div>
-                    <strong class="review-section-title">大盘盘点</strong>
+                    <strong class="review-section-title">市场与板块</strong>
+                    <small class="muted">每个标的一行，点击行打开详情编辑支撑、压力与分析。</small>
                   </div>
-                  <button type="button" class="compact-button" data-note-add-section="marketSentiment">+ 一级</button>
-                </div>
-                <div id="marketSentimentBlockEditor" class="structured-note-editor" data-note-field="marketSentiment"></div>
-              </div>
-            </section>
-
-            <section class="review-step-panel hidden" data-step="rotation">
-              <div class="review-field wide structured-note-field">
-                <div class="structured-note-head">
-                  <div>
-                    <strong class="review-section-title">大宗商品与板块轮动</strong>
+                  <div class="action-row">
+                    <button id="addMarketBlockBtn" type="button" class="ghost compact-button" aria-haspopup="dialog">添加标的</button>
+                    <button id="marketAutoSortBtn" type="button" class="ghost compact-button">自动排序</button>
+                    <span class="action-plan-row-tools">
+                      <button id="marketMoveUpBtn" type="button" class="ghost compact-button">上移</button>
+                      <button id="marketMoveDownBtn" type="button" class="ghost compact-button">下移</button>
+                      <button id="marketDeleteBlockBtn" type="button" class="ghost compact-button danger">删除</button>
+                    </span>
                   </div>
-                  <button type="button" class="compact-button" data-note-add-section="sectorRotation">+ 一级</button>
                 </div>
-                <div id="sectorRotationBlockEditor" class="structured-note-editor" data-note-field="sectorRotation"></div>
+                <div class="market-catalog-status hidden">
+                  <span id="marketReviewMessage" class="muted" role="status" aria-live="polite"></span>
+                </div>
+                <div class="action-plan-table-wrap">
+                  <table id="marketReviewTable" class="action-plan-table market-table">
+                    <colgroup><col class="market-col-symbol"><col class="market-col-level"><col class="market-col-level"><col class="market-col-thinking"><col class="market-col-other"></colgroup>
+                    <thead><tr><th>标的</th><th>支撑位</th><th>压力位</th><th>思考</th><th>其他分析</th></tr></thead>
+                    <tbody id="marketReviewRows"></tbody>
+                  </table>
+                </div>
+                <div id="marketReviewEmpty" class="empty-state">暂无市场与板块主题，点击“添加标的”开始填写。</div>
               </div>
             </section>
 
@@ -562,6 +569,7 @@
 
           <div class="review-modal-footer">
             <button id="prevStepBtn" type="button" class="ghost">上一步</button>
+            <p id="reviewFooterMessage" class="review-footer-message hidden" role="status" aria-live="polite"></p>
             <button id="nextStepBtn" type="button">下一步</button>
           </div>
         </div>
@@ -609,6 +617,50 @@
       </div>
     </aside>
 
+    <aside id="marketReviewDetail" class="market-review-detail hidden" role="dialog" aria-modal="true" aria-labelledby="marketDetailTitle">
+      <div id="marketDetailBackdrop" class="action-plan-detail-backdrop"></div>
+      <div class="action-plan-detail-panel market-detail-panel">
+        <header class="action-plan-detail-head">
+          <div><h3><span id="marketDetailTitle">市场与板块详情</span><span class="tip-trigger tip-panel market-detail-tip" tabindex="0" role="button" aria-label="查看编辑说明" aria-describedby="marketDetailTipBubble">
+            <svg viewBox="0 0 16 16"><circle cx="8" cy="8" r="7"></circle><line x1="8" y1="7" x2="8" y2="11.5" stroke-linecap="round"></line><circle cx="8" cy="4.8" r="0.1" stroke-width="2" stroke-linecap="round"></circle></svg>
+            <span id="marketDetailTipBubble" class="bubble" role="tooltip"><span class="market-detail-tip-line">编辑当前标的的市场判断，完成编辑后统一保存复盘。</span><span id="marketSharedLevelsHint" class="market-detail-tip-line"></span></span>
+          </span></h3></div>
+          <div id="marketDetailMetrics" class="action-plan-metrics market-detail-metrics">
+            <div class="action-plan-metric metric-price" data-metric="latest-price"><span>当前最近价格</span><strong>暂无</strong></div>
+            <div class="action-plan-metric" data-metric="day-change"><span>复盘日</span><strong>暂无</strong></div>
+          </div>
+          <button id="closeMarketDetailBtn" type="button" class="ghost compact-button">关闭</button>
+        </header>
+        <div class="action-plan-editor market-detail-body">
+          <div class="market-child-add-toolbar">
+            <button id="changeMarketSymbolBtn" type="button" class="ghost compact-button">更换标的</button>
+            <label class="compact" for="marketChildKindSelect">添加二级分析</label>
+            <select id="marketChildKindSelect" aria-label="二级分析类型"></select>
+            <button id="addMarketChildBtn" type="button" class="ghost compact-button">添加二级</button>
+          </div>
+          <p id="marketChangeSymbolHint" class="muted market-change-symbol-hint"></p>
+          <p id="marketLegacyOrigin" class="muted market-legacy-origin hidden"></p>
+          <details id="marketLevelConflicts" class="market-level-conflicts hidden"></details>
+          <p id="marketDetailMessage" class="market-detail-message" role="status" aria-live="polite"></p>
+          <div id="marketDetailFields" class="market-detail-fields"></div>
+        </div>
+        <footer class="action-plan-detail-footer">
+          <span class="muted market-detail-draft-hint">更改已保留在草稿中，需统一保存复盘</span>
+          <button id="finishMarketDetailBtn" type="button" class="primary">完成编辑</button>
+        </footer>
+      </div>
+    </aside>
+
+    <aside id="marketSymbolPicker" class="market-symbol-picker hidden" role="dialog" aria-modal="true" aria-labelledby="marketSymbolPickerTitle">
+      <div id="marketSymbolPickerBackdrop" class="market-detail-backdrop"></div>
+      <div class="market-symbol-picker-panel">
+        <header class="action-plan-detail-head"><h3 id="marketSymbolPickerTitle">添加市场标的</h3><button id="closeMarketSymbolPickerBtn" type="button" class="ghost compact-button">关闭</button></header>
+        <div class="action-plan-symbol-search-wrap"><input id="marketSymbolSearchInput" type="search" autocomplete="off" placeholder="搜索代码、名称、别名、类型" aria-label="搜索市场标的" /></div>
+        <div id="marketSymbolFilterRow" class="action-plan-symbol-filter-row"></div>
+        <div id="marketSymbolResultList" class="action-plan-symbol-result-list"></div>
+      </div>
+    </aside>
+
     <aside id="actionPlanDetailModal" class="action-plan-detail-modal hidden">
       <div id="actionPlanDetailBackdrop" class="action-plan-detail-backdrop"></div>
       <div class="action-plan-detail-panel">
@@ -616,6 +668,7 @@
           <div>
             <h3 id="actionPlanDetailTitle">标的详情</h3>
             <p id="actionPlanDetailSubtitle" class="muted">查看与编辑当前标的的操作计划。</p>
+            <p id="actionPlanSharedLevelsHint" class="shared-levels-hint"></p>
           </div>
           <div id="actionPlanMetrics" class="action-plan-metrics">
             <div class="action-plan-metric metric-price" data-metric="latest-price"><span>当前最近价格</span><strong>暂无</strong></div>
@@ -737,6 +790,6 @@
 
     <div id="actionPlanCellTooltip" class="action-plan-cell-tooltip hidden" role="tooltip"></div>
 
-    <script type="module" src="/app.js?v=20260904-sp500-template"></script>
+    <script type="module" src="/app.js?v=20261017-market-review-5"></script>
   </body>
 </html>

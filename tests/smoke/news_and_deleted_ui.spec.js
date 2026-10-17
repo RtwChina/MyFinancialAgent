@@ -11,7 +11,7 @@ test('news search and initialized review entry stay usable on the current UI', a
   await page.getByRole('button', { name: '新闻检索' }).click();
   await expect(page.getByRole('heading', { name: '新闻检索台' })).toBeVisible();
   await expect(page.locator('select[name="type"]')).toHaveValue('');
-  await expect(page.locator('select[name="starsMin"]')).toHaveValue('3');
+  await expect(page.locator('select[name="starsMin"]')).toHaveValue('4');
   await expect(page.locator('#newsSummary')).toContainText('当前结果');
 
   const firstNewsRow = page.locator('#newsList tr').first();

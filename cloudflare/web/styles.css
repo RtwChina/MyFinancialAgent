@@ -1675,13 +1675,6 @@ textarea {
   color: #174ea6;
 }
 
-.review-outline-item.child {
-  padding-left: 30px;
-  color: #64748b;
-  font-size: 11px;
-  font-weight: 650;
-}
-
 .review-modal-body {
   display: grid;
   grid-template-columns: minmax(0, 1fr);
@@ -2244,6 +2237,19 @@ details.review-news-overview > .empty-state {
   display: flex;
   justify-content: space-between;
   gap: 12px;
+}
+
+.review-footer-message {
+  flex: 1;
+  margin: 0;
+  align-self: center;
+  text-align: right;
+  font-size: 0.88rem;
+  color: var(--muted);
+}
+
+.review-footer-message.error {
+  color: #b91c1c;
 }
 
 .data-box,
@@ -3270,7 +3276,8 @@ textarea[name="reviewerNewsNotes"] {
   border-left: 1px solid rgba(15, 23, 42, 0.12);
 }
 
-.action-plan-group .empty-state {
+.action-plan-group .empty-state,
+.market-review-field .empty-state {
   padding: 10px 14px;
   font-size: 0.82rem;
   text-align: center;
@@ -3524,7 +3531,359 @@ textarea[name="reviewerNewsNotes"] {
 .action-plan-position.pos-30  { color: #450a0a; background: #f87171; }
 .action-plan-position.pos-max { color: #fff;    background: #dc2626; }
 
-.action-plan-detail-modal {
+/* Market review reuses the plan section banner; its toolbar sits on the banner's right. */
+.review-step-panel .market-review-head {
+  flex-direction: row;
+  align-items: center;
+  flex-wrap: nowrap;
+  gap: 16px;
+}
+
+.market-review-head .action-row {
+  margin-left: auto;
+  flex-shrink: 0;
+}
+
+.market-review-head .compact-button {
+  min-height: 26px;
+  padding: 3px 12px;
+  font-size: 0.78rem;
+}
+
+.market-catalog-status {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 0 12px 8px;
+  font-size: 0.78rem;
+}
+
+.market-table {
+  min-width: 780px;
+}
+
+.market-table col.market-col-symbol { width: 17%; }
+.market-table col.market-col-level { width: 18%; }
+.market-table col.market-col-thinking { width: 27%; }
+.market-table col.market-col-other { width: 20%; }
+
+.market-table tbody tr td:first-child,
+.market-table tbody tr.selected td:first-child {
+  position: relative;
+  padding-left: 18px;
+  box-shadow: none;
+}
+
+.market-table tbody tr td:first-child::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 12px;
+  bottom: 12px;
+  width: 3px;
+  border-radius: 3px;
+  background: #bfdbfe;
+}
+
+.market-table tbody tr.selected td:first-child::before {
+  background: #2563eb;
+}
+
+.market-table tbody tr:focus-visible {
+  outline: 2px solid #2563eb;
+  outline-offset: -2px;
+}
+
+.market-symbol-name {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  margin-top: 4px;
+  color: #64748b;
+  font-size: 0.75rem;
+  font-weight: 500;
+}
+
+.shared-levels-hint {
+  margin: 6px 0;
+  color: #64748b;
+  font-size: 0.75rem;
+  line-height: 1.5;
+  font-weight: 400;
+}
+
+.market-table .shared-levels-hint {
+  display: block;
+  max-width: 240px;
+}
+
+.market-symbol-picker {
+  position: fixed;
+  inset: 0;
+  display: flex;
+  justify-content: center;
+  z-index: 38;
+  padding: 18px;
+}
+
+.market-symbol-picker.hidden {
+  display: none;
+}
+
+.market-detail-backdrop {
+  position: absolute;
+  inset: 0;
+  background: rgba(15, 23, 42, 0.22);
+}
+
+.action-plan-detail-panel.market-detail-panel {
+  grid-template-rows: auto minmax(0, 1fr) auto;
+  overflow: hidden;
+}
+
+.market-detail-panel .action-plan-detail-head > div:first-child {
+  min-width: 0;
+  flex: 1;
+}
+
+.market-detail-panel .action-plan-detail-head h3 {
+  overflow-wrap: anywhere;
+}
+
+.market-detail-tip {
+  border-radius: 50%;
+}
+
+.market-detail-tip:focus-visible {
+  outline: 2px solid rgba(37, 99, 235, 0.4);
+  outline-offset: 2px;
+}
+
+.market-detail-tip:focus-visible .bubble {
+  opacity: 1;
+  visibility: visible;
+  pointer-events: auto;
+}
+
+.market-detail-tip .bubble {
+  display: grid;
+  gap: 6px;
+  font-weight: 400;
+  letter-spacing: 0;
+}
+
+.market-detail-tip-line:empty {
+  display: none;
+}
+
+.action-plan-editor.market-detail-body {
+  display: block;
+  overflow-y: auto;
+  min-height: 0;
+}
+
+.action-plan-metrics.market-detail-metrics {
+  grid-template-columns: 1.25fr 1fr;
+  width: 310px;
+  flex-shrink: 0;
+}
+
+.market-detail-metrics.hidden {
+  display: none;
+}
+
+.market-detail-fields {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  align-items: start;
+  gap: 12px;
+}
+
+.market-detail-field {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+  color: #475569;
+  font-size: 0.78rem;
+  font-weight: 800;
+}
+
+.market-detail-fields .market-wide-card {
+  grid-column: 1 / -1;
+}
+
+.market-child-add-toolbar {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.market-child-add-toolbar > *,
+.action-plan-editor .market-child-add-toolbar label.compact {
+  align-self: center;
+}
+
+.market-detail-body .market-child-add-toolbar select {
+  width: auto;
+  min-width: 160px;
+  font-size: 0.74rem;
+}
+
+.market-child-add-toolbar label {
+  margin-left: auto;
+}
+
+.market-change-symbol-hint {
+  margin: 8px 0 14px;
+  font-size: 0.75rem;
+}
+
+.market-legacy-badge {
+  display: inline-block;
+  margin-top: 4px;
+  padding: 1px 6px;
+  border-radius: 4px;
+  background: #fef3c7;
+  color: #92400e;
+  font-size: 0.7rem;
+  font-weight: 500;
+}
+
+.market-legacy-origin {
+  margin: -6px 0 12px;
+  font-size: 0.75rem;
+}
+
+.market-level-conflicts {
+  margin: 0 0 14px;
+  border: 1px solid #fde68a;
+  border-radius: 8px;
+  background: #fffbeb;
+  padding: 8px 12px;
+  font-size: 0.8rem;
+}
+
+.market-level-conflicts summary {
+  cursor: pointer;
+  color: #92400e;
+  font-weight: 600;
+}
+
+.market-conflict h4 {
+  margin: 10px 0 4px;
+  font-size: 0.8rem;
+}
+
+.market-conflict ul {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: grid;
+  gap: 6px;
+}
+
+.market-conflict-source {
+  color: #64748b;
+  font-size: 0.75rem;
+}
+
+.market-conflict pre {
+  margin: 2px 0 0;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  font: inherit;
+  color: #0f172a;
+}
+
+.market-detail-message {
+  margin: 8px 0;
+  color: #b91c1c;
+  font-size: 0.82rem;
+}
+
+.market-detail-message:empty {
+  display: none;
+}
+
+.market-child-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  min-width: 0;
+  min-height: 28px;
+}
+
+.market-child-header .field-title {
+  overflow-wrap: anywhere;
+}
+
+.market-child-title-label {
+  min-width: 0;
+  flex: 1;
+}
+
+.market-detail-fields [data-market-title] {
+  box-sizing: border-box;
+}
+
+.market-detail-fields [data-market-title][aria-invalid="true"] {
+  border-color: #dc2626;
+}
+
+.market-child-actions {
+  display: flex;
+  flex-shrink: 0;
+  gap: 4px;
+}
+
+.market-child-actions button {
+  min-width: 28px;
+  min-height: 28px;
+  padding: 0 6px;
+  border-radius: 8px;
+  font-size: 0.74rem;
+}
+
+.market-detail-fields textarea {
+  box-sizing: border-box;
+}
+
+.market-detail-draft-hint {
+  margin-right: auto;
+  font-size: 0.78rem;
+}
+
+.market-symbol-picker {
+  z-index: 40;
+  align-items: center;
+}
+
+.market-symbol-picker-panel {
+  position: relative;
+  z-index: 1;
+  display: grid;
+  grid-template-rows: auto auto auto minmax(0, 1fr);
+  gap: 12px;
+  width: 540px;
+  max-height: calc(100vh - 36px);
+  box-sizing: border-box;
+  padding: 18px;
+  border-radius: 22px;
+  border: 1px solid rgba(15, 23, 42, 0.1);
+  background: #fff;
+  box-shadow: 0 24px 70px rgba(15, 23, 42, 0.22);
+}
+
+.market-symbol-picker-panel .action-plan-symbol-result-list {
+  max-height: calc(100vh - 240px);
+}
+
+.action-plan-detail-modal,
+.market-review-detail {
   position: fixed;
   inset: 0;
   z-index: 35;
@@ -3533,7 +3892,12 @@ textarea[name="reviewerNewsNotes"] {
   padding: 24px;
 }
 
-.action-plan-detail-modal.hidden {
+.market-review-detail {
+  z-index: 38;
+}
+
+.action-plan-detail-modal.hidden,
+.market-review-detail.hidden {
   display: none;
 }
 
@@ -4179,12 +4543,10 @@ textarea[name="reviewerNewsNotes"] {
 }
 
 #actionPlanSupportLevelsInput,
-#actionPlanResistanceLevelsInput {
+#actionPlanResistanceLevelsInput,
+.market-detail-fields textarea[data-market-kind="support"],
+.market-detail-fields textarea[data-market-kind="resistance"] {
   min-height: 88px;
-}
-
-#actionPlanSupportLevelsInput,
-#actionPlanResistanceLevelsInput {
   font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
   font-size: 0.8rem;
 }

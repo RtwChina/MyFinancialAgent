@@ -1,14 +1,11 @@
 import { test, expect } from '@playwright/test';
-import { execFileSync } from 'node:child_process';
+import { queryLocalSql } from '../helpers/market-review-local.mjs';
 
 const BASE_URL = 'http://127.0.0.1:8787';
 
+// Same isolated local test D1 the 8787 Worker reads; rows keep wrangler's pretty JSON for text assertions.
 function d1(command) {
-  return execFileSync(
-    'npx',
-    ['wrangler', 'd1', 'execute', 'my-financial-agent', '--local', '--command', command],
-    { cwd: `${process.cwd()}/cloudflare`, encoding: 'utf8' },
-  );
+  return JSON.stringify(queryLocalSql(command), null, 2);
 }
 
 test('symbol manager page can add and hide a temporary symbol', async ({ page }) => {

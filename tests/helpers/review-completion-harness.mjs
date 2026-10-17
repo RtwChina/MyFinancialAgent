@@ -5,11 +5,12 @@ import { pathToFileURL } from 'node:url';
 import { seedReview, reviewDate } from './review-completion-fixtures.mjs';
 export const root=path.resolve(import.meta.dirname,'../..');
 export const baselineRoot=path.join(root,'.tests/review-completion/baseline');
-export async function createHarness({ baseline=false, fixture={}, failure=null }={}) {
+export async function createHarness({ baseline=false, fixture={}, failure=null, seed=null }={}) {
  const source=baseline?baselineRoot:root;
  const sqlite=new DatabaseSync(':memory:');
  for(const name of fs.readdirSync(path.join(source,'cloudflare/migrations')).filter(x=>x.endsWith('.sql')).sort()) sqlite.exec(fs.readFileSync(path.join(source,'cloudflare/migrations',name),'utf8'));
- const payload=seedReview(sqlite,fixture); const events=[];const counts=new Map();let stage='';let calls=0;let prepares=0;let roundTrips=0;let fault=failure;
+ // A custom loader replaces the default seed and receives the fully migrated real database.
+ const payload=seed?seed(sqlite):seedReview(sqlite,fixture); const events=[];const counts=new Map();let stage='';let calls=0;let prepares=0;let roundTrips=0;let fault=failure;
  function statement(sql,values=[]) {
   return {sql,values,bind(...args){return statement(sql,args);},
    async run(){roundTrips++;return execute(sql,values,'run');},
@@ -34,7 +35,15 @@ export async function createHarness({ baseline=false, fixture={}, failure=null }
  let rolledBack=[];
  const DB={prepare(sql){prepares++;return statement(sql);},async batch(statements){roundTrips++;const mark=events.length;sqlite.exec('SAVEPOINT d1_batch');try{const out=[];for(const s of statements){const rows=execute(s.sql,s.values,'all');out.push({success:true,results:rows});}sqlite.exec('RELEASE d1_batch');return out;}catch(e){sqlite.exec('ROLLBACK TO d1_batch; RELEASE d1_batch');rolledBack=events.slice(mark).map(x=>x.key);throw e;}}};
  const worker=(await import(pathToFileURL(path.join(source,'cloudflare/worker/src/index.js')).href)).default;
- async function request(url,body){stage=url.endsWith('/complete')?'complete':body?'save':'read';const response=await worker.fetch(new Request(`http://localhost${url}`,body?{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(body)}:undefined),{DB,APP_ENV:'test'});return {status:response.status,body:await response.json()};}
+ async function request(url,body,{method=body?'POST':'GET'}={}){
+  method=method.toUpperCase();
+  stage=url.endsWith('/complete')?'complete':method==='GET'?'read':'save';
+  const init={method};
+  // GET must never send a body, even when a caller supplies one alongside an explicit method.
+  if(method!=='GET' && body!==undefined){init.headers={'content-type':'application/json'};init.body=JSON.stringify(body);}
+  const response=await worker.fetch(new Request(`http://localhost${url}`,init),{DB,APP_ENV:'test'});
+  return {status:response.status,body:await response.json()};
+ }
  function snapshot(){return Object.fromEntries(sqlite.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' ORDER BY name").all().map(({name})=>[name,sqlite.prepare(`SELECT * FROM "${name}" ORDER BY rowid`).all().map(x=>({...x}))]));}
  return {sqlite,DB,payload,events,request,snapshot,stats:()=>({calls,prepares,roundTrips}),rolledBack:()=>rolledBack,clearFailure(){fault=null;counts.clear();rolledBack=[];},setFailure(next){fault=next;counts.clear();rolledBack=[];},async complete(body={}){const saved=await request(`/api/reviews/${reviewDate}`,payload);if(saved.status!==200)return saved;return request(`/api/reviews/${reviewDate}/complete`,{accountSnapshot:{accounts:[],notes:''},...body});},close(){sqlite.close();}};
 }

@@ -44,9 +44,11 @@ test('实时计划批次中途失败时不留下新旧混合的计划集合',asy
   harness.payload.actionPlans=harness.payload.actionPlans.slice(0,3)
    .map(plan=>({...plan,thinking:'改写后的计划',entryPlan:'改为进场'}));
 
-  harness.setFailure({key:nthWriteKey(harness,'INSERT INTO account_live_action_plans',1),when:'before'});
+  const dailyBefore=harness.sqlite.prepare('SELECT * FROM daily_review_action_plans ORDER BY rowid').all().map(row=>({...row}));
+  harness.setFailure({key:nthWriteKey(harness,'DELETE FROM account_live_action_plans',0),when:'before'});
   assert.equal((await harness.complete()).status,500);
 
   assert.deepEqual(livePlans(harness),before);
+  assert.deepEqual(harness.sqlite.prepare('SELECT * FROM daily_review_action_plans ORDER BY rowid').all().map(row=>({...row})),dailyBefore);
  }finally{harness.close();}
 });

@@ -20,6 +20,9 @@ def assert_final_schema(conn: sqlite3.Connection) -> None:
         "tracked_symbols": {"symbol", "market_type"},
         "daily_review_action_plans": {"account_id", "position_amount"},
         "account_live_action_plans": {"account_id", "position_amount"},
+        "daily_review_archive": {"market_review_json"},
+        "daily_review_snapshots": {"market_review_json", "symbol_levels_json"},
+        "daily_review_symbol_levels": {"archive_date", "symbol", "support_levels", "resistance_levels"},
     }
     for table_name, expected in required_columns.items():
         actual = table_columns(conn, table_name)
@@ -27,6 +30,9 @@ def assert_final_schema(conn: sqlite3.Connection) -> None:
         if missing:
             raise AssertionError(f"{table_name} is missing columns: {sorted(missing)}")
 
+    from market_review_migration import assert_market_review_schema
+
+    assert_market_review_schema(conn)
     archive_columns = table_columns(conn, "daily_review_archive")
     removed_archive_columns = {"asset_plan", "market_sentiment", "sector_rotation"}
     unexpected = archive_columns & removed_archive_columns
@@ -53,8 +59,8 @@ def assert_final_schema(conn: sqlite3.Connection) -> None:
 def main() -> None:
     migrations = sorted(MIGRATIONS_DIR.glob("[0-9][0-9][0-9]_*.sql"))
     migration_numbers = [int(path.name[:3]) for path in migrations]
-    if not migration_numbers or migration_numbers[-1] < 26:
-        raise AssertionError(f"migration 026 is missing: {migration_numbers!r}")
+    if not migration_numbers or migration_numbers[-1] < 27:
+        raise AssertionError(f"migration 027 is missing: {migration_numbers!r}")
     expected_numbers = list(range(1, migration_numbers[-1] + 1))
     if migration_numbers != expected_numbers:
         raise AssertionError(

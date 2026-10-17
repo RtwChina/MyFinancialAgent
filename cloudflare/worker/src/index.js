@@ -1,3 +1,5 @@
+import { createMarketReview, assembleMarketReview, serializeMarketReview, validateMarketReviewBlocks, patchMarketReviewLevels, projectMarketReview } from '../../web/market-review-model.js';
+
 const JSON_HEADERS = {
   "content-type": "application/json; charset=utf-8",
 };
@@ -183,13 +185,13 @@ async function handleApi(request, env, url, appEnv) {
     if (liveActionPlanMatch) {
       const planId = Number(liveActionPlanMatch[1]);
       if (request.method === "GET") {
-        const item = await getAccountLiveActionPlanById(env, planId);
-        if (!item) {
+        const result = await getAccountLiveActionPlanById(env, planId);
+        if (!result.item) {
           const error = new Error("活态操作计划不存在");
           error.statusCode = 404;
           throw error;
         }
-        return json({ item }, 200, request);
+        return json(result, 200, request);
       }
       if (request.method === "PUT") {
         return json(await updateAccountLiveActionPlan(env, planId, await request.json()), 200, request);
@@ -287,7 +289,7 @@ async function handleApi(request, env, url, appEnv) {
       {
         error: error instanceof Error ? error.message : "Unknown error",
       },
-      error.statusCode || 500,
+      error.statusCode || error.status || 500,
       request,
     );
   }
@@ -894,6 +896,7 @@ async function getReviews(env, url) {
       a.updated_at,
       a.reviewed_at,
       a.reviewer_news_notes,
+      a.market_review_json,
       a.market_sentiment_blocks_json,
       a.sector_rotation_blocks_json,
       (
@@ -968,15 +971,29 @@ function deriveReviewDailyThesis(row = {}) {
   const tradingSummary = firstMeaningfulLine(row.trading_summary);
   if (tradingSummary) return tradingSummary;
 
-  const reviewParts = [
-    firstReviewNoteBlockLine(row.market_sentiment_blocks_json, 42),
-    firstReviewNoteBlockLine(row.sector_rotation_blocks_json, 42),
-  ].filter(Boolean);
+  const reviewParts = row.market_review_json != null
+    ? marketReviewThesisParts(row.market_review_json)
+    : [
+      firstReviewNoteBlockLine(row.market_sentiment_blocks_json, 42),
+      firstReviewNoteBlockLine(row.sector_rotation_blocks_json, 42),
+    ].filter(Boolean);
   if (reviewParts.length) return reviewParts.join(" / ");
 
   return firstMeaningfulLine(row.daily_major_events)
     || firstMeaningfulLine(row.linkage_logic_chain)
     || "待复盘";
+}
+
+// 新文档前两个主题：名称＋首行思考；不读价位，列表无需逐日期查询。
+function marketReviewThesisParts(value) {
+  let blocks = [];
+  try { blocks = JSON.parse(value)?.blocks || []; } catch { return []; }
+  return blocks.slice(0, 2).map((block) => {
+    const name = block.type === "symbol" ? (block.identity?.displayName || block.symbol || "") : String(block.title || "").trim();
+    const thinking = firstMeaningfulLine((block.children || []).find((child) => child.kind === "thinking")?.body, 84);
+    const text = thinking ? `${name}：${thinking}` : name;
+    return text.length > 42 ? `${text.slice(0, 42)}...` : text;
+  }).filter(Boolean);
 }
 
 function firstReviewNoteBlockLine(value, maxLength = 42) {
@@ -1043,36 +1060,13 @@ function resolveReviewNoteBlocks(record, jsonKey, prefix) {
   return { blocks: [], source: "empty" };
 }
 
-function hasExplicitReviewNoteContent(record, jsonKey) {
-  if (!record) return false;
-  if (record[jsonKey] != null) return true;
-  return false;
-}
-
-function resolveReviewNoteBlocksWithFallback(primary, fallback, jsonKey, prefix) {
-  if (hasExplicitReviewNoteContent(primary, jsonKey)) {
-    return resolveReviewNoteBlocks(primary, jsonKey, prefix);
-  }
-  return resolveReviewNoteBlocks(fallback, jsonKey, prefix);
-}
-
 function getBatchReviewReadiness(record = {}) {
   const missingFields = [];
   if (!String(record.reviewer_news_notes || "").trim()) missingFields.push("news");
-  if (!normalizeReviewNoteBlocks(record.market_sentiment_blocks_json, "market").length) {
-    missingFields.push("market");
-  }
-  if (!normalizeReviewNoteBlocks(record.sector_rotation_blocks_json, "rotation").length) {
-    missingFields.push("rotation");
-  }
+  const market = record.market_review_json == null ? createMarketReview() : JSON.parse(record.market_review_json);
+  if (!market.blocks.length) missingFields.push("market");
   if (Number(record.action_plan_count || 0) <= 0) missingFields.push("plan");
   return { ready: missingFields.length === 0, missingFields };
-}
-
-function pickSubmittedReviewNoteBlocks(body, camelKey, snakeKey) {
-  if (Array.isArray(body?.[camelKey])) return body[camelKey];
-  if (Array.isArray(body?.[snakeKey])) return body[snakeKey];
-  return null;
 }
 
 function parsePositionWeight(value) {
@@ -1320,18 +1314,99 @@ function previousActionPlanSymbolKeysFromRows(rows = []) {
   return new Set(rows.map((row) => `${Number(row.account_id)}:${row.symbol}`));
 }
 
-async function getReviewByDate(env, archiveDate) {
-  const archive = await env.DB.prepare(
-    `SELECT * FROM daily_review_archive WHERE archive_date = ? LIMIT 1`,
-  )
-    .bind(archiveDate)
-    .first();
+function symbolLevelMapFromRows(rows) {
+  return Object.fromEntries(rows.map(row => [row.symbol, {
+    supportLevels: row.support_levels,
+    resistanceLevels: row.resistance_levels,
+  }]));
+}
 
+// Existing rows, including two empty strings, are authoritative. Legacy raw
+// plans only supply missing symbols; callers order them by account then plan.
+function resolvePlanSymbolLevels(levelRows, planRows, { conflicts = false } = {}) {
+  const symbolLevels = symbolLevelMapFromRows(levelRows);
+  const differences = [];
+  for (const symbol of new Set(planRows.map(row => row.symbol))) {
+    if (Object.hasOwn(symbolLevels, symbol)) continue;
+    const candidates = planRows.filter(row => row.symbol === symbol);
+    const levels = {};
+    for (const [field, column] of [['supportLevels', 'support_levels'], ['resistanceLevels', 'resistance_levels']]) {
+      const nonempty = candidates.filter(row => typeof row[column] === 'string' && row[column].trim());
+      const selected = nonempty[0];
+      levels[field] = selected?.[column] ?? '';
+      const alternatives = nonempty.filter(row => row[column] !== levels[field]);
+      if (conflicts && alternatives.length) differences.push({
+        id: `live:${symbol}:${field}`, symbol, field, selectedValue: levels[field],
+        selectedSource: { accountId: Number(selected.account_id), planId: Number(selected.id), source: 'live' },
+        alternatives: alternatives.map(row => ({ value: row[column], accountId: Number(row.account_id), planId: Number(row.id) })),
+      });
+    }
+    Object.defineProperty(symbolLevels, symbol, { value: levels, enumerable: true, configurable: true, writable: true });
+  }
+  return { symbolLevels, conflicts: differences };
+}
+
+function projectActionPlanPrices(rows, symbolLevels, toApi = dbActionPlanToApi) {
+  return rows.map(row => ({ ...toApi(row), ...(Object.hasOwn(symbolLevels, row.symbol)
+    ? symbolLevels[row.symbol] : { supportLevels: '', resistanceLevels: '' }) }));
+}
+
+function nonEmptyJsonArraySql(column, path = '') {
+  return `(CASE WHEN json_valid(${column}) THEN json_array_length(${column}${path ? `, '${path}'` : ''}) ELSE 0 END) > 0`;
+}
+
+// 沿用候选：最近非空新文档基线，及其后各组最近非空旧列（新文档日期的冻结旧列不参与）。
+// dateSql 为 '?' 或标量子查询；两条语句并入调用方既有读批次，不增加往返。
+function prepareMarketHistoryReads(env, dateSql, dateParams = []) {
+  const baseline = `(SELECT MAX(archive_date) FROM daily_review_archive
+    WHERE archive_date < ${dateSql} AND review_status = 'reviewed' AND market_review_json IS NOT NULL
+      AND ${nonEmptyJsonArraySql('market_review_json', '$.blocks')})`;
+  const legacy = column => `(SELECT MAX(archive_date) FROM daily_review_archive
+    WHERE archive_date < ${dateSql} AND review_status = 'reviewed' AND market_review_json IS NULL
+      AND ${nonEmptyJsonArraySql(column)} AND archive_date > COALESCE(${baseline}, ''))`;
+  return [
+    env.DB.prepare(
+      `SELECT archive_date, review_status, market_review_json, market_sentiment_blocks_json, sector_rotation_blocks_json
+       FROM daily_review_archive
+       WHERE archive_date IN (${baseline}, ${legacy('market_sentiment_blocks_json')}, ${legacy('sector_rotation_blocks_json')})
+       ORDER BY archive_date DESC`,
+    ).bind(...Array.from({ length: 5 }, () => dateParams).flat()),
+    env.DB.prepare(`SELECT * FROM daily_review_symbol_levels WHERE archive_date = ${baseline} ORDER BY symbol`).bind(...dateParams),
+  ];
+}
+
+function projectArchiveMarketReview({
+  archiveDate, archive, catalog, levelRows = [], planRows = [], historyRows = [], baselineLevelRows = [], allowInheritance = false,
+}) {
+  const historyLevels = {};
+  for (const row of baselineLevelRows) {
+    historyLevels[row.archive_date] ??= {};
+    Object.assign(historyLevels[row.archive_date], symbolLevelMapFromRows([row]));
+  }
+  return projectMarketReview({
+    archiveDate, target: archive || {}, catalog, history: historyRows, levelRows, planRows, historyLevels, allowInheritance,
+  });
+}
+
+async function getReviewByDate(env, archiveDate) {
+  const reads = await env.DB.batch([
+    env.DB.prepare(`SELECT * FROM daily_review_archive WHERE archive_date = ? LIMIT 1`).bind(archiveDate),
+    env.DB.prepare(`SELECT * FROM daily_review_symbol_levels WHERE archive_date = ? ORDER BY symbol`).bind(archiveDate),
+    prepareDailyReviewPlanRead(env, archiveDate),
+    env.DB.prepare(`SELECT * FROM tracked_symbols ORDER BY symbol_type, market_type, sort_order, id`),
+  ]);
+  const archive = firstBatchRow(reads[0]);
+  const { marketReview, symbolLevels } = projectArchiveMarketReview({
+    archiveDate, archive, catalog: (reads[3]?.results || []).map(enrichSymbolItem),
+    levelRows: reads[1]?.results || [], planRows: reads[2]?.results || [],
+  });
   return {
     archiveDate,
     review: archive ? {
       ...archive,
       review_status: normalizeReviewStatus(archive.review_status),
+      marketReview,
+      symbolLevels,
       market_sentiment_blocks: resolveReviewNoteBlocks(
         archive,
         "market_sentiment_blocks_json",
@@ -1347,6 +1422,7 @@ async function getReviewByDate(env, archiveDate) {
 }
 
 async function getReviewBootstrap(env, archiveDate) {
+  const [historyRead, baselineLevelsRead] = prepareMarketHistoryReads(env, '?', [archiveDate]);
   const phaseOne = await env.DB.batch([
     env.DB.prepare(`SELECT * FROM investment_accounts ORDER BY sort_order ASC, id ASC`),
     env.DB.prepare(`SELECT * FROM daily_review_archive WHERE archive_date = ? LIMIT 1`).bind(archiveDate),
@@ -1372,35 +1448,20 @@ async function getReviewBootstrap(env, archiveDate) {
        WHERE k_date <= ? ORDER BY k_date DESC LIMIT 2`,
     ).bind(archiveDate),
     env.DB.prepare(`SELECT * FROM daily_news_ai_analysis WHERE analysis_date = ? LIMIT 1`).bind(archiveDate),
-    env.DB.prepare(
-      `SELECT
-         (SELECT market_sentiment_blocks_json
-          FROM daily_review_archive
-          WHERE archive_date < ?
-            AND review_status = 'reviewed'
-            AND LENGTH(TRIM(COALESCE(market_sentiment_blocks_json, ''))) > 2
-            AND LOWER(TRIM(market_sentiment_blocks_json)) != 'null'
-          ORDER BY archive_date DESC
-          LIMIT 1) AS market_sentiment_blocks_json,
-         (SELECT sector_rotation_blocks_json
-          FROM daily_review_archive
-          WHERE archive_date < ?
-            AND review_status = 'reviewed'
-            AND LENGTH(TRIM(COALESCE(sector_rotation_blocks_json, ''))) > 2
-            AND LOWER(TRIM(sector_rotation_blocks_json)) != 'null'
-          ORDER BY archive_date DESC
-          LIMIT 1) AS sector_rotation_blocks_json`,
-    ).bind(archiveDate, archiveDate),
+    historyRead,
     env.DB.prepare(
       `SELECT p.*, a.name AS account_name, a.currency AS account_currency,
           a.sort_order AS account_sort_order, a.enabled AS account_enabled
        FROM daily_review_action_plans p
        LEFT JOIN investment_accounts a ON a.id = p.account_id
        WHERE p.archive_date = ?
-       ORDER BY COALESCE(a.sort_order, 999) ASC, p.sort_order ASC, p.symbol ASC`,
+       ORDER BY COALESCE(a.sort_order, 999), COALESCE(a.id, 999999), p.sort_order, p.id`,
     ).bind(archiveDate),
     env.DB.prepare(`SELECT * FROM review_account_snapshots WHERE archive_date = ? LIMIT 1`).bind(archiveDate),
     env.DB.prepare(`SELECT MAX(archive_date) AS latest FROM daily_review_archive`),
+    env.DB.prepare(`SELECT * FROM tracked_symbols ORDER BY symbol_type, market_type, sort_order, id`),
+    env.DB.prepare(`SELECT * FROM daily_review_symbol_levels WHERE archive_date = ? ORDER BY symbol`).bind(archiveDate),
+    baselineLevelsRead,
   ]);
 
   const investmentAccounts = (phaseOne[0]?.results || []).map(accountRowToApi);
@@ -1409,8 +1470,14 @@ async function getReviewBootstrap(env, archiveDate) {
   const currentPricesRaw = { results: currentPriceRows };
   const newsWindow = buildNewsWindowFromRows(phaseOne[3]?.results || [], archiveDate);
   const analysis = firstBatchRow(phaseOne[4]);
-  const previousCompletedReview = firstBatchRow(phaseOne[5]);
-  const actionPlans = (phaseOne[6]?.results || []).map(dbActionPlanToApi);
+  const rawActionPlans = phaseOne[6]?.results || [];
+  const marketReviewSymbols = (phaseOne[9]?.results || []).map(enrichSymbolItem);
+  const { marketReview, symbolLevels } = projectArchiveMarketReview({
+    archiveDate, archive: existingDraft, catalog: marketReviewSymbols,
+    levelRows: phaseOne[10]?.results || [], planRows: rawActionPlans,
+    historyRows: phaseOne[5]?.results || [], baselineLevelRows: phaseOne[11]?.results || [], allowInheritance: true,
+  });
+  const actionPlans = projectActionPlanPrices(rawActionPlans, symbolLevels);
   const accountSnapshot = snapshotRowToApi(firstBatchRow(phaseOne[7]));
   const latestArchiveDate = firstBatchRow(phaseOne[8])?.latest || null;
 
@@ -1519,18 +1586,6 @@ async function getReviewBootstrap(env, archiveDate) {
     });
   }
   if (accountImpactSummary == null) accountImpactSummary = [];
-  const marketNoteBlocks = resolveReviewNoteBlocksWithFallback(
-    existingDraft,
-    previousCompletedReview,
-    "market_sentiment_blocks_json",
-    "market",
-  );
-  const sectorNoteBlocks = resolveReviewNoteBlocksWithFallback(
-    existingDraft,
-    previousCompletedReview,
-    "sector_rotation_blocks_json",
-    "rotation",
-  );
 
   // news 按类型分组
   const newsByType = { index: [], sector: [], stock: [] };
@@ -1555,17 +1610,16 @@ async function getReviewBootstrap(env, archiveDate) {
     accountSnapshot,
     accountImpactSummary,
     account_impact_summary: accountImpactSummary,
+    marketReviewSymbols,
+    symbolLevels,
     structuredNotes: {
-      marketSentiment: marketNoteBlocks,
-      sectorRotation: sectorNoteBlocks,
+      marketReview,
     },
     draft: existingDraft ? {
       ...existingDraft,
       review_status: reviewStatus,
-      market_sentiment_blocks: marketNoteBlocks.blocks,
-      market_sentiment_blocks_source: marketNoteBlocks.source,
-      sector_rotation_blocks: sectorNoteBlocks.blocks,
-      sector_rotation_blocks_source: sectorNoteBlocks.source,
+      marketReview,
+      symbolLevels,
     } : null,
   };
 }
@@ -1655,7 +1709,7 @@ function normalizeActionPlanItem(item, sortOrder = 0) {
   if (!symbol) return null;
   const supportLevels = String(item.supportLevels || item.support_levels || "").trim();
   const resistanceLevels = String(item.resistanceLevels || item.resistance_levels || "").trim();
-  const keyLevels = String(item.keyLevels || item.key_levels || "").trim();
+  const keyLevels = String(item.keyLevels ?? item.key_levels ?? "");
   const rawAmount = item.positionAmount ?? item.position_amount;
   const positionAmount = rawAmount == null || rawAmount === ""
     ? null
@@ -1673,7 +1727,7 @@ function normalizeActionPlanItem(item, sortOrder = 0) {
     stopLossPlan: String(item.stopLossPlan || item.stop_loss_plan || "").trim(),
     supportLevels,
     resistanceLevels,
-    keyLevels: keyLevels || formatSupportResistanceLevels(supportLevels, resistanceLevels),
+    keyLevels,
     currentPosition: normalizeActionPlanPosition(item.currentPosition || item.current_position || defaultActionPlanPositionForAction(item.actionType || item.action_type)),
     positionAmount,
     thinking: String(item.thinking || "").trim(),
@@ -1707,7 +1761,7 @@ function dbActionPlanToApi(row) {
     stopLossPlan: row.stop_loss_plan || "",
     supportLevels: row.support_levels || "",
     resistanceLevels: row.resistance_levels || "",
-    keyLevels: row.key_levels || formatSupportResistanceLevels(row.support_levels || "", row.resistance_levels || ""),
+    keyLevels: row.key_levels ?? "",
     currentPosition: row.current_position || DEFAULT_ACTION_PLAN_POSITION,
     positionAmount: row.position_amount == null ? null : Number(row.position_amount),
     thinking: row.thinking || "",
@@ -1718,18 +1772,26 @@ function dbActionPlanToApi(row) {
   };
 }
 
-async function listReviewActionPlans(env, archiveDate) {
-  const rows = await env.DB.prepare(
+function prepareDailyReviewPlanRead(env, archiveDate) {
+  const statement = env.DB.prepare(
     `SELECT p.*, a.name AS account_name, a.currency AS account_currency,
         a.sort_order AS account_sort_order, a.enabled AS account_enabled
      FROM daily_review_action_plans p
      LEFT JOIN investment_accounts a ON a.id = p.account_id
-     WHERE p.archive_date = ?
-     ORDER BY COALESCE(a.sort_order, 999) ASC, p.sort_order ASC, p.symbol ASC`,
-  )
-    .bind(archiveDate)
-    .all();
-  return (rows.results || []).map(dbActionPlanToApi);
+     WHERE p.archive_date = ${archiveDate === undefined ? '(SELECT MAX(archive_date) FROM daily_review_archive)' : '?'}
+     ORDER BY COALESCE(a.sort_order, 999), COALESCE(a.id, 999999), p.sort_order, p.id`,
+  );
+  return archiveDate === undefined ? statement : statement.bind(archiveDate);
+}
+
+async function listReviewActionPlans(env, archiveDate) {
+  const reads = await env.DB.batch([
+    prepareDailyReviewPlanRead(env, archiveDate),
+    env.DB.prepare(`SELECT * FROM daily_review_symbol_levels WHERE archive_date = ? ORDER BY symbol`).bind(archiveDate),
+  ]);
+  const rows = reads[0]?.results || [];
+  const { symbolLevels } = resolvePlanSymbolLevels(reads[1]?.results || [], rows);
+  return projectActionPlanPrices(rows, symbolLevels);
 }
 
 function shiftDate(dateString, days) {
@@ -2484,7 +2546,7 @@ function dbAccountLiveActionPlanToApi(row) {
     stopLossPlan: row.stop_loss_plan || "",
     supportLevels: row.support_levels || "",
     resistanceLevels: row.resistance_levels || "",
-    keyLevels: row.key_levels || formatSupportResistanceLevels(row.support_levels || "", row.resistance_levels || ""),
+    keyLevels: row.key_levels ?? "",
     currentPosition: row.current_position || DEFAULT_ACTION_PLAN_POSITION,
     positionAmount: row.position_amount == null ? null : Number(row.position_amount),
     thinking: row.thinking || "",
@@ -2495,203 +2557,275 @@ function dbAccountLiveActionPlanToApi(row) {
   };
 }
 
+async function readAccountLivePlanState(env, { mutation = false } = {}) {
+  const latestSql = '(SELECT MAX(archive_date) FROM daily_review_archive)';
+  const statements = [
+    env.DB.prepare(`SELECT * FROM daily_review_archive WHERE archive_date = ${latestSql} LIMIT 1`),
+    env.DB.prepare(`SELECT * FROM daily_review_symbol_levels WHERE archive_date = ${latestSql} ORDER BY symbol`),
+    prepareDailyReviewPlanRead(env),
+    env.DB.prepare(
+      `SELECT p.*, a.name AS account_name, a.currency AS account_currency,
+          a.sort_order AS account_sort_order, a.enabled AS account_enabled
+       FROM account_live_action_plans p
+       LEFT JOIN investment_accounts a ON a.id = p.account_id
+       ORDER BY COALESCE(a.sort_order, 999), COALESCE(a.id, 999999), p.sort_order, p.id`,
+    ),
+    env.DB.prepare(`SELECT * FROM tracked_symbols ORDER BY symbol_type, market_type, sort_order, id`),
+    ...prepareMarketHistoryReads(env, latestSql),
+  ];
+  if (mutation) statements.push(env.DB.prepare(`SELECT * FROM investment_accounts ORDER BY sort_order, id`));
+  const reads = await env.DB.batch(statements);
+  const archive = firstBatchRow(reads[0]);
+  const levelRows = reads[1]?.results || [];
+  const dailyRows = reads[2]?.results || [];
+  const liveRows = reads[3]?.results || [];
+  const catalog = (reads[4]?.results || []).map(enrichSymbolItem);
+  if (!archive) {
+    return { archive, levelRows, dailyRows, liveRows, catalog, projection: null, accounts: reads[7]?.results || [],
+      ...resolvePlanSymbolLevels(levelRows, liveRows, { conflicts: true }) };
+  }
+  // 最新日未物化时与 bootstrap 同一投影（含沿用）；首次 live 写入冻结的就是这份内容。
+  const projection = projectArchiveMarketReview({
+    archiveDate: archive.archive_date, archive, catalog, levelRows, planRows: dailyRows,
+    historyRows: reads[5]?.results || [], baselineLevelRows: reads[6]?.results || [], allowInheritance: true,
+  });
+  return { archive, levelRows, dailyRows, liveRows, catalog, projection, accounts: reads[7]?.results || [],
+    symbolLevels: projection.symbolLevels, conflicts: projection.marketReview.conflicts };
+}
+
 async function listAccountLiveActionPlans(env) {
-  const rows = await env.DB.prepare(
-    `SELECT p.*, a.name AS account_name, a.currency AS account_currency,
-        a.sort_order AS account_sort_order, a.enabled AS account_enabled
-     FROM account_live_action_plans p
-     LEFT JOIN investment_accounts a ON a.id = p.account_id
-     ORDER BY COALESCE(a.sort_order, 999) ASC, COALESCE(a.id, 999999) ASC,
-              p.sort_order ASC, p.id ASC`,
-  ).all();
-  return (rows.results || []).map(dbAccountLiveActionPlanToApi);
+  const state = await readAccountLivePlanState(env);
+  return projectActionPlanPrices(state.liveRows, state.symbolLevels, dbAccountLiveActionPlanToApi);
 }
 
 async function getAccountLiveActionPlanById(env, id) {
-  const row = await env.DB.prepare(
+  const state = await readAccountLivePlanState(env);
+  const row = state.liveRows.find(row => Number(row.id) === id);
+  return { item: row ? projectActionPlanPrices([row], state.symbolLevels, dbAccountLiveActionPlanToApi)[0] : null, conflicts: state.conflicts };
+}
+
+function validateLivePriceBody(body) {
+  if (!body || typeof body !== 'object' || Array.isArray(body)) throw reviewInputError('活态计划请求必须是对象');
+  const patch = {};
+  for (const [field, alias] of [['supportLevels', 'support_levels'], ['resistanceLevels', 'resistance_levels']]) {
+    for (const key of [field, alias]) {
+      if (!Object.hasOwn(body, key)) continue;
+      if (typeof body[key] !== 'string') throw reviewInputError('价位必须为字符串，清空请使用空字符串');
+    }
+    if (Object.hasOwn(body, field)) patch[field] = body[field];
+    else if (Object.hasOwn(body, alias)) patch[field] = body[alias];
+  }
+  return patch;
+}
+
+function liveBodyValue(body, field, alias, fallback) {
+  if (Object.hasOwn(body, field)) return body[field];
+  if (alias && Object.hasOwn(body, alias)) return body[alias];
+  return fallback;
+}
+
+function normalizeLiveMutation(body, existing, state) {
+  const rawAccountId = liveBodyValue(body, 'accountId', 'account_id', existing?.account_id);
+  const accountId = Number(rawAccountId);
+  if (!['number', 'string'].includes(typeof rawAccountId) || !Number.isSafeInteger(accountId) || accountId <= 0) {
+    throw reviewInputError('accountId 必填且必须是正整数');
+  }
+  if (!state.accounts.some(account => Number(account.id) === accountId)) throw reviewInputError(`账户不存在：accountId=${accountId}`);
+  const merged = { accountId, symbol: body.symbol ?? existing?.symbol };
+  for (const [field, column] of [
+    ['actionType', 'action_type'], ['entryPlan', 'entry_plan'], ['takeProfitPlan', 'take_profit_plan'],
+    ['stopLossPlan', 'stop_loss_plan'], ['keyLevels', 'key_levels'], ['currentPosition', 'current_position'],
+    ['positionAmount', 'position_amount'], ['thinking', 'thinking'], ['marketType', 'market_type'], ['sortOrder', 'sort_order'],
+  ]) {
+    const value = liveBodyValue(body, field, column, existing?.[column]);
+    merged[field] = field === 'positionAmount' ? value : value ?? existing?.[column];
+  }
+  const normalized = normalizeActionPlanItem(merged, Number(existing?.sort_order || 0));
+  if (!normalized) throw reviewInputError('symbol 不能为空');
+  if (state.liveRows.some(row => Number(row.id) !== Number(existing?.id) && Number(row.account_id) === accountId && row.symbol === normalized.symbol)) {
+    throw reviewInputError(`该账户已存在 ${normalized.symbol} 的活态计划`, 409);
+  }
+  // Historical identities may remain editable, but cannot be created or moved
+  // to another account using an unavailable catalog symbol.
+  const sameIdentity = existing && Number(existing.account_id) === accountId && existing.symbol === normalized.symbol;
+  if (!sameIdentity && !state.catalog.some(item => item.symbol === normalized.symbol && Number(item.is_active) === 1)) {
+    throw reviewInputError(`操作计划标的不可用：${normalized.symbol}`);
+  }
+  // Omitted fields must not normalize stored text, especially legacy key_levels.
+  if (existing) for (const [field, column] of [
+    ['entryPlan', 'entry_plan'], ['takeProfitPlan', 'take_profit_plan'], ['stopLossPlan', 'stop_loss_plan'],
+    ['keyLevels', 'key_levels'], ['thinking', 'thinking'],
+  ]) {
+    if (!Object.hasOwn(body, field) && !Object.hasOwn(body, column)) normalized[field] = existing[column] ?? '';
+  }
+  return normalized;
+}
+
+function buildLivePriceMirrorStatement(env, levels, now, { archiveDate = null } = {}) {
+  if (archiveDate) {
+    // Date prices have already been patched in this batch. Never mirror a
+    // read-before-write snapshot, including the field omitted by this request.
+    const scope = levels == null ? '' : `AND symbol IN (SELECT json_extract(value, '$.symbol') FROM json_each(?))`;
+    return env.DB.prepare(
+      `UPDATE account_live_action_plans SET
+         support_levels = (SELECT support_levels FROM daily_review_symbol_levels WHERE archive_date = ? AND symbol = account_live_action_plans.symbol),
+         resistance_levels = (SELECT resistance_levels FROM daily_review_symbol_levels WHERE archive_date = ? AND symbol = account_live_action_plans.symbol),
+         updated_at = ?
+       WHERE EXISTS (SELECT 1 FROM daily_review_symbol_levels WHERE archive_date = ? AND symbol = account_live_action_plans.symbol) ${scope}`,
+    ).bind(archiveDate, archiveDate, now, archiveDate, ...(levels == null ? [] : [JSON.stringify(levels)]));
+  }
+  const data = JSON.stringify(levels);
+  return env.DB.prepare(
+    `UPDATE account_live_action_plans SET
+       support_levels = COALESCE((SELECT json_extract(value, '$.supportLevels') FROM json_each(?) WHERE json_extract(value, '$.symbol') = account_live_action_plans.symbol AND json_type(value, '$.supportLevels') = 'text'), support_levels),
+       resistance_levels = COALESCE((SELECT json_extract(value, '$.resistanceLevels') FROM json_each(?) WHERE json_extract(value, '$.symbol') = account_live_action_plans.symbol AND json_type(value, '$.resistanceLevels') = 'text'), resistance_levels),
+       updated_at = ?
+     WHERE symbol IN (SELECT json_extract(value, '$.symbol') FROM json_each(?))`,
+  ).bind(data, data, now, data);
+}
+
+function liveMutationPriceValue(field, column, normalized, pricePatch, state, existing) {
+  if (Object.hasOwn(pricePatch, field)) return { sql: '?', values: [pricePatch[field]] };
+  if (state.archive) return {
+    sql: `COALESCE((SELECT ${column} FROM daily_review_symbol_levels WHERE archive_date = ? AND symbol = ?), ?)`,
+    values: [state.archive.archive_date, normalized.symbol, normalized[field]],
+  };
+  // New/rekeyed identities load the current shared value, excluding the old
+  // identity. The first nonempty field is selected independently per price.
+  return {
+    sql: `COALESCE((SELECT p.${column} FROM account_live_action_plans p
+      LEFT JOIN investment_accounts a ON a.id = p.account_id
+      WHERE p.symbol = ? AND p.id <> ? AND typeof(p.${column}) = 'text' AND trim(p.${column}) <> ''
+      ORDER BY COALESCE(a.sort_order, 999), COALESCE(a.id, 999999), p.sort_order, p.id LIMIT 1), '')`,
+    values: [normalized.symbol, existing?.id ?? -1],
+  };
+}
+
+async function mutateAccountLiveActionPlan(env, method, id, body) {
+  const pricePatch = method === 'DELETE' ? {} : validateLivePriceBody(body);
+  const state = await readAccountLivePlanState(env, { mutation: true });
+  const existing = method === 'POST' ? null : state.liveRows.find(row => Number(row.id) === id);
+  if (method !== 'POST' && !existing) throw reviewInputError('活态操作计划不存在', 404);
+  const normalized = method === 'DELETE' ? null : normalizeLiveMutation(body, existing, state);
+  const patches = Object.keys(pricePatch).length ? [{ symbol: normalized.symbol, ...pricePatch }] : [];
+  // 最新日未物化时，写前有效展示结构（含沿用、sourceDates 与冲突证据）先冻结，再叠本次补丁。
+  const materializing = Boolean(state.archive) && !state.projection.materialized;
+  const document = state.archive ? state.projection.document : createMarketReview();
+  // Editing a historical live identity is allowed; creating a new market
+  // identity still requires an active catalog entry (existing blocks may stay).
+  const canSupplement = patches.every(patch => document.blocks.some(block => block.type === 'symbol' && block.symbol === patch.symbol)
+    || state.catalog.some(item => item.symbol === patch.symbol && Number(item.is_active) === 1));
+  const patched = patchMarketReviewLevels(document, state.symbolLevels, patches, {
+    catalog: state.catalog, supplement: Boolean(state.archive) && canSupplement,
+  });
+  const symbolLevels = patched.symbolLevels;
+  const now = isoNow();
+  // Materialize/patch date authority before writing any live price values.
+  const persisted = new Set(state.levelRows.map(row => row.symbol));
+  const levelSymbols = !state.archive ? [] : materializing
+    ? Object.keys(symbolLevels).filter(symbol => !persisted.has(symbol) || patches.some(patch => patch.symbol === symbol))
+    : normalized && (patches.length || !persisted.has(normalized.symbol)) ? [normalized.symbol] : [];
+  if (state.archive && normalized && !levelSymbols.includes(normalized.symbol) && !persisted.has(normalized.symbol)) levelSymbols.push(normalized.symbol);
+  const changedLevels = levelSymbols.map(symbol => ({ symbol, supportLevels: '', resistanceLevels: '', ...symbolLevels[symbol] }));
+  const statements = state.archive
+    ? buildReviewSymbolLevelStatements(env, state.archive.archive_date, changedLevels, { patches }) : [];
+  const mutationIndex = statements.length;
+  if (method === 'DELETE') {
+    statements.push(env.DB.prepare(`DELETE FROM account_live_action_plans WHERE id = ? RETURNING *`).bind(id));
+  } else {
+    Object.assign(normalized, Object.hasOwn(symbolLevels, normalized.symbol) ? symbolLevels[normalized.symbol] : { supportLevels: '', resistanceLevels: '' });
+    if (method === 'POST') {
+      const support = liveMutationPriceValue('supportLevels', 'support_levels', normalized, pricePatch, state, existing);
+      const resistance = liveMutationPriceValue('resistanceLevels', 'resistance_levels', normalized, pricePatch, state, existing);
+      const values = [normalized.accountId, normalized.symbol, normalized.actionType, normalized.entryPlan,
+        normalized.takeProfitPlan, normalized.stopLossPlan, normalized.keyLevels, ...support.values,
+        ...resistance.values, normalized.currentPosition, normalized.positionAmount, normalized.thinking,
+        normalized.sortOrder, normalized.marketType];
+      statements.push(env.DB.prepare(
+        `INSERT INTO account_live_action_plans (
+           account_id, symbol, action_type, entry_plan, take_profit_plan, stop_loss_plan,
+           key_levels, support_levels, resistance_levels, current_position, position_amount,
+           thinking, sort_order, market_type, created_at, updated_at
+         ) VALUES (?, ?, ?, ?, ?, ?, ?, ${support.sql}, ${resistance.sql}, ?, ?, ?, ?, ?, ?, ?) RETURNING *`,
+      ).bind(...values, now, now));
+    } else {
+      // Only explicit client fields may replace non-price values read before
+      // another request committed. SQL identifiers come from this fixed map.
+      const fields = [
+        ['accountId', 'account_id'], ['symbol', 'symbol'], ['actionType', 'action_type'],
+        ['entryPlan', 'entry_plan'], ['takeProfitPlan', 'take_profit_plan'], ['stopLossPlan', 'stop_loss_plan'],
+        ['keyLevels', 'key_levels'], ['currentPosition', 'current_position'], ['positionAmount', 'position_amount'],
+        ['thinking', 'thinking'], ['sortOrder', 'sort_order'], ['marketType', 'market_type'],
+      ].filter(([field, column]) => Object.hasOwn(body, field) || Object.hasOwn(body, column));
+      const priceFields = [['supportLevels', 'support_levels'], ['resistanceLevels', 'resistance_levels']]
+        .filter(([field]) => Object.hasOwn(pricePatch, field) || existing.symbol !== normalized.symbol)
+        .map(([field, column]) => ({ column, ...liveMutationPriceValue(field, column, normalized, pricePatch, state, existing) }));
+      const assignments = [...fields.map(([, column]) => `${column} = ?`),
+        ...priceFields.map(({ column, sql }) => `${column} = ${sql}`), 'updated_at = ?'];
+      statements.push(env.DB.prepare(
+        `UPDATE account_live_action_plans SET ${assignments.join(', ')} WHERE id = ? RETURNING *`,
+      ).bind(...fields.map(([field]) => normalized[field]), ...priceFields.flatMap(price => price.values), now, id));
+    }
+    if (!state.archive && patches.length) statements.push(buildLivePriceMirrorStatement(env, patches, now));
+  }
+  if (state.archive) {
+    if (normalized) statements.push(buildLivePriceMirrorStatement(env, [{ symbol: normalized.symbol }], now, { archiveDate: state.archive.archive_date }));
+    if (materializing) {
+      // 并发首次写入已落文档时保留对方结果，不用本次读前快照覆盖。
+      statements.push(env.DB.prepare(
+        `UPDATE daily_review_archive SET market_review_json = COALESCE(market_review_json, ?), updated_at = ?
+         WHERE archive_date = ? RETURNING market_review_json`,
+      ).bind(serializeMarketReview(patched.marketReview), now, state.archive.archive_date));
+    } else if (serializeMarketReview(patched.marketReview) !== serializeMarketReview(document)) {
+      statements.push(env.DB.prepare(
+        `UPDATE daily_review_archive SET
+           market_review_json = CASE WHEN market_review_json = ? THEN ? ELSE market_review_json END,
+           updated_at = ? WHERE archive_date = ? RETURNING market_review_json`,
+      ).bind(state.archive.market_review_json, serializeMarketReview(patched.marketReview), now, state.archive.archive_date));
+    }
+    // Read membership and non-price fields from the current live table inside
+    // the write batch, never from the pre-mutation snapshot.
+    statements.push(...buildReviewActionPlanStatements(env, state.archive.archive_date, null, { fromLive: true }).statements);
+  }
+  if (normalized) statements.push(env.DB.prepare(
     `SELECT p.*, a.name AS account_name, a.currency AS account_currency,
         a.sort_order AS account_sort_order, a.enabled AS account_enabled
-     FROM account_live_action_plans p
-     LEFT JOIN investment_accounts a ON a.id = p.account_id
-     WHERE p.id = ? LIMIT 1`,
-  ).bind(id).first();
-  if (!row) return null;
-  return dbAccountLiveActionPlanToApi(row);
+     FROM account_live_action_plans p LEFT JOIN investment_accounts a ON a.id = p.account_id
+     WHERE p.symbol = ?
+     ORDER BY COALESCE(a.sort_order, 999), COALESCE(a.id, 999999), p.sort_order, p.id`,
+  ).bind(normalized.symbol));
+  // One write batch owns mutation, prices, every same-symbol live mirror and the
+  // latest daily membership, including the final response read.
+  const written = await env.DB.batch(statements);
+  if (method === 'DELETE') return { ok: true, deletedId: id };
+  const finalRows = written[written.length - 1]?.results || [];
+  const currentId = Number(firstBatchRow(written[mutationIndex]).id);
+  const row = finalRows.find(row => Number(row.id) === currentId);
+  const finalLevels = resolvePlanSymbolLevels([], finalRows).symbolLevels;
+  return { item: projectActionPlanPrices([row], finalLevels, dbAccountLiveActionPlanToApi)[0] };
 }
 
-async function assertAccountExistsForLivePlan(env, accountId) {
-  const row = await env.DB.prepare(
-    `SELECT id, enabled FROM investment_accounts WHERE id = ? LIMIT 1`,
-  ).bind(accountId).first();
-  if (!row) {
-    const error = new Error(`账户不存在：accountId=${accountId}`);
-    error.statusCode = 400;
-    throw error;
-  }
-  return row;
+async function createAccountLiveActionPlan(env, body) {
+  return mutateAccountLiveActionPlan(env, 'POST', null, body);
 }
 
-async function syncLatestDailyFromLive(env) {
-  const latest = await getLatestArchiveDate(env);
-  if (!latest) return;
-  const livePlans = await listAccountLiveActionPlans(env);
-  await replaceReviewActionPlans(env, latest, livePlans);
-}
-
-async function createAccountLiveActionPlan(env, body = {}) {
-  const accountId = Number(body.accountId ?? body.account_id);
-  if (!Number.isFinite(accountId) || accountId <= 0) {
-    const error = new Error("accountId 必填且必须是正整数");
-    error.statusCode = 400;
-    throw error;
-  }
-  await assertAccountExistsForLivePlan(env, accountId);
-  const normalized = normalizeActionPlanItem({ ...body, accountId });
-  if (!normalized) {
-    const error = new Error("symbol 不能为空");
-    error.statusCode = 400;
-    throw error;
-  }
-  const duplicate = await env.DB.prepare(
-    `SELECT id FROM account_live_action_plans WHERE account_id = ? AND symbol = ? LIMIT 1`,
-  ).bind(accountId, normalized.symbol).first();
-  if (duplicate) {
-    const error = new Error(`该账户已存在 ${normalized.symbol} 的活态计划`);
-    error.statusCode = 409;
-    throw error;
-  }
-  const now = isoNow();
-  const result = await env.DB.prepare(
-    `INSERT INTO account_live_action_plans (
-      account_id, symbol, action_type, entry_plan, take_profit_plan,
-      stop_loss_plan, key_levels, support_levels, resistance_levels,
-      current_position, position_amount, thinking, sort_order, market_type, created_at, updated_at
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-  ).bind(
-    accountId,
-    normalized.symbol,
-    normalized.actionType,
-    normalized.entryPlan,
-    normalized.takeProfitPlan,
-    normalized.stopLossPlan,
-    normalized.keyLevels,
-    normalized.supportLevels,
-    normalized.resistanceLevels,
-    normalized.currentPosition,
-    normalized.positionAmount,
-    normalized.thinking,
-    normalized.sortOrder,
-    normalized.marketType,
-    now,
-    now,
-  ).run();
-  await syncLatestDailyFromLive(env);
-  const item = await getAccountLiveActionPlanById(env, result.meta.last_row_id);
-  return { item };
-}
-
-async function updateAccountLiveActionPlan(env, id, body = {}) {
-  const existing = await env.DB.prepare(
-    `SELECT * FROM account_live_action_plans WHERE id = ? LIMIT 1`,
-  ).bind(id).first();
-  if (!existing) {
-    const error = new Error("活态操作计划不存在");
-    error.statusCode = 404;
-    throw error;
-  }
-  const accountId = Number(body.accountId ?? body.account_id ?? existing.account_id);
-  if (!Number.isFinite(accountId) || accountId <= 0) {
-    const error = new Error("accountId 必须是正整数");
-    error.statusCode = 400;
-    throw error;
-  }
-  if (accountId !== Number(existing.account_id)) {
-    await assertAccountExistsForLivePlan(env, accountId);
-  }
-  const merged = {
-    accountId,
-    symbol: body.symbol ?? existing.symbol,
-    actionType: body.actionType ?? body.action_type ?? existing.action_type,
-    entryPlan: body.entryPlan ?? body.entry_plan ?? existing.entry_plan,
-    takeProfitPlan: body.takeProfitPlan ?? body.take_profit_plan ?? existing.take_profit_plan,
-    stopLossPlan: body.stopLossPlan ?? body.stop_loss_plan ?? existing.stop_loss_plan,
-    keyLevels: body.keyLevels ?? body.key_levels ?? existing.key_levels,
-    supportLevels: body.supportLevels ?? body.support_levels ?? existing.support_levels,
-    resistanceLevels: body.resistanceLevels ?? body.resistance_levels ?? existing.resistance_levels,
-    currentPosition: body.currentPosition ?? body.current_position ?? existing.current_position,
-    positionAmount: body.positionAmount ?? body.position_amount ?? existing.position_amount,
-    thinking: body.thinking ?? existing.thinking,
-    marketType: body.marketType ?? body.market_type ?? existing.market_type,
-    sortOrder: body.sortOrder ?? body.sort_order ?? existing.sort_order,
-  };
-  const normalized = normalizeActionPlanItem(merged, Number(existing.sort_order || 0));
-  if (!normalized) {
-    const error = new Error("symbol 不能为空");
-    error.statusCode = 400;
-    throw error;
-  }
-  if (
-    Number(existing.account_id) !== accountId ||
-    String(existing.symbol) !== normalized.symbol
-  ) {
-    const duplicate = await env.DB.prepare(
-      `SELECT id FROM account_live_action_plans
-       WHERE account_id = ? AND symbol = ? AND id != ? LIMIT 1`,
-    ).bind(accountId, normalized.symbol, id).first();
-    if (duplicate) {
-      const error = new Error(`该账户已存在 ${normalized.symbol} 的活态计划`);
-      error.statusCode = 409;
-      throw error;
-    }
-  }
-  const now = isoNow();
-  await env.DB.prepare(
-    `UPDATE account_live_action_plans SET
-       account_id = ?, symbol = ?, action_type = ?, entry_plan = ?,
-       take_profit_plan = ?, stop_loss_plan = ?, key_levels = ?,
-       support_levels = ?, resistance_levels = ?, current_position = ?,
-       position_amount = ?, thinking = ?, sort_order = ?, market_type = ?, updated_at = ?
-     WHERE id = ?`,
-  ).bind(
-    accountId,
-    normalized.symbol,
-    normalized.actionType,
-    normalized.entryPlan,
-    normalized.takeProfitPlan,
-    normalized.stopLossPlan,
-    normalized.keyLevels,
-    normalized.supportLevels,
-    normalized.resistanceLevels,
-    normalized.currentPosition,
-    normalized.positionAmount,
-    normalized.thinking,
-    normalized.sortOrder,
-    normalized.marketType,
-    now,
-    id,
-  ).run();
-  await syncLatestDailyFromLive(env);
-  const item = await getAccountLiveActionPlanById(env, id);
-  return { item };
+async function updateAccountLiveActionPlan(env, id, body) {
+  return mutateAccountLiveActionPlan(env, 'PUT', id, body);
 }
 
 async function deleteAccountLiveActionPlan(env, id) {
-  const existing = await env.DB.prepare(
-    `SELECT id FROM account_live_action_plans WHERE id = ? LIMIT 1`,
-  ).bind(id).first();
-  if (!existing) {
-    const error = new Error("活态操作计划不存在");
-    error.statusCode = 404;
-    throw error;
-  }
-  await env.DB.prepare(`DELETE FROM account_live_action_plans WHERE id = ?`).bind(id).run();
-  await syncLatestDailyFromLive(env);
-  return { ok: true, deletedId: id };
+  return mutateAccountLiveActionPlan(env, 'DELETE', id);
 }
 
-function buildAccountLiveActionPlanStatements(env, actionPlans) {
+function buildAccountLiveActionPlanStatements(env, actionPlans, { archiveDate = null } = {}) {
   const normalizedInput = (Array.isArray(actionPlans) ? actionPlans : [])
-    .map((plan, idx) => normalizeActionPlanItem(plan, idx))
+    .map((plan, idx) => {
+      const normalized = normalizeActionPlanItem(plan, idx);
+      if (!normalized) return null;
+      if (typeof plan.supportLevels === 'string') normalized.supportLevels = plan.supportLevels;
+      if (typeof plan.resistanceLevels === 'string') normalized.resistanceLevels = plan.resistanceLevels;
+      return normalized;
+    })
     .filter(Boolean)
     .filter((plan) => Number.isFinite(Number(plan.accountId)) && Number(plan.accountId) > 0);
   const seen = new Set();
@@ -2703,54 +2837,48 @@ function buildAccountLiveActionPlanStatements(env, actionPlans) {
     normalized.push({ ...plan, sortOrder: normalized.length });
   }
   const now = isoNow();
-  const writeStatement = env.DB.prepare(
-    `INSERT INTO account_live_action_plans (
-        account_id, symbol, action_type, entry_plan, take_profit_plan,
-        stop_loss_plan, key_levels, support_levels, resistance_levels,
-        current_position, position_amount, thinking, sort_order, market_type, created_at, updated_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-      ON CONFLICT(account_id, symbol) DO UPDATE SET
-        action_type = excluded.action_type,
-        entry_plan = excluded.entry_plan,
-        take_profit_plan = excluded.take_profit_plan,
-        stop_loss_plan = excluded.stop_loss_plan,
-        key_levels = excluded.key_levels,
-        support_levels = excluded.support_levels,
-        resistance_levels = excluded.resistance_levels,
-        current_position = excluded.current_position,
-        position_amount = excluded.position_amount,
-        thinking = excluded.thinking,
-        market_type = excluded.market_type,
-        sort_order = excluded.sort_order,
-        updated_at = excluded.updated_at`,
-  );
-  const statements = normalized.map((plan) => writeStatement.bind(
-    plan.accountId,
-    plan.symbol,
-    plan.actionType,
-    plan.entryPlan,
-    plan.takeProfitPlan,
-    plan.stopLossPlan,
-    plan.keyLevels,
-    plan.supportLevels,
-    plan.resistanceLevels,
-    plan.currentPosition,
-    plan.positionAmount,
-    plan.thinking,
-    plan.sortOrder,
-    plan.marketType,
-    now,
-    now,
-  ));
-  if (normalized.length) {
-    const conditions = normalized.map(() => "(account_id = ? AND symbol = ?)").join(" OR ");
-    const values = normalized.flatMap((plan) => [plan.accountId, plan.symbol]);
-    statements.push(env.DB.prepare(
-      `DELETE FROM account_live_action_plans WHERE NOT (${conditions})`,
-    ).bind(...values));
-  } else {
-    statements.push(env.DB.prepare(`DELETE FROM account_live_action_plans`));
-  }
+  const data = JSON.stringify(normalized);
+  const priceValue = (field, column) => archiveDate
+    ? `COALESCE((SELECT ${column} FROM daily_review_symbol_levels WHERE archive_date = ? AND symbol = json_extract(value, '$.symbol')), json_extract(value, '$.${field}'))`
+    : `json_extract(value, '$.${field}')`;
+  const statements = [
+    env.DB.prepare(
+      `INSERT INTO account_live_action_plans (
+          account_id, symbol, action_type, entry_plan, take_profit_plan,
+          stop_loss_plan, key_levels, support_levels, resistance_levels,
+          current_position, position_amount, thinking, sort_order, market_type, created_at, updated_at
+        )
+        SELECT json_extract(value, '$.accountId'), json_extract(value, '$.symbol'),
+          json_extract(value, '$.actionType'), json_extract(value, '$.entryPlan'),
+          json_extract(value, '$.takeProfitPlan'), json_extract(value, '$.stopLossPlan'),
+          json_extract(value, '$.keyLevels'), ${priceValue('supportLevels', 'support_levels')},
+          ${priceValue('resistanceLevels', 'resistance_levels')}, json_extract(value, '$.currentPosition'),
+          json_extract(value, '$.positionAmount'), json_extract(value, '$.thinking'),
+          json_extract(value, '$.sortOrder'), json_extract(value, '$.marketType'), ?, ?
+        FROM json_each(?) WHERE 1
+        ON CONFLICT(account_id, symbol) DO UPDATE SET
+          action_type = excluded.action_type,
+          entry_plan = excluded.entry_plan,
+          take_profit_plan = excluded.take_profit_plan,
+          stop_loss_plan = excluded.stop_loss_plan,
+          support_levels = excluded.support_levels,
+          resistance_levels = excluded.resistance_levels,
+          current_position = excluded.current_position,
+          position_amount = excluded.position_amount,
+          thinking = excluded.thinking,
+          market_type = excluded.market_type,
+          sort_order = excluded.sort_order,
+          updated_at = excluded.updated_at`,
+    ).bind(...(archiveDate ? [archiveDate, archiveDate] : []), now, now, data),
+    env.DB.prepare(
+      `DELETE FROM account_live_action_plans
+       WHERE NOT EXISTS (
+         SELECT 1 FROM json_each(?) member
+         WHERE json_extract(member.value, '$.accountId') = account_live_action_plans.account_id
+           AND json_extract(member.value, '$.symbol') = account_live_action_plans.symbol
+       )`,
+    ).bind(data),
+  ];
   return { statements, normalized };
 }
 
@@ -2761,8 +2889,9 @@ async function replaceAccountLiveActionPlans(env, actionPlans) {
 }
 
 async function getAccountLiveActionPlansResponse(env) {
-  const items = await listAccountLiveActionPlans(env);
-  return { items, total: items.length };
+  const state = await readAccountLivePlanState(env);
+  const items = projectActionPlanPrices(state.liveRows, state.symbolLevels, dbAccountLiveActionPlanToApi);
+  return { items, total: items.length, conflicts: state.conflicts };
 }
 
 async function getAccountLiveActionPlanSymbolCatalog(env) {
@@ -2770,63 +2899,58 @@ async function getAccountLiveActionPlanSymbolCatalog(env) {
   return getActionPlanSymbolCatalog(env, latest || new Date().toISOString().slice(0, 10));
 }
 
-function buildReviewActionPlanStatements(env, archiveDate, actionPlans) {
-  const normalized = normalizeActionPlansForSave(actionPlans);
+function buildReviewActionPlanStatements(env, archiveDate, actionPlans, { preserveValues = false, fromLive = false } = {}) {
+  const normalized = fromLive ? [] : preserveValues ? actionPlans.map(plan => ({ ...plan })) : normalizeActionPlansForSave(actionPlans);
   const now = isoNow();
-  const writeStatement = env.DB.prepare(
-    `INSERT INTO daily_review_action_plans (
-        archive_date, account_id, symbol, action_type, entry_plan, take_profit_plan,
-        stop_loss_plan, key_levels, support_levels, resistance_levels,
-        current_position, position_amount, thinking, market_type, sort_order, created_at, updated_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-      ON CONFLICT(archive_date, account_id, symbol) DO UPDATE SET
-        action_type = excluded.action_type,
-        entry_plan = excluded.entry_plan,
-        take_profit_plan = excluded.take_profit_plan,
-        stop_loss_plan = excluded.stop_loss_plan,
-        key_levels = excluded.key_levels,
-        support_levels = excluded.support_levels,
-        resistance_levels = excluded.resistance_levels,
-        current_position = excluded.current_position,
-        position_amount = excluded.position_amount,
-        thinking = excluded.thinking,
-        market_type = excluded.market_type,
-        sort_order = excluded.sort_order,
-        updated_at = excluded.updated_at`,
-  );
-  const statements = normalized.map((plan) => writeStatement.bind(
-    archiveDate,
-    plan.accountId,
-    plan.symbol,
-    plan.actionType,
-    plan.entryPlan,
-    plan.takeProfitPlan,
-    plan.stopLossPlan,
-    plan.keyLevels,
-    plan.supportLevels,
-    plan.resistanceLevels,
-    plan.currentPosition,
-    plan.positionAmount,
-    plan.thinking,
-    plan.marketType,
-    plan.sortOrder,
-    now,
-    now,
-  ));
-
-  if (normalized.length) {
-    const conditions = normalized.map(() => "(account_id = ? AND symbol = ?)").join(" OR ");
-    const values = normalized.flatMap((plan) => [plan.accountId, plan.symbol]);
-    statements.push(env.DB.prepare(
+  const data = JSON.stringify(normalized);
+  const source = fromLive
+    ? `SELECT ?, p.account_id, p.symbol, p.action_type, p.entry_plan, p.take_profit_plan,
+          p.stop_loss_plan, p.key_levels, NULL, NULL, p.current_position, p.position_amount,
+          p.thinking, p.market_type,
+          ROW_NUMBER() OVER (ORDER BY COALESCE(a.sort_order, 999), COALESCE(a.id, 999999), p.sort_order, p.id) - 1,
+          ?, ?
+       FROM account_live_action_plans p
+       LEFT JOIN investment_accounts a ON a.id = p.account_id WHERE 1`
+    : `SELECT ?, json_extract(value, '$.accountId'), json_extract(value, '$.symbol'),
+          json_extract(value, '$.actionType'), json_extract(value, '$.entryPlan'),
+          json_extract(value, '$.takeProfitPlan'), json_extract(value, '$.stopLossPlan'),
+          json_extract(value, '$.keyLevels'), NULL,
+          NULL, json_extract(value, '$.currentPosition'),
+          json_extract(value, '$.positionAmount'), json_extract(value, '$.thinking'),
+          json_extract(value, '$.marketType'), json_extract(value, '$.sortOrder'), ?, ?
+       FROM json_each(?) WHERE 1`;
+  const members = fromLive
+    ? `SELECT 1 FROM account_live_action_plans member
+       WHERE member.account_id = daily_review_action_plans.account_id
+         AND member.symbol = daily_review_action_plans.symbol`
+    : `SELECT 1 FROM json_each(?) member
+       WHERE json_extract(member.value, '$.accountId') = daily_review_action_plans.account_id
+         AND json_extract(member.value, '$.symbol') = daily_review_action_plans.symbol`;
+  const statements = [
+    env.DB.prepare(
+      `INSERT INTO daily_review_action_plans (
+          archive_date, account_id, symbol, action_type, entry_plan, take_profit_plan,
+          stop_loss_plan, key_levels, support_levels, resistance_levels,
+          current_position, position_amount, thinking, market_type, sort_order, created_at, updated_at
+        )
+        ${source}
+        ON CONFLICT(archive_date, account_id, symbol) DO UPDATE SET
+          action_type = excluded.action_type,
+          entry_plan = excluded.entry_plan,
+          take_profit_plan = excluded.take_profit_plan,
+          stop_loss_plan = excluded.stop_loss_plan,
+          current_position = excluded.current_position,
+          position_amount = excluded.position_amount,
+          thinking = excluded.thinking,
+          market_type = excluded.market_type,
+          sort_order = excluded.sort_order,
+          updated_at = excluded.updated_at`,
+    ).bind(...(fromLive ? [archiveDate, now, now] : [archiveDate, now, now, data])),
+    env.DB.prepare(
       `DELETE FROM daily_review_action_plans
-       WHERE archive_date = ?
-         AND NOT (${conditions})`,
-    ).bind(archiveDate, ...values));
-  } else {
-    statements.push(env.DB.prepare(
-      `DELETE FROM daily_review_action_plans WHERE archive_date = ?`,
-    ).bind(archiveDate));
-  }
+       WHERE archive_date = ? AND NOT EXISTS (${members})`,
+    ).bind(...(fromLive ? [archiveDate] : [archiveDate, data])),
+  ];
   return { statements, normalized };
 }
 
@@ -2835,6 +2959,31 @@ async function replaceReviewActionPlans(env, archiveDate, actionPlans) {
   await runWriteBatches(env, statements);
   await updateLegacyAssetPlanSummaryIfPresent(env, archiveDate, normalized);
   return normalized;
+}
+
+function buildReviewSymbolLevelStatements(env, archiveDate, levels, { patches } = {}) {
+  if (!levels.length) return [];
+  const now = isoNow();
+  // The base collection API still replaces both fields. Request callers pass
+  // actual own-field patches; initial-only materialization never overwrites a
+  // row another request inserted after the initial read.
+  const assignment = (field, column) => patches === undefined ? `excluded.${column}` :
+    `CASE WHEN EXISTS (SELECT 1 FROM json_each(?) patch
+       WHERE json_extract(patch.value, '$.symbol') = excluded.symbol
+         AND json_type(patch.value, '$.${field}') = 'text')
+     THEN excluded.${column} ELSE daily_review_symbol_levels.${column} END`;
+  return [env.DB.prepare(
+    `INSERT INTO daily_review_symbol_levels (
+        archive_date, symbol, support_levels, resistance_levels, created_at, updated_at
+      )
+      SELECT ?, json_extract(value, '$.symbol'), COALESCE(json_extract(value, '$.supportLevels'), ''),
+        COALESCE(json_extract(value, '$.resistanceLevels'), ''), ?, ?
+      FROM json_each(?) WHERE 1
+      ON CONFLICT(archive_date, symbol) DO UPDATE SET
+        support_levels = ${assignment('supportLevels', 'support_levels')},
+        resistance_levels = ${assignment('resistanceLevels', 'resistance_levels')},
+        updated_at = excluded.updated_at`,
+  ).bind(archiveDate, now, now, JSON.stringify(levels), ...(patches === undefined ? [] : [JSON.stringify(patches), JSON.stringify(patches)]))];
 }
 
 function normalizeReviewAnalysis(analysis, newsItems) {
@@ -2913,100 +3062,158 @@ function beginReviewStage(env, stage, itemCount = null) {
   timing.current = stage ? { stage, start: now, itemCount } : null;
 }
 
+function reviewInputError(message, statusCode = 400) {
+  const error = new Error(message);
+  error.statusCode = statusCode;
+  return error;
+}
+
+function validateReviewLevelPatches(patches, catalog, existingBlocks, symbolLevels) {
+  const available = new Set(catalog.filter(item => Number(item.is_active) === 1).map(item => item.symbol));
+  const historical = new Set(existingBlocks.filter(block => block.type === 'symbol').map(block => block.symbol));
+  const seen = new Set();
+  return patches.map(patch => {
+    if (!patch || typeof patch !== 'object' || Array.isArray(patch) || typeof patch.symbol !== 'string' || !patch.symbol.trim()) {
+      throw reviewInputError('价位补丁必须包含有效的 symbol');
+    }
+    const symbol = patch.symbol;
+    if (!available.has(symbol) && !historical.has(symbol) && !Object.hasOwn(symbolLevels, symbol)) {
+      throw reviewInputError(`价位标的不可用：${symbol}`);
+    }
+    if (seen.has(symbol)) throw reviewInputError(`重复的价位补丁：${symbol}`);
+    seen.add(symbol);
+    const fields = ['supportLevels', 'resistanceLevels'].filter(field => Object.hasOwn(patch, field));
+    if (!fields.length || fields.some(field => typeof patch[field] !== 'string')) {
+      throw reviewInputError('价位补丁至少包含一个字符串字段，null 不是清空');
+    }
+    return { symbol, ...Object.fromEntries(fields.map(field => [field, patch[field]])) };
+  });
+}
+
 async function saveReviewDraft(env, archiveDate, body) {
   beginReviewStage(env, "save.validate");
+  if (!body || typeof body !== 'object' || Array.isArray(body)) throw reviewInputError('复盘请求必须是对象');
+  const oldFields = ['marketSentimentBlocks', 'sectorRotationBlocks', 'market_sentiment_blocks', 'sector_rotation_blocks'];
+  if (oldFields.some(field => Object.hasOwn(body, field))) {
+    throw reviewInputError('旧复盘字段已停用，请刷新页面后重试');
+  }
+  const hasMarketReview = Object.hasOwn(body, 'marketReview');
+  if (hasMarketReview && (!body.marketReview || typeof body.marketReview !== 'object' || Array.isArray(body.marketReview) ||
+      !Array.isArray(body.marketReview.blocks) || !Array.isArray(body.marketReview.levels))) {
+    throw reviewInputError('marketReview 必须同时包含 blocks 和 levels 数组');
+  }
+  if (Object.hasOwn(body, 'actionPlans') && !Array.isArray(body.actionPlans)) throw reviewInputError('actionPlans 必须为数组');
   const hasStructuredActionPlans = Array.isArray(body.actionPlans);
-  const normalizedActionPlans = hasStructuredActionPlans
-    ? normalizeActionPlansForSave(body.actionPlans)
-    : [];
-  // 保存入口信任页面提交的 accountId 和 symbol，不额外查询账户、补建默认账户或校验标的。
-  // 一次 batch 只读取复盘状态与最新归档日，用于保持状态及决定是否同步实时计划。
+  if (hasStructuredActionPlans && body.actionPlans.some(plan => !plan || typeof plan !== 'object' || Array.isArray(plan))) {
+    throw reviewInputError('actionPlans 中每条计划必须为对象');
+  }
+  const normalizedActionPlans = hasStructuredActionPlans ? normalizeActionPlansForSave(body.actionPlans) : [];
   const readResults = await env.DB.batch([
-    env.DB.prepare(`SELECT review_status FROM daily_review_archive WHERE archive_date = ? LIMIT 1`).bind(archiveDate),
+    env.DB.prepare(`SELECT * FROM daily_review_archive WHERE archive_date = ? LIMIT 1`).bind(archiveDate),
     env.DB.prepare(`SELECT MAX(archive_date) AS latest FROM daily_review_archive`),
+    env.DB.prepare(`SELECT * FROM tracked_symbols ORDER BY symbol_type, market_type, sort_order, id`),
+    env.DB.prepare(`SELECT * FROM daily_review_symbol_levels WHERE archive_date = ? ORDER BY symbol`).bind(archiveDate),
+    env.DB.prepare(
+      `SELECT p.* FROM daily_review_action_plans p
+       LEFT JOIN investment_accounts a ON a.id = p.account_id
+       WHERE p.archive_date = ?
+       ORDER BY COALESCE(a.sort_order, 999), COALESCE(a.id, 999999), p.sort_order, p.id`,
+    ).bind(archiveDate),
+    ...prepareMarketHistoryReads(env, '?', [archiveDate]),
   ]);
-  const existing = (readResults[0].results || [])[0] || null;
-  const latestBeforeSave = (readResults[1].results || [])[0]?.latest || null;
-  const reviewStatus = body.reviewStatus || existing?.review_status || "initialized";
-  const submittedMarketBlocks = pickSubmittedReviewNoteBlocks(
-    body,
-    "marketSentimentBlocks",
-    "market_sentiment_blocks",
-  );
-  const submittedSectorBlocks = pickSubmittedReviewNoteBlocks(
-    body,
-    "sectorRotationBlocks",
-    "sector_rotation_blocks",
-  );
-  const marketBlocks = submittedMarketBlocks
-    ? normalizeReviewNoteBlocks(submittedMarketBlocks, "market")
-    : null;
-  const sectorBlocks = submittedSectorBlocks
-    ? normalizeReviewNoteBlocks(submittedSectorBlocks, "rotation")
-    : null;
-  const marketBlocksJson = marketBlocks ? JSON.stringify(marketBlocks) : null;
-  const sectorBlocksJson = sectorBlocks ? JSON.stringify(sectorBlocks) : null;
-
-  beginReviewStage(env, "save.write", normalizedActionPlans.length);
-  const draftStatement = env.DB.prepare(
-    `INSERT INTO daily_review_archive (
-      archive_date, review_status, reviewer_news_notes, market_sentiment_blocks_json,
-      sector_rotation_blocks_json, trading_summary, updated_at
-    ) VALUES (?, ?, ?, ?, ?, ?, ?)
-    ON CONFLICT(archive_date) DO UPDATE SET
-      review_status = excluded.review_status,
-      reviewer_news_notes = excluded.reviewer_news_notes,
-      market_sentiment_blocks_json = CASE
-        WHEN ? THEN excluded.market_sentiment_blocks_json
-        ELSE daily_review_archive.market_sentiment_blocks_json
-      END,
-      sector_rotation_blocks_json = CASE
-        WHEN ? THEN excluded.sector_rotation_blocks_json
-        ELSE daily_review_archive.sector_rotation_blocks_json
-      END,
-      trading_summary = excluded.trading_summary,
-      updated_at = excluded.updated_at`,
-  )
-    .bind(
-      archiveDate,
-      reviewStatus,
-      body.reviewerNewsNotes || body.newsBrief || "",
-      marketBlocksJson,
-      sectorBlocksJson,
-      body.tradingSummary || "",
-      isoNow(),
-      submittedMarketBlocks ? 1 : 0,
-      submittedSectorBlocks ? 1 : 0,
-    );
-
-  // 正文、当日计划、实时计划写在同一批里：跨太平洋的 D1 每次往返约 120ms，
-  // 分开写就是三趟。同批还让三者要么全成功、要么全回滚。
-  const statements = [draftStatement];
-  let normalizedFromDaily = [];
-  let syncedToLive = false;
+  const existing = firstBatchRow(readResults[0]);
+  const latestBeforeSave = firstBatchRow(readResults[1])?.latest || null;
+  const catalog = (readResults[2]?.results || []).map(enrichSymbolItem);
+  const persistedLevels = symbolLevelMapFromRows(readResults[3]?.results || []);
+  const existingPlans = readResults[4]?.results || [];
+  // 未物化日期以写前的有效展示结构（与 bootstrap 相同，含沿用）为可信基础，并在本次写入冻结。
+  const projection = projectArchiveMarketReview({
+    archiveDate, archive: existing, catalog, levelRows: readResults[3]?.results || [], planRows: existingPlans,
+    historyRows: readResults[5]?.results || [], baselineLevelRows: readResults[6]?.results || [], allowInheritance: true,
+  });
+  const materializing = !projection.materialized;
+  const existingDocument = projection.document;
+  const document = hasMarketReview ? createMarketReview({
+    ...existingDocument,
+    blocks: validateMarketReviewBlocks(body.marketReview.blocks, { catalog, existingBlocks: existingDocument.blocks }),
+  }) : existingDocument;
+  const patches = hasMarketReview ? validateReviewLevelPatches(body.marketReview.levels, catalog, existingDocument.blocks, projection.symbolLevels) : [];
+  const initialSymbolLevels = Object.assign(Object.create(null), structuredClone(projection.symbolLevels));
+  const initialSymbols = materializing
+    ? [...Object.keys(projection.symbolLevels), ...document.blocks.filter(block => block.type === 'symbol').map(block => block.symbol), ...normalizedActionPlans.map(plan => plan.symbol)]
+    : [];
+  for (const symbol of new Set([...initialSymbols, ...patches.map(patch => patch.symbol)])) {
+    if (!Object.hasOwn(initialSymbolLevels, symbol)) initialSymbolLevels[symbol] = { supportLevels: '', resistanceLevels: '' };
+  }
+  // Submitted blocks are final: shared patching must never supplement here.
+  const { symbolLevels } = patchMarketReviewLevels(document, initialSymbolLevels, patches, { catalog });
   if (hasStructuredActionPlans) {
-    const daily = buildReviewActionPlanStatements(env, archiveDate, normalizedActionPlans);
-    normalizedFromDaily = daily.normalized;
-    statements.push(...daily.statements);
-    // 写草稿后当前日期一定已存在，最新归档日等价于「不存在更晚的日期」。
-    if (!latestBeforeSave || archiveDate >= latestBeforeSave) {
-      statements.push(...buildAccountLiveActionPlanStatements(env, normalizedFromDaily).statements);
-      syncedToLive = true;
+    for (const plan of body.actionPlans) {
+      for (const [field, alias] of [['supportLevels', 'support_levels'], ['resistanceLevels', 'resistance_levels']]) {
+        for (const key of [field, alias]) {
+          if (Object.hasOwn(plan, key) && plan[key] !== (symbolLevels[plan.symbol]?.[field] ?? '')) {
+            throw reviewInputError('操作计划价位必须使用 marketReview.levels 提交', 409);
+          }
+        }
+      }
     }
   }
-  await runWriteBatches(env, statements);
+  const patchSymbols = new Set(patches.map(patch => patch.symbol));
+  const changedLevels = Object.entries(symbolLevels)
+    .filter(([symbol]) => (materializing && !Object.hasOwn(persistedLevels, symbol)) || patchSymbols.has(symbol))
+    .map(([symbol, levels]) => ({ symbol, ...levels }));
+  const reviewStatus = body.reviewStatus || existing?.review_status || 'initialized';
+  // 1 替换为提交结构；2 仅在仍未物化时冻结写前投影；0 保留现有文档。
+  const documentMode = hasMarketReview ? 1 : materializing ? 2 : 0;
+  const storedJson = documentMode ? serializeMarketReview(document) : existing?.market_review_json ?? null;
+  const isLatest = !latestBeforeSave || archiveDate >= latestBeforeSave;
+  beginReviewStage(env, 'save.write', normalizedActionPlans.length);
+  const statements = [env.DB.prepare(
+    `INSERT INTO daily_review_archive (
+       archive_date, review_status, reviewer_news_notes, market_review_json, trading_summary, updated_at
+     ) VALUES (?, ?, ?, ?, ?, ?)
+     ON CONFLICT(archive_date) DO UPDATE SET
+       review_status = excluded.review_status,
+       reviewer_news_notes = excluded.reviewer_news_notes,
+       market_review_json = CASE ? WHEN 1 THEN excluded.market_review_json
+         WHEN 2 THEN COALESCE(daily_review_archive.market_review_json, excluded.market_review_json)
+         ELSE daily_review_archive.market_review_json END,
+       trading_summary = excluded.trading_summary,
+       updated_at = excluded.updated_at
+     RETURNING market_review_json, reviewer_news_notes, trading_summary`,
+  ).bind(archiveDate, reviewStatus, body.reviewerNewsNotes ?? body.newsBrief ?? existing?.reviewer_news_notes ?? '',
+    storedJson, body.tradingSummary ?? existing?.trading_summary ?? '', isoNow(), documentMode),
+    ...buildReviewSymbolLevelStatements(env, archiveDate, changedLevels, { patches })];
   if (hasStructuredActionPlans) {
-    await updateLegacyAssetPlanSummaryIfPresent(env, archiveDate, normalizedFromDaily);
+    const daily = buildReviewActionPlanStatements(env, archiveDate, normalizedActionPlans);
+    statements.push(...daily.statements);
+    if (isLatest) {
+      // Membership/non-price values are replaced by the collection request;
+      // shared price values come from date authority inside the same SQL.
+      statements.push(...buildAccountLiveActionPlanStatements(env, daily.normalized, { archiveDate }).statements);
+    }
   }
-
+  if (isLatest && (hasStructuredActionPlans || changedLevels.length)) {
+    statements.push(buildLivePriceMirrorStatement(env, null, isoNow(), { archiveDate }));
+  }
+  // A single bulk read at the tail of the write batch returns current authority
+  // values, not the snapshot used to validate/initialize the request.
+  statements.push(env.DB.prepare(
+    `SELECT * FROM daily_review_symbol_levels WHERE archive_date = ? ORDER BY symbol`,
+  ).bind(archiveDate));
+  const written = await env.DB.batch(statements);
+  const saved = firstBatchRow(written[0]);
+  const savedJson = saved.market_review_json;
+  const savedDocument = savedJson == null ? createMarketReview() : JSON.parse(savedJson);
+  const finalSymbolLevels = symbolLevelMapFromRows(written[written.length - 1]?.results || []);
   return {
-    ok: true,
-    archiveDate,
-    reviewStatus,
-    actionPlanCount: normalizedActionPlans.length,
-    marketSentimentBlocks: marketBlocks || [],
-    sectorRotationBlocks: sectorBlocks || [],
-    syncedToLive,
+    ok: true, archiveDate, reviewStatus,
+    reviewerNewsNotes: saved.reviewer_news_notes,
+    tradingSummary: saved.trading_summary,
+    actionPlanCount: hasStructuredActionPlans ? normalizedActionPlans.length : existingPlans.length,
+    marketReview: { ...assembleMarketReview(savedDocument, finalSymbolLevels), source: savedJson == null ? 'empty' : 'saved' },
+    symbolLevels: finalSymbolLevels,
+    syncedToLive: isLatest && (hasStructuredActionPlans || changedLevels.length > 0),
   };
 }
 
@@ -3026,7 +3233,7 @@ async function completeReview(env, archiveDate, body = {}) {
   const reads = await env.DB.batch([
     env.DB.prepare(
       `SELECT archive_date, review_status, reviewer_news_notes, trading_summary,
-         market_sentiment_blocks_json, sector_rotation_blocks_json,
+         market_review_json, market_sentiment_blocks_json, sector_rotation_blocks_json,
          (SELECT COUNT(*) FROM daily_review_action_plans plans
           WHERE plans.archive_date = daily_review_archive.archive_date) AS action_plan_count
        FROM daily_review_archive
@@ -3045,7 +3252,7 @@ async function completeReview(env, archiveDate, body = {}) {
        FROM daily_review_action_plans p
        LEFT JOIN investment_accounts a ON a.id = p.account_id
        WHERE p.archive_date = ?
-       ORDER BY COALESCE(a.sort_order, 999) ASC, p.sort_order ASC, p.symbol ASC`,
+       ORDER BY COALESCE(a.sort_order, 999), COALESCE(a.id, 999999), p.sort_order, p.id`,
     ).bind(archiveDate),
     env.DB.prepare(`SELECT * FROM investment_accounts ORDER BY sort_order ASC, id ASC`),
     env.DB.prepare(
@@ -3057,11 +3264,14 @@ async function completeReview(env, archiveDate, body = {}) {
          WHERE archive_date < ?
        )`,
     ).bind(archiveDate),
+    env.DB.prepare(`SELECT * FROM daily_review_symbol_levels WHERE archive_date = ? ORDER BY symbol`).bind(archiveDate),
   ]);
   const existing = (reads[0].results || [])[0] || null;
   const newsWindow = buildNewsWindowFromRows(reads[1].results || [], archiveDate);
   const analysis = (reads[2].results || [])[0] || null;
-  const actionPlans = (reads[3].results || []).map(dbActionPlanToApi);
+  const rawActionPlans = reads[3].results || [];
+  const { symbolLevels } = resolvePlanSymbolLevels(reads[6]?.results || [], rawActionPlans);
+  const actionPlans = projectActionPlanPrices(rawActionPlans, symbolLevels);
   const investmentAccounts = (reads[4].results || []).map(accountRowToApi);
   const previousSymbolsByAccount = previousActionPlanSymbolKeysFromRows(reads[5].results || []);
 
@@ -3071,23 +3281,40 @@ async function completeReview(env, archiveDate, body = {}) {
   if (body.onlyIfPending && normalizeReviewStatus(existing?.review_status) === "reviewed") {
     return { ok: true, skipped: true, reason: "already reviewed", archiveDate, reviewStatus: "reviewed" };
   }
+  let readinessRecord = existing;
   if (body.completionSource === "batch" && body.autoFill && existing) {
     beginReviewStage(env, "complete.autofill");
-    // Persist the same defaults shown by the editor; saved fields (including []) win.
-    await saveReviewDraft(env, archiveDate, {
+    // Saved documents (including blocks: []) and every persisted price row
+    // win over defaults. Omit an unchanged document to preserve concurrent edits.
+    const defaults = body.autoFill.marketReview;
+    const persistedSymbols = new Set((reads[6]?.results || []).map(row => row.symbol));
+    const levels = Array.isArray(defaults?.levels)
+      ? defaults.levels.filter(patch => !persistedSymbols.has(patch?.symbol))
+      : defaults?.levels;
+    const hasDefaults = Object.hasOwn(body.autoFill, 'marketReview');
+    // 本日旧列（含明确 []）也是已有内容：省略 marketReview 让保存冻结其投影，不被默认覆盖。
+    const ownLegacy = existing.market_review_json == null
+      && (existing.market_sentiment_blocks_json != null || existing.sector_rotation_blocks_json != null);
+    const needsMarketReview = hasDefaults && !ownLegacy
+      && (existing.market_review_json == null || !Array.isArray(levels) || levels.length > 0);
+    const marketReview = existing.market_review_json != null
+      ? { blocks: JSON.parse(existing.market_review_json).blocks, levels }
+      : defaults && typeof defaults === 'object' && !Array.isArray(defaults) ? { ...defaults, levels } : defaults;
+    const saved = await saveReviewDraft(env, archiveDate, {
       reviewStatus: existing.review_status,
       reviewerNewsNotes: existing.reviewer_news_notes || body.autoFill.reviewerNewsNotes || "",
-      tradingSummary: existing.trading_summary || "",
-      marketSentimentBlocks: resolveReviewNoteBlocksWithFallback(existing, {
-        market_sentiment_blocks_json: JSON.stringify(body.autoFill.marketSentimentBlocks || []),
-      }, "market_sentiment_blocks_json", "market").blocks,
-      sectorRotationBlocks: resolveReviewNoteBlocksWithFallback(existing, {
-        sector_rotation_blocks_json: JSON.stringify(body.autoFill.sectorRotationBlocks || []),
-      }, "sector_rotation_blocks_json", "rotation").blocks,
+      tradingSummary: existing.trading_summary ?? "",
+      ...(needsMarketReview ? { marketReview } : {}),
     });
+    readinessRecord = { ...existing,
+      market_review_json: saved.marketReview.source === 'empty' ? null : serializeMarketReview(saved.marketReview),
+      reviewer_news_notes: saved.reviewerNewsNotes,
+      trading_summary: saved.tradingSummary,
+      action_plan_count: saved.actionPlanCount,
+    };
   }
   if (body.requireCompleteContent && existing) {
-    const readiness = getBatchReviewReadiness(existing);
+    const readiness = getBatchReviewReadiness(readinessRecord);
     if (!readiness.ready) {
       return {
         ok: true,
@@ -3267,6 +3494,7 @@ async function initializeReview(env, archiveDate) {
       `UPDATE daily_review_archive
        SET review_status = 'initialized',
            reviewer_news_notes = '',
+           market_review_json = NULL,
            market_sentiment_blocks_json = NULL,
            sector_rotation_blocks_json = NULL,
            trading_summary = '',
@@ -3387,11 +3615,14 @@ async function createReviewSnapshots(env, archiveDate, body = {}) {
     const versionNo = await getNextSnapshotVersionNo(env, "daily_review_snapshots", "archive_date", archiveDate);
     const snapshotCreatedAt = isoNow();
     await env.DB.prepare(
+      // 价位在同一语句内复制当时的值；未物化旧日不写新列，也不反向物化。
       `INSERT INTO daily_review_snapshots (
         archive_date, version_no, snapshot_reason, review_status, reviewer_news_notes,
         market_sentiment_blocks_json, sector_rotation_blocks_json, trading_summary,
-        reviewed_at, source_updated_at, snapshot_created_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        reviewed_at, source_updated_at, snapshot_created_at, market_review_json, symbol_levels_json
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CASE WHEN ? IS NULL THEN NULL ELSE (
+        SELECT json_group_object(symbol, json_object('supportLevels', support_levels, 'resistanceLevels', resistance_levels))
+        FROM daily_review_symbol_levels WHERE archive_date = ?) END)`,
     )
       .bind(
         archiveDate,
@@ -3405,6 +3636,9 @@ async function createReviewSnapshots(env, archiveDate, body = {}) {
         reviewRecord.reviewed_at || null,
         reviewRecord.updated_at || null,
         snapshotCreatedAt,
+        reviewRecord.market_review_json ?? null,
+        reviewRecord.market_review_json ?? null,
+        archiveDate,
       )
       .run();
     result.reviewSnapshot = {
@@ -3919,6 +4153,9 @@ export {
   buildAccountImpactSummaryFromPlans,
   buildAccountImpactSummaryFromSnapshot,
   buildAccountSnapshotFromAccounts,
+  buildAccountLiveActionPlanStatements,
+  buildReviewActionPlanStatements,
+  buildReviewSymbolLevelStatements,
   buildActionPlanSymbolMetrics,
   buildNewsWindowFromRows,
   buildReviewListItems,
@@ -3931,5 +4168,4 @@ export {
   parsePendingReviewLimit,
   parsePositionWeight,
   previousActionPlanSymbolKeysFromRows,
-  resolveReviewNoteBlocksWithFallback,
 };

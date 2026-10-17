@@ -1,87 +1,9 @@
-const SYMBOL_STOP_WORDS = new Set([
-  "ETF",
-  "INDEX",
-  "SUPPORT",
-  "RESISTANCE",
-]);
-
-function normalizeAliases(value) {
-  if (Array.isArray(value)) return value.map(String);
-  if (!value) return [];
-  if (typeof value === "string") {
-    try {
-      const parsed = JSON.parse(value);
-      if (Array.isArray(parsed)) return parsed.map(String);
-    } catch {
-      // 兼容逗号分隔的旧别名。
-    }
-    return value.split(/[,，]/).map((item) => item.trim()).filter(Boolean);
-  }
-  return [];
-}
-
-function normalizeSymbolItem(item = {}) {
-  const symbol = String(item.symbol || "").trim().toUpperCase();
-  if (!symbol) return null;
-  const displayName = String(item.displayName || item.display_name || "").trim();
-  return {
-    symbol,
-    aliases: [
-      { value: symbol, priority: 2 },
-      { value: displayName, priority: 1 },
-      ...normalizeAliases(item.aliases).map((value) => ({ value, priority: 1 })),
-    ].map((alias) => ({ ...alias, value: String(alias.value || "").trim() }))
-      .filter((alias) => alias.value),
-  };
-}
-
-function aliasAppearsInTitle(title, alias) {
-  const normalizedTitle = String(title || "").toUpperCase();
-  const normalizedAlias = String(alias || "").trim().toUpperCase();
-  if (!normalizedAlias) return false;
-  if (/^[A-Z0-9.^=-]+$/.test(normalizedAlias)) {
-    const escaped = normalizedAlias.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-    return new RegExp(`(^|[^A-Z0-9])${escaped}([^A-Z0-9]|$)`).test(normalizedTitle);
-  }
-  return normalizedTitle.includes(normalizedAlias);
-}
-
-export function resolveRotationSymbol(sectionTitle, symbolCatalog = [], actionPlans = []) {
-  const candidates = new Map();
-  [...symbolCatalog, ...actionPlans].forEach((item) => {
-    const normalized = normalizeSymbolItem(item);
-    if (!normalized) return;
-    const existing = candidates.get(normalized.symbol) || { symbol: normalized.symbol, aliases: [] };
-    existing.aliases.push(...normalized.aliases);
-    candidates.set(normalized.symbol, existing);
-  });
-
-  const matches = new Map();
-  candidates.forEach((candidate) => {
-    candidate.aliases.forEach((alias) => {
-      if (aliasAppearsInTitle(sectionTitle, alias.value)) {
-        const score = alias.priority * 1000 + alias.value.length;
-        matches.set(candidate.symbol, Math.max(matches.get(candidate.symbol) || 0, score));
-      }
-    });
-  });
-  const rankedMatches = [...matches].map(([symbol, score]) => ({ symbol, score }))
-    .sort((left, right) => right.score - left.score || left.symbol.localeCompare(right.symbol));
-  if (rankedMatches.length) {
-    if (rankedMatches[1]?.score === rankedMatches[0].score) return null;
-    return rankedMatches[0].symbol;
-  }
-
-  const explicitTokens = String(sectionTitle || "").toUpperCase().match(/\b[A-Z][A-Z0-9.^=-]{0,11}\b/g) || [];
-  return explicitTokens.find((token) => !SYMBOL_STOP_WORDS.has(token)) || null;
-}
-
-export function classifyZoneTitle(title) {
-  const normalized = String(title || "").trim();
-  if (/(压力|阻力|resistance)/i.test(normalized)) return "压力";
-  if (/(支撑|支持|support)/i.test(normalized)) return "支撑";
-  return null;
-}
+const SP500_SYMBOL = "GSPC";
+const SP500_CHART_SYMBOLS = "SPX,ES1!,ES";
+const LEVEL_FIELDS = [
+  { kind: "resistance", field: "resistanceLevels", type: "压力" },
+  { kind: "support", field: "supportLevels", type: "支撑" },
+];
 
 function formatZoneNumber(value) {
   const number = Number(value);
@@ -143,33 +65,13 @@ function parseZoneText(text, { symbol, type, source, startOrder = 0 }) {
   return { zones, skipped, nextOrder: order };
 }
 
-export function extractRotationZones(blocks = [], symbolCatalog = [], actionPlans = []) {
-  const zones = [];
-  let skipped = 0;
-  let order = 0;
-  (Array.isArray(blocks) ? blocks : []).forEach((section) => {
-    const typedChildren = (Array.isArray(section?.children) ? section.children : [])
-      .map((child) => ({ child, type: classifyZoneTitle(child?.title) }))
-      .filter((item) => item.type);
-    if (!typedChildren.length) return;
-    const symbol = resolveRotationSymbol(section?.title, symbolCatalog, actionPlans);
-    typedChildren.forEach(({ child, type }) => {
-      const parsed = parseZoneText(child?.body, {
-        symbol,
-        type,
-        source: "rotation",
-        startOrder: order,
-      });
-      zones.push(...parsed.zones);
-      skipped += parsed.skipped;
-      order = parsed.nextOrder;
-    });
-  });
-  return { zones, skipped };
+function isLevelKind(kind) {
+  return kind === "support" || kind === "resistance";
 }
 
-function isSp500MarketSection(title) {
-  return /(?:标普\s*500|S\s*&\s*P\s*500|SP\s*500|\bSPX\b|\^?GSPC\b)/i.test(String(title || ""));
+function sharedLevelText(symbolLevels, symbol, field, fallback = "") {
+  const row = symbolLevels?.[symbol];
+  return row && typeof row[field] === "string" ? row[field] : String(fallback || "");
 }
 
 function extractPointNumbers(text) {
@@ -210,73 +112,32 @@ function uniquePointZones(points, type) {
   });
 }
 
-export function extractMarketSp500Zones(blocks = []) {
-  const zones = [];
+// Only linked GSPC themes feed the S&P 500 template; resistance stays out of it by design.
+export function extractMarketSp500Zones(blocks = [], symbolLevels = {}) {
+  const themes = (Array.isArray(blocks) ? blocks : []).filter((block) => block?.type === "symbol" && block.symbol === SP500_SYMBOL);
+  const children = themes.flatMap((block) => (Array.isArray(block.children) ? block.children : []));
+  const levelBody = (child) => (isLevelKind(child.kind)
+    ? sharedLevelText(symbolLevels, SP500_SYMBOL, child.kind === "support" ? "supportLevels" : "resistanceLevels", child.body)
+    : child.body);
+  const support = children.some((child) => child.kind === "support")
+    ? parseZoneText(sharedLevelText(symbolLevels, SP500_SYMBOL, "supportLevels", children.find((child) => child.kind === "support")?.body), {
+      symbol: SP500_CHART_SYMBOLS,
+      type: "支撑",
+      source: "market",
+    })
+    : { zones: [], skipped: 0 };
   const negativeGammaPoints = [];
   const accelerationPoints = [];
-  let skipped = 0;
-  let order = 0;
-  (Array.isArray(blocks) ? blocks : []).forEach((section) => {
-    if (!isSp500MarketSection(section?.title)) return;
-    (Array.isArray(section?.children) ? section.children : []).forEach((child) => {
-      if (classifyZoneTitle(child?.title) === "支撑") {
-        const parsed = parseZoneText(child?.body, {
-          symbol: "SPX,ES1!,ES",
-          type: "支撑",
-          source: "market",
-          startOrder: order,
-        });
-        zones.push(...parsed.zones);
-        skipped += parsed.skipped;
-        order = parsed.nextOrder;
-      }
-      negativeGammaPoints.push(...extractMarkedPointNumbers(
-        child?.title,
-        child?.body,
-        /负\s*伽马(?:位)?/i,
-      ));
-      accelerationPoints.push(...extractMarkedPointNumbers(
-        child?.title,
-        child?.body,
-        /加速(?:卖出(?:触发)?|下跌)(?:位)?/i,
-      ));
-    });
+  children.forEach((child) => {
+    negativeGammaPoints.push(...extractMarkedPointNumbers(child.title, levelBody(child), /负\s*伽马(?:位)?/i));
+    accelerationPoints.push(...extractMarkedPointNumbers(child.title, levelBody(child), /加速(?:卖出(?:触发)?|下跌)(?:位)?/i));
   });
   return {
-    supportZones: zones,
+    supportZones: support.zones,
     negativeGammaZones: uniquePointZones(negativeGammaPoints, "负伽马"),
     accelerationZones: uniquePointZones(accelerationPoints, "加速下跌"),
-    skipped,
+    skipped: support.skipped,
   };
-}
-
-export function extractMarketSp500SupportZones(blocks = []) {
-  const result = extractMarketSp500Zones(blocks);
-  return { zones: result.supportZones, skipped: result.skipped };
-}
-
-export function extractActionPlanZones(plans = []) {
-  const zones = [];
-  let skipped = 0;
-  let order = 0;
-  (Array.isArray(plans) ? plans : []).forEach((plan) => {
-    const symbol = String(plan?.symbol || "").trim().toUpperCase() || null;
-    [
-      { text: plan?.resistanceLevels, type: "压力" },
-      { text: plan?.supportLevels, type: "支撑" },
-    ].forEach(({ text, type }) => {
-      const parsed = parseZoneText(text, {
-        symbol,
-        type,
-        source: "action-plan",
-        startOrder: order,
-      });
-      zones.push(...parsed.zones);
-      skipped += parsed.skipped;
-      order = parsed.nextOrder;
-    });
-  });
-  return { zones, skipped };
 }
 
 function escapeDrawZoneString(value) {
@@ -314,50 +175,52 @@ function renderMarketSp500Export(market) {
   return lines.length > 1 ? lines.join("\n") : "";
 }
 
+// Symbols come from linked identities only; each symbol's shared levels are parsed once,
+// so the same price shown in the market review and several accounts is exported once.
 export function buildZoneExport({
-  marketBlocks = [],
-  rotationBlocks = [],
+  marketReviewBlocks = [],
+  symbolLevels = {},
   actionPlans = [],
-  symbolCatalog = [],
   includeMarket = true,
-  includeRotation = true,
 } = {}) {
+  const themes = includeMarket
+    ? (Array.isArray(marketReviewBlocks) ? marketReviewBlocks : []).filter((block) => block?.type === "symbol" && block.symbol)
+    : [];
   const market = includeMarket
-    ? extractMarketSp500Zones(marketBlocks)
+    ? extractMarketSp500Zones(themes, symbolLevels)
     : { supportZones: [], negativeGammaZones: [], accelerationZones: [], skipped: 0 };
-  const rotation = includeRotation
-    ? extractRotationZones(rotationBlocks, symbolCatalog, actionPlans)
-    : { zones: [], skipped: 0 };
-  const plans = extractActionPlanZones(actionPlans);
-  const symbolOrder = [];
-  const merged = new Map();
-  let displayOrder = 0;
 
-  [...rotation.zones, ...plans.zones].forEach((zone) => {
-    if (!symbolOrder.includes(zone.symbol)) symbolOrder.push(zone.symbol);
-    const key = `${zone.symbol}\u0000${zone.type}\u0000${zone.lowerText}\u0000${zone.upperText}`;
-    const existing = merged.get(key);
-    if (!existing) {
-      merged.set(key, { ...zone, displayOrder });
-      displayOrder += 1;
-      return;
-    }
-    if (zone.source === "action-plan") {
-      merged.set(key, { ...zone, displayOrder: existing.displayOrder });
-    }
+  const exported = new Map();
+  const include = (symbol, kinds, fallback = {}) => {
+    const entry = exported.get(symbol) || { kinds: new Set(), fallback };
+    kinds.forEach((kind) => entry.kinds.add(kind));
+    exported.set(symbol, entry);
+  };
+  themes.filter((block) => block.symbol !== SP500_SYMBOL).forEach((block) => {
+    const kinds = (Array.isArray(block.children) ? block.children : []).map((child) => child?.kind).filter(isLevelKind);
+    if (kinds.length) include(block.symbol, kinds);
+  });
+  (Array.isArray(actionPlans) ? actionPlans : []).forEach((plan) => {
+    const symbol = String(plan?.symbol || "").trim().toUpperCase();
+    if (symbol) include(symbol, ["support", "resistance"], plan);
   });
 
-  const groups = symbolOrder
-    .map((symbol) => {
-      const zones = [...merged.values()]
-        .filter((zone) => zone.symbol === symbol)
-        .sort((left, right) => {
-          const typeOrder = (left.type === "压力" ? 0 : 1) - (right.type === "压力" ? 0 : 1);
-          return typeOrder || left.displayOrder - right.displayOrder;
-        });
-      return zones.length ? { symbol, zones } : null;
-    })
-    .filter(Boolean);
+  let skipped = market.skipped;
+  const groups = [...exported].map(([symbol, { kinds, fallback }]) => {
+    const seen = new Set();
+    const zones = [];
+    LEVEL_FIELDS.filter(({ kind }) => kinds.has(kind)).forEach(({ field, type }) => {
+      const parsed = parseZoneText(sharedLevelText(symbolLevels, symbol, field, fallback[field]), { symbol, type, source: "levels" });
+      skipped += parsed.skipped;
+      parsed.zones.forEach((zone) => {
+        const key = `${zone.type}\u0000${zone.lowerText}\u0000${zone.upperText}`;
+        if (seen.has(key)) return;
+        seen.add(key);
+        zones.push(zone);
+      });
+    });
+    return zones.length ? { symbol, zones } : null;
+  }).filter(Boolean);
 
   const genericText = groups.map(({ symbol, zones }) => [
     `// ${symbol} 的压力支持`,
@@ -373,13 +236,13 @@ export function buildZoneExport({
     ...market.accelerationZones,
   ];
   const outputGroups = marketZones.length
-    ? [{ symbol: "SPX,ES1!,ES", zones: marketZones }, ...groups]
+    ? [{ symbol: SP500_CHART_SYMBOLS, zones: marketZones }, ...groups]
     : groups;
 
   return {
     text,
     groups: outputGroups,
     zoneCount: outputGroups.reduce((total, group) => total + group.zones.length, 0),
-    skippedCount: market.skipped + rotation.skipped + plans.skipped,
+    skippedCount: skipped,
   };
 }

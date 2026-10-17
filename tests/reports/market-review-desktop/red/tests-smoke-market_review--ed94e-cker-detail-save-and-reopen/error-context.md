@@ -1,0 +1,136 @@
+# Page snapshot
+
+```yaml
+- generic [active] [ref=e1]:
+  - generic [ref=e2]:
+    - banner [ref=e3]:
+      - generic [ref=e4]:
+        - generic [ref=e5]:
+          - text: “
+          - generic [ref=e7]:
+            - button "每日一句" [ref=e8] [cursor=pointer]
+            - strong [ref=e9]: 投资真理
+          - paragraph [ref=e10]: 复盘记录：分析不足，记录错误。
+        - generic [ref=e11]:
+          - navigation [ref=e12]:
+            - button "复盘工作台" [ref=e13] [cursor=pointer]
+            - button "新闻检索" [ref=e14] [cursor=pointer]
+            - button "标的管理" [ref=e15] [cursor=pointer]
+            - button "账户管理" [ref=e16] [cursor=pointer]
+            - button "关键词管理" [ref=e17] [cursor=pointer]
+            - button "ReadMe" [ref=e18] [cursor=pointer]
+          - generic [ref=e19]:
+            - generic [ref=e20]: 当前环境
+            - strong [ref=e21]: 测试环境
+    - main [ref=e22]:
+      - generic [ref=e25]:
+        - generic [ref=e26]:
+          - heading "全量复盘列表" [level=2] [ref=e28]
+          - generic [ref=e29]:
+            - button "复盘全部待处理" [ref=e30] [cursor=pointer]
+            - button "刷新" [ref=e31] [cursor=pointer]
+        - generic [ref=e32]:
+          - generic [ref=e33]:
+            - text: 状态
+            - combobox "状态" [ref=e34]:
+              - option "全部" [selected]
+              - option "待开始"
+              - option "进行中"
+              - option "已复盘"
+          - generic [ref=e35]:
+            - text: 开始日期
+            - textbox "开始日期" [ref=e36]: 2026-09-01
+          - generic [ref=e37]:
+            - text: 结束日期
+            - textbox "结束日期" [ref=e38]: 2026-09-01
+          - button "查询" [ref=e39] [cursor=pointer]
+        - table [ref=e41]:
+          - rowgroup [ref=e42]:
+            - row "复盘日 账户估算影响 当日主线 操作" [ref=e43]:
+              - columnheader "复盘日" [ref=e44]:
+                - text: 复盘日
+                - img [ref=e46] [cursor=pointer]
+              - columnheader "账户估算影响" [ref=e49]
+              - columnheader "当日主线" [ref=e50]
+              - columnheader "操作" [ref=e51]
+          - rowgroup [ref=e52]:
+            - row "2026-09-01 历史草稿 未复盘 待复盘 不同步账户管理 编辑草稿" [ref=e53]:
+              - cell "2026-09-01 历史草稿" [ref=e54]:
+                - generic [ref=e55]:
+                  - strong [ref=e56]: 2026-09-01
+                  - generic [ref=e57]: 历史草稿
+              - cell "未复盘" [ref=e58]:
+                - generic [ref=e60]: 未复盘
+              - cell "待复盘" [ref=e61]
+              - cell "不同步账户管理 编辑草稿" [ref=e62]:
+                - generic [ref=e63]:
+                  - generic [ref=e64]: 不同步账户管理
+                  - button "编辑草稿" [ref=e65] [cursor=pointer]
+        - generic [ref=e66]:
+          - button "上一页" [disabled] [ref=e67] [cursor=pointer]
+          - generic [ref=e68]: 1 / 1 页
+          - button "下一页" [disabled] [ref=e69] [cursor=pointer]
+          - generic [ref=e70]:
+            - text: 每页
+            - combobox "每页 条" [ref=e71]:
+              - option "5" [selected]
+              - option "10"
+              - option "20"
+              - option "50"
+              - option "100"
+            - text: 条
+          - generic [ref=e72]: 共 1 条
+  - complementary [ref=e73]:
+    - generic [ref=e75]:
+      - generic [ref=e77]:
+        - generic [ref=e78]:
+          - heading "2026-09-01 · 美股交易日" [level=1] [ref=e79]
+          - generic [ref=e80]:
+            - generic [ref=e81]: 北京时间 09/01 21:30 - 09/02 04:00 ｜ 新闻窗口（北京时间） 2026/09/01 04:00:00 → 2026/09/02 04:00:00
+            - generic [ref=e82]: 历史草稿（仅修改 2026-09-01 当日数据，不同步账户管理）
+        - generic [ref=e83]:
+          - generic [ref=e84]: 待开始
+          - generic [ref=e85]:
+            - button "导出画线" [ref=e86] [cursor=pointer]
+            - generic [ref=e87]:
+              - button "保存" [ref=e88] [cursor=pointer]
+              - button "已初始化" [disabled] [ref=e89]
+            - button "关闭" [ref=e90] [cursor=pointer]
+      - navigation "复盘目录" [ref=e91]:
+        - generic [ref=e92]: 目录
+        - button "复盘日价格" [ref=e94] [cursor=pointer]
+        - button "新闻总结" [ref=e96] [cursor=pointer]
+        - generic [ref=e97]:
+          - button "个股操作" [ref=e98] [cursor=pointer]
+          - button "暂无操作计划" [ref=e99] [cursor=pointer]
+      - generic [ref=e100]:
+        - generic [ref=e101]:
+          - button "1. 新闻总结" [ref=e102] [cursor=pointer]
+          - button "2. 大盘盘点" [ref=e103] [cursor=pointer]
+          - button "3. 板块轮动" [disabled] [ref=e104]
+          - button "4. 操作计划" [disabled] [ref=e105]
+          - button "5. 深度总结" [disabled] [ref=e106]
+        - generic [ref=e107]: 先看 AI 日总结和重点新闻，再写下你自己的主线判断与点评。
+        - generic [ref=e108]:
+          - generic [ref=e110]:
+            - generic [ref=e111]:
+              - heading "新闻总结与点评" [level=3] [ref=e112]
+              - generic [ref=e113]: 重点新闻默认全部纳入复盘，你只需要查看 AI 总结并写下你自己的主线判断。
+            - article [ref=e116]:
+              - strong [ref=e117]:
+                - text: 市场影响
+                - generic [ref=e118]:
+                  - img [ref=e119]
+                  - generic [ref=e122]: AI生成
+              - paragraph [ref=e123]: 1. [大盘] 暂无可用的大盘与板块影响，请先更新新闻数据。
+            - generic [ref=e125]: 当前没有可纳入复盘的重点新闻。
+            - generic [ref=e127]:
+              - generic [ref=e128]: 新闻总结与点评
+              - textbox "新闻总结与点评" [ref=e129]:
+                - /placeholder: 基于上面的 AI 日总结和重点新闻，写下你自己的主线判断、补充观点和交易点评。
+                - text: "# 1. [大盘] 宏观主线：[大盘] 暂无可用的大盘与板块影响，请先更新新闻数据。 # 2. [大盘] 标的主线：[大盘] 暂无可用的大盘与板块影响，请先更新新闻数据。"
+          - text: ▸ ▸ ▸ ▸
+        - generic [ref=e130]:
+          - button "上一步" [disabled] [ref=e131] [cursor=pointer]
+          - button "下一步" [ref=e132] [cursor=pointer]
+```

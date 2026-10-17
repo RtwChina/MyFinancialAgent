@@ -24,10 +24,21 @@ export async function mountReview(page,{baseline=false,fixture={},failComplete=f
  await page.goto('http://review.test/');
  await page.locator("#reviewsList tr").filter({hasText:reviewDate}).locator("[data-review-open]").first().click();
  await page.locator('#reviewDrawer:not(.review-loading)').waitFor();
- // Follow the actual wizard without injecting application state.
- for(let i=0;i<4;i++) await page.getByRole('button',{name:'下一步',exact:true}).click();
+ // Follow the actual wizard without injecting application state; the pre-merge baseline still has a separate rotation step.
+ for(let i=0;i<(baseline?4:3);i++) await page.getByRole('button',{name:'下一步',exact:true}).click();
  await page.getByRole('button',{name:'完成复盘',exact:true}).waitFor();
  // Drain initial bootstrap/preview before measuring the click.
  await page.waitForLoadState('networkidle');requests.length=0;
  return {h,requests,allowRequests(){completionFailure=false;saveFailure=false;}};
+}
+
+// Reference outcome: one clean single-page completion of the current code on a fresh database.
+export async function completeOnce(browser,options={}){
+ const context=await browser.newContext();const page=await context.newPage();let f;
+ try{
+  f=await mountReview(page,options);
+  await page.getByRole('button',{name:'完成复盘',exact:true}).click();
+  await page.locator('#reviewDrawer').waitFor({state:'hidden'});
+  return f.h.snapshot();
+ }finally{await context.close();f?.h.close();}
 }

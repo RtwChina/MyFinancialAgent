@@ -1,10 +1,13 @@
 import {test,expect} from '@playwright/test';
-import {mountReview} from '../helpers/review-completion-browser.mjs';
+import {mountReview,completeOnce} from '../helpers/review-completion-browser.mjs';
 if(process.env.PLAYWRIGHT_EXECUTABLE_PATH)test.use({launchOptions:{executablePath:process.env.PLAYWRIGHT_EXECUTABLE_PATH}});
 for(const failSave of [true,false])test(failSave?'save failure does not complete':'completion failure restores saved draft and retries',async({page})=>{
  const f=await mountReview(page,{failSave,failComplete:!failSave});
  try{
-  const error=page.waitForEvent('pageerror');await page.getByRole('button',{name:'完成复盘',exact:true}).click();await error;
+  // Failures are handled in-page: the footer explains them on the current (last) step instead of throwing.
+  await page.getByRole('button',{name:'完成复盘',exact:true}).click();
+  const message=page.locator('#reviewFooterMessage');
+  await expect(message).toBeVisible();await expect(message).toContainText('完成失败，草稿已保留');await expect(message).toHaveClass(/error/);
   await expect(page.locator('#reviewDrawer')).toBeVisible();
   expect(f.h.snapshot().daily_review_archive.find(x=>x.archive_date==='2026-09-16').review_status).not.toBe('reviewed');
   if(failSave)expect(f.requests.filter(x=>x.path.endsWith('/complete'))).toHaveLength(0);
@@ -40,7 +43,7 @@ test('completion shows progress until the refreshed list is visible',async({page
 test('action plan save controls stay visible in a long detail form',async({page})=>{
  await page.setViewportSize({width:1280,height:720});
  const f=await mountReview(page);try{
-  await page.getByText('4. 操作计划',{exact:true}).click();
+  await page.getByText('3. 操作计划',{exact:true}).click();
   await page.locator('#actionPlanAccountGroups tbody tr').first().click();
   await expect(page.locator('#actionPlanDetailModal')).toBeVisible();
   const buttonBox=await page.locator('#saveActionPlanDetailBtn').boundingBox();
@@ -49,73 +52,66 @@ test('action plan save controls stay visible in a long detail form',async({page}
  }finally{f.h.close();}
 });
 
-test('two pages completing the same saved day keep baseline results',async({browser})=>{
- const {assertEquivalent}=await import('../helpers/review-completion-compare.mjs');
- const snapshots=[];
- for(const baseline of [true,false]){
-  const context=await browser.newContext();const first=await context.newPage(),second=await context.newPage();let f;
-  try{
-   f=await mountReview(first,{baseline});await mountReview(second,{baseline,harness:f.h});
-   await first.getByRole('button',{name:'完成复盘',exact:true}).click();await expect(first.locator('#reviewDrawer')).toBeHidden();
-   await second.getByRole('button',{name:'完成复盘',exact:true}).click();await expect(second.locator('#reviewDrawer')).toBeHidden();
-   snapshots.push(f.h.snapshot());
-  }finally{await context.close();f?.h.close();}
- }
- assertEquivalent(snapshots[0],snapshots[1]);
+// Oracle: one clean single-page completion of the current code (the pre-merge baseline no longer shares the schema).
+test('two pages completing the same saved day match a single completion',async({browser})=>{
+ const {assertConverged}=await import('../helpers/review-completion-compare.mjs');
+ const reference=await completeOnce(browser);
+ const context=await browser.newContext();const first=await context.newPage(),second=await context.newPage();let f;
+ try{
+  f=await mountReview(first);await mountReview(second,{harness:f.h});
+  await first.getByRole('button',{name:'完成复盘',exact:true}).click();await expect(first.locator('#reviewDrawer')).toBeHidden();
+  const afterFirst=f.h.snapshot();
+  await second.getByRole('button',{name:'完成复盘',exact:true}).click();await expect(second.locator('#reviewDrawer')).toBeHidden();
+  assertConverged(reference,afterFirst);
+  assertConverged(afterFirst,f.h.snapshot());
+ }finally{await context.close();f?.h.close();}
 });
-
-test('lost completion response preserves baseline persisted state and retry',async({browser})=>{
- const {assertEquivalent}=await import('../helpers/review-completion-compare.mjs');
- const outcomes=[];
- for(const baseline of [true,false]){
-  const context=await browser.newContext();const page=await context.newPage();let f;
-  try{
-   f=await mountReview(page,{baseline});
-   const url='http://review.test/api/reviews/2026-09-16/complete';
-   await page.route(url,async route=>{
-    const result=await f.h.request('/api/reviews/2026-09-16/complete',route.request().postDataJSON());
-    expect(result.status).toBe(200);await route.abort('failed');
-   });
-   const error=page.waitForEvent('pageerror');
-   await page.getByRole('button',{name:'完成复盘',exact:true}).click();await error;
-   await expect(page.locator('#reviewDrawer')).toBeVisible();
-   const beforeRetry=f.h.snapshot();
-   expect(beforeRetry.daily_review_archive.find(x=>x.archive_date==='2026-09-16').review_status).toBe('reviewed');
-   await page.unroute(url);
-   await page.getByRole('button',{name:'完成复盘',exact:true}).click();await expect(page.locator('#reviewDrawer')).toBeHidden();
-   outcomes.push({beforeRetry,afterRetry:f.h.snapshot()});
-  }finally{await context.close();f?.h.close();}
- }
- assertEquivalent(outcomes[0],outcomes[1]);
+test('lost completion response keeps the persisted completion and retry is a no-op',async({browser})=>{
+ const {assertConverged}=await import('../helpers/review-completion-compare.mjs');
+ const reference=await completeOnce(browser);
+ const context=await browser.newContext();const page=await context.newPage();let f;
+ try{
+  f=await mountReview(page);
+  const url='http://review.test/api/reviews/2026-09-16/complete';
+  await page.route(url,async route=>{
+   const result=await f.h.request('/api/reviews/2026-09-16/complete',route.request().postDataJSON());
+   expect(result.status).toBe(200);await route.abort('failed');
+  });
+  await page.getByRole('button',{name:'完成复盘',exact:true}).click();
+  await expect(page.locator('#reviewFooterMessage')).toContainText('完成失败，草稿已保留');
+  await expect(page.locator('#reviewDrawer')).toBeVisible();
+  const beforeRetry=f.h.snapshot();
+  expect(beforeRetry.daily_review_archive.find(x=>x.archive_date==='2026-09-16').review_status).toBe('reviewed');
+  await page.unroute(url);
+  await page.getByRole('button',{name:'完成复盘',exact:true}).click();await expect(page.locator('#reviewDrawer')).toBeHidden();
+  assertConverged(reference,beforeRetry);
+  assertConverged(beforeRetry,f.h.snapshot());
+ }finally{await context.close();f?.h.close();}
 });
-
 test('two pages overlap completion at the complete-request barrier',async({browser})=>{
  const {assertConverged}=await import('../helpers/review-completion-compare.mjs');
- const outcomes=[];
- for(const baseline of [true,false]){
-  const context=await browser.newContext();const first=await context.newPage(),second=await context.newPage();let f;
-  let arrivals=0;let releaseBarrier;const barrier=new Promise(resolve=>{releaseBarrier=resolve;});
-  try{
-   f=await mountReview(first,{baseline});await mountReview(second,{baseline,harness:f.h});
-   const intercept=async route=>{
-    arrivals+=1;if(arrivals===2)releaseBarrier();await barrier;
-    const result=await f.h.request('/api/reviews/2026-09-16/complete',route.request().postDataJSON());
-    await route.fulfill({status:result.status,contentType:'application/json',body:JSON.stringify(result.body)});
-   };
-   await first.route('http://review.test/api/reviews/2026-09-16/complete',intercept);
-   await second.route('http://review.test/api/reviews/2026-09-16/complete',intercept);
-   await Promise.all([
-    first.getByRole('button',{name:'完成复盘',exact:true}).click(),
-    second.getByRole('button',{name:'完成复盘',exact:true}).click(),
-   ]);
-   await expect(first.locator('#reviewDrawer')).toBeHidden();
-   await expect(second.locator('#reviewDrawer')).toBeHidden();
-   expect(arrivals).toBe(2);outcomes.push(f.h.snapshot());
-  }finally{releaseBarrier?.();await context.close();f?.h.close();}
- }
- assertConverged(outcomes[0],outcomes[1]);
+ const reference=await completeOnce(browser);
+ const context=await browser.newContext();const first=await context.newPage(),second=await context.newPage();let f;
+ let arrivals=0;let releaseBarrier;const barrier=new Promise(resolve=>{releaseBarrier=resolve;});
+ try{
+  f=await mountReview(first);await mountReview(second,{harness:f.h});
+  const intercept=async route=>{
+   arrivals+=1;if(arrivals===2)releaseBarrier();await barrier;
+   const result=await f.h.request('/api/reviews/2026-09-16/complete',route.request().postDataJSON());
+   await route.fulfill({status:result.status,contentType:'application/json',body:JSON.stringify(result.body)});
+  };
+  await first.route('http://review.test/api/reviews/2026-09-16/complete',intercept);
+  await second.route('http://review.test/api/reviews/2026-09-16/complete',intercept);
+  await Promise.all([
+   first.getByRole('button',{name:'完成复盘',exact:true}).click(),
+   second.getByRole('button',{name:'完成复盘',exact:true}).click(),
+  ]);
+  await expect(first.locator('#reviewDrawer')).toBeHidden();
+  await expect(second.locator('#reviewDrawer')).toBeHidden();
+  expect(arrivals).toBe(2);
+  assertConverged(reference,f.h.snapshot());
+ }finally{releaseBarrier?.();await context.close();f?.h.close();}
 });
-
 test('rapid consecutive completion clicks submit only once',async({page})=>{
  const f=await mountReview(page);try{
   await page.getByRole('button',{name:'完成复盘',exact:true}).dblclick();

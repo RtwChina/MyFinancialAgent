@@ -1,5 +1,6 @@
 import {test,expect} from '@playwright/test';
 import {mountReview} from '../helpers/review-completion-browser.mjs';
+import {assertConverged} from '../helpers/review-completion-compare.mjs';
 if(process.env.PLAYWRIGHT_EXECUTABLE_PATH)test.use({launchOptions:{executablePath:process.env.PLAYWRIGHT_EXECUTABLE_PATH}});
 test('standalone save still refreshes the list and impact preview without completing',async({page})=>{
  const f=await mountReview(page);try{
@@ -19,22 +20,29 @@ test('historical manual completion does not sync its daily plans into live plans
  }finally{f.h.close();}
 });
 
-test('editing an already completed review preserves baseline save behavior',async({browser})=>{
- const {assertEquivalent}=await import('../helpers/review-completion-compare.mjs');
- const outcomes=[];
- for(const baseline of [true,false]){
-  const context=await browser.newContext();const page=await context.newPage();let f;
-  try{
-   f=await mountReview(page,{baseline});
-   await page.getByRole('button',{name:'完成复盘',exact:true}).click();
-   await expect(page.locator('#reviewDrawer')).toBeHidden();
-   await page.locator('#reviewsList tr').filter({hasText:'2026-09-16'}).getByRole('button',{name:'编辑',exact:true}).click();
-   await page.locator('#reviewDrawer:not(.review-loading)').waitFor();
-   await page.locator('#reviewerNewsNotesInput').fill('完成后的编辑内容');
-   await page.locator('#saveDraftBtn').click();
-   await expect(page.locator('#nextStepBtn')).toHaveText('已复盘');
-   outcomes.push(f.h.snapshot());
-  }finally{await context.close();f?.h.close();}
- }
- assertEquivalent(outcomes[0],outcomes[1]);
+// The pre-merge baseline stores market notes in retired columns, so the oracle is explicit:
+// editing a completed review changes only the edited field.
+test('editing an already completed review changes only the edited field',async({page})=>{
+ const f=await mountReview(page);
+ try{
+  await page.getByRole('button',{name:'完成复盘',exact:true}).click();
+  await expect(page.locator('#reviewDrawer')).toBeHidden();
+  const completed=f.h.snapshot();
+  await page.locator('#reviewsList tr').filter({hasText:'2026-09-16'}).getByRole('button',{name:'编辑',exact:true}).click();
+  await page.locator('#reviewDrawer:not(.review-loading)').waitFor();
+  // The list's edit entry opens a completed review on the plan step.
+  await page.locator('#reviewOutline').getByRole('button',{name:'新闻总结',exact:true}).click();
+  await page.locator('#reviewerNewsNotesInput').fill('完成后的编辑内容');
+  await page.locator('#saveDraftBtn').click();
+  await expect(page.locator('#reviewFooterMessage')).toContainText('复盘已保存');
+  await expect(page.locator('#nextStepBtn')).toHaveText('已复盘');
+  const expected=structuredClone(completed);
+  const row=expected.daily_review_archive.find(x=>x.archive_date==='2026-09-16');
+  row.reviewer_news_notes='完成后的编辑内容';row.updated_at='2026-10-01 00:00:00';
+  const edited=f.h.snapshot();
+  const editedRow=edited.daily_review_archive.find(x=>x.archive_date==='2026-09-16');
+  expect(editedRow.review_status).toBe('reviewed');
+  editedRow.updated_at='2026-10-01 00:00:00';
+  assertConverged(expected,edited);
+ }finally{f.h.close();}
 });

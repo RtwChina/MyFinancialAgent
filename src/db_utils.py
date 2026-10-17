@@ -4,6 +4,7 @@
 import os
 import json
 import hashlib
+import re
 import sqlite3
 from datetime import datetime
 from typing import Optional, List, Dict, Any
@@ -401,24 +402,25 @@ def get_news_by_date_range(start_time: datetime, end_time: datetime, db_path: st
 # ========== 复盘数据操作 ==========
 
 def save_archive(data: Dict[str, Any], db_path: str = None) -> bool:
-    """按日期保存或更新复盘记录"""
+    """按日期保存或更新复盘记录；未传 market_review 时保留已存市场文档，不写冻结的旧笔记列与价位表。"""
     try:
         conn = get_db_connection(db_path)
         cursor = conn.cursor()
+        has_market_review = 'market_review' in data
+        market_review_json = json.dumps(data['market_review'], ensure_ascii=False) if has_market_review else None
 
         cursor.execute('''
             INSERT INTO daily_review_archive
             (
-                archive_date, review_status, reviewer_news_notes, market_sentiment,
-                sector_rotation, trading_summary,
-                reviewed_at, updated_at
+                archive_date, review_status, reviewer_news_notes, market_review_json,
+                trading_summary, reviewed_at, updated_at
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(archive_date) DO UPDATE SET
                 review_status = excluded.review_status,
                 reviewer_news_notes = excluded.reviewer_news_notes,
-                market_sentiment = excluded.market_sentiment,
-                sector_rotation = excluded.sector_rotation,
+                market_review_json = CASE WHEN ? THEN excluded.market_review_json
+                    ELSE daily_review_archive.market_review_json END,
                 trading_summary = excluded.trading_summary,
                 reviewed_at = excluded.reviewed_at,
                 updated_at = excluded.updated_at
@@ -426,11 +428,11 @@ def save_archive(data: Dict[str, Any], db_path: str = None) -> bool:
             data.get('archive_date'),
             data.get('review_status', 'draft'),
             data.get('reviewer_news_notes') or data.get('news_brief'),
-            data.get('market_sentiment'),
-            data.get('sector_rotation'),
+            market_review_json,
             data.get('trading_summary'),
             data.get('reviewed_at'),
             data.get('updated_at', now_cst()),
+            has_market_review,
         ))
 
         conn.commit()
@@ -446,58 +448,32 @@ def save_archive(data: Dict[str, Any], db_path: str = None) -> bool:
 def initialize_archive_record(archive_date: str, db_path: str = None) -> bool:
     """初始化复盘记录。
 
-    只保留日期和 initialized 状态；如果该日期已经 reviewed，则不覆盖。
+    已 reviewed 的日期不覆盖；其余日期清空笔记、新市场文档与冻结旧笔记列，保留日期价位与计划。
     """
     try:
         conn = get_db_connection(db_path)
         cursor = conn.cursor()
         now = now_cst()
 
-        cursor.execute(
-            'SELECT review_status FROM daily_review_archive WHERE archive_date = ?',
-            (archive_date,),
-        )
-        row = cursor.fetchone()
-        existing_status = row['review_status'] if row else None
-        # 已完成复盘的记录不允许被 initialized 状态覆盖，提前返回保护数据
-        if existing_status == 'reviewed':
-            conn.close()
-            return True
-
-        # SQL 层面再做一次 CASE 保护，防止并发写入时 Python 层检查失效
+        # WHERE 守卫让并发写入 reviewed 后也不会被 initialized 覆盖。
         cursor.execute('''
             INSERT INTO daily_review_archive
             (
-                archive_date, review_status, reviewer_news_notes, market_sentiment,
-                sector_rotation, trading_summary, reviewed_at, updated_at
+                archive_date, review_status, reviewer_news_notes, market_review_json,
+                market_sentiment_blocks_json, sector_rotation_blocks_json,
+                trading_summary, reviewed_at, updated_at
             )
-            VALUES (?, 'initialized', '', '', '', '', NULL, ?)
+            VALUES (?, 'initialized', '', NULL, NULL, NULL, '', NULL, ?)
             ON CONFLICT(archive_date) DO UPDATE SET
-                review_status = CASE
-                    WHEN daily_review_archive.review_status = 'reviewed' THEN daily_review_archive.review_status
-                    ELSE 'initialized'
-                END,
-                reviewer_news_notes = CASE
-                    WHEN daily_review_archive.review_status = 'reviewed' THEN daily_review_archive.reviewer_news_notes
-                    ELSE ''
-                END,
-                market_sentiment = CASE
-                    WHEN daily_review_archive.review_status = 'reviewed' THEN daily_review_archive.market_sentiment
-                    ELSE ''
-                END,
-                sector_rotation = CASE
-                    WHEN daily_review_archive.review_status = 'reviewed' THEN daily_review_archive.sector_rotation
-                    ELSE ''
-                END,
-                trading_summary = CASE
-                    WHEN daily_review_archive.review_status = 'reviewed' THEN daily_review_archive.trading_summary
-                    ELSE ''
-                END,
-                reviewed_at = CASE
-                    WHEN daily_review_archive.review_status = 'reviewed' THEN daily_review_archive.reviewed_at
-                    ELSE NULL
-                END,
+                review_status = 'initialized',
+                reviewer_news_notes = '',
+                market_review_json = NULL,
+                market_sentiment_blocks_json = NULL,
+                sector_rotation_blocks_json = NULL,
+                trading_summary = '',
+                reviewed_at = NULL,
                 updated_at = excluded.updated_at
+            WHERE daily_review_archive.review_status IS NOT 'reviewed'
         ''', (
             archive_date,
             now,
@@ -527,32 +503,174 @@ def get_archive_by_date(archive_date: str, db_path: str = None) -> Optional[Dict
     return dict(row) if row else None
 
 
-def list_review_action_plans(archive_date: str, db_path: str = None) -> List[Dict[str, Any]]:
-    """查询指定复盘日的结构化操作计划。"""
-    conn = get_db_connection(db_path)
-    cursor = conn.cursor()
-    cursor.execute(
+def _select_review_action_plan_rows(conn: sqlite3.Connection, archive_date: str) -> List[Dict[str, Any]]:
+    return [dict(row) for row in conn.execute(
         '''
         SELECT p.*, a.name AS account_name, a.currency AS account_currency,
-            a.sort_order AS account_sort_order, a.enabled AS account_enabled
+            a.sort_order AS account_sort_order, a.enabled AS account_enabled,
+            l.symbol AS _level_symbol, l.support_levels AS _shared_support,
+            l.resistance_levels AS _shared_resistance
         FROM daily_review_action_plans p
         LEFT JOIN investment_accounts a ON a.id = p.account_id
+        LEFT JOIN daily_review_symbol_levels l
+            ON l.archive_date = p.archive_date AND l.symbol = p.symbol
         WHERE p.archive_date = ?
-        ORDER BY COALESCE(a.sort_order, 999) ASC, p.sort_order ASC, p.symbol ASC
-        ''',
-        (archive_date,),
-    )
-    rows = cursor.fetchall()
-    conn.close()
-    return [dict(row) for row in rows]
+        ORDER BY COALESCE(a.sort_order, 999), p.account_id, p.sort_order, p.symbol, p.id
+        ''', (archive_date,),
+    )]
+
+
+def _review_initial_symbol_levels(
+    conn: sqlite3.Connection, archive_date: str, plans: List[Dict[str, Any]],
+) -> Dict[str, Dict[str, str]]:
+    """解析目标日旧笔记与计划的初始价位。"""
+    levels: Dict[str, Dict[str, str]] = {}
+    fields = ("support_levels", "resistance_levels")
+
+    def select(symbol: str, field: str, value: Any) -> None:
+        current = levels.setdefault(symbol, dict.fromkeys(fields, ""))
+        if not current[field] and isinstance(value, str) and value.strip():
+            current[field] = value  # 空白只用于判空，不修剪原多行文本。
+
+    archive = conn.execute(
+        '''SELECT market_review_json, market_sentiment_blocks_json, sector_rotation_blocks_json
+           FROM daily_review_archive WHERE archive_date = ?''', (archive_date,),
+    ).fetchone()
+    # 新文档非 NULL（包括 blocks=[]）后，冻结的旧两列不再参与选择。
+    if archive and archive["market_review_json"] is None:
+        catalog = [dict(row) for row in conn.execute(
+            "SELECT symbol, display_name, aliases FROM tracked_symbols ORDER BY id"
+        )]
+
+        def array(value: Any) -> list:
+            if isinstance(value, str):
+                try:
+                    value = json.loads(value)
+                except (ValueError, TypeError):
+                    return []
+            return value if isinstance(value, list) else []
+
+        def aliases(value: Any) -> list:
+            if isinstance(value, str):
+                try:
+                    value = json.loads(value)
+                except (ValueError, TypeError):
+                    value = re.split(r"[,，]", value)
+            return [alias for alias in value if isinstance(alias, str)] if isinstance(value, list) else []
+
+        def text(value: Any) -> str:
+            return value if isinstance(value, str) else "" if value is None else str(value)
+
+        # 与 market-review-model.js resolveLegacyBlockItem 保持一致：唯一系统代码（区分大小写）
+        # → 与整个标题相同的名称/别名 → 大盘组的非 ETF 标普标题；其余不猜。
+        def linked_symbol(title: str, group: str) -> Optional[str]:
+            codes = {item["symbol"] for item in catalog if isinstance(item["symbol"], str) and item["symbol"]
+                     and re.search(r"(^|[^A-Za-z0-9])" + re.escape(item["symbol"]) + r"([^A-Za-z0-9]|$)", title)}
+            if codes:
+                return next(iter(codes)) if len(codes) == 1 else None
+            needle = title.strip().lower()
+            if not needle:
+                return None
+            names = {item["symbol"] for item in catalog
+                     if any(name.strip().lower() == needle for name in [text(item["display_name"]), *aliases(item["aliases"])])}
+            if names:
+                return next(iter(names)) if len(names) == 1 else None
+            if (group == "market" and re.search(r"标普\s*500|S\s*&\s*P\s*500|SP\s*500", title, re.IGNORECASE)
+                    and not re.search(r"ETF", title, re.IGNORECASE) and any(item["symbol"] == "GSPC" for item in catalog)):
+                return "GSPC"
+            return None
+
+        titles = {
+            "support_levels": {"支撑位", "支撑", "支持", "支持位", "支撑位(support)"},
+            "resistance_levels": {"压力位", "压力", "阻力位", "阻力", "压力位(resistance)", "阻力位(resistance)"},
+        }
+        for group, column in (("market", "market_sentiment_blocks_json"), ("rotation", "sector_rotation_blocks_json")):
+            for block in array(archive[column]):
+                if not isinstance(block, dict):
+                    continue
+                symbol = linked_symbol(text(block.get("title")), group)
+                if not symbol:
+                    continue
+                children = block.get("children")
+                seen = set()
+                for child in children if isinstance(children, list) else []:
+                    if not isinstance(child, dict):
+                        continue
+                    title = re.sub(r"\s+", "", text(child.get("title")).replace("（", "(").replace("）", ")")).lower()
+                    field = next((field for field in fields if title in titles[field]), None)
+                    if field and field not in seen:
+                        seen.add(field)  # 重复预设的后项属于旧自定义原文，不参与价位。
+                        select(symbol, field, text(child.get("body")))
+
+    for plan in plans:  # 已按账户 sort_order 排序；两个字段各自取首份非空。
+        for field in fields:
+            select(plan["symbol"], field, plan.get(field))
+    return levels
+
+
+def _read_review_action_plans(conn: sqlite3.Connection, archive_date: str) -> List[Dict[str, Any]]:
+    rows = _select_review_action_plan_rows(conn, archive_date)
+    initial = _review_initial_symbol_levels(conn, archive_date, rows)
+    for row in rows:
+        exists = row.pop("_level_symbol") is not None
+        support = row.pop("_shared_support")
+        resistance = row.pop("_shared_resistance")
+        if exists:  # 行存在即两个字段权威，不能用空字符串退回旧值。
+            row["support_levels"], row["resistance_levels"] = support, resistance
+        else:
+            row.update(initial[row["symbol"]])
+    return rows
+
+
+def list_review_action_plans(archive_date: str, db_path: str = None) -> List[Dict[str, Any]]:
+    """读取本日共用价位投影，不物化旧材料、不跨日沿用。"""
+    conn = get_db_connection(db_path)
+    try:
+        return _read_review_action_plans(conn, archive_date)
+    finally:
+        conn.close()
+
+
+_REVIEW_LEVEL_PATCHES_UNSET = object()
+
+
+def _normalize_review_level_patches(symbol_levels: Any) -> List[Dict[str, str]]:
+    if symbol_levels is _REVIEW_LEVEL_PATCHES_UNSET:
+        return []
+    if not isinstance(symbol_levels, list):
+        raise ValueError("symbol_levels 必须是补丁数组")
+    patches = []
+    seen = set()
+    for item in symbol_levels:
+        if not isinstance(item, dict) or not isinstance(item.get("symbol"), str) or not item["symbol"].strip():
+            raise ValueError("价位补丁必须包含非空字符串 symbol")
+        symbol = item["symbol"].strip().upper()
+        if symbol in seen:
+            raise ValueError("同一 symbol 不能出现多个价位补丁")
+        seen.add(symbol)
+        patch = {"symbol": symbol}
+        for snake, camel in (("support_levels", "supportLevels"), ("resistance_levels", "resistanceLevels")):
+            if snake in item and camel in item:
+                raise ValueError(f"价位补丁不能同时提交 {snake} 和 {camel}")
+            key = snake if snake in item else camel
+            if key in item:
+                if not isinstance(item[key], str):
+                    raise ValueError(f"{key} 必须为字符串；空字符串表示清空")
+                patch[snake] = item[key]
+        if len(patch) == 1:
+            raise ValueError("价位补丁至少需要一个显式价位字段")
+        patches.append(patch)
+    return patches
 
 
 def replace_review_action_plans(
     archive_date: str,
     action_plans: List[Dict[str, Any]],
     db_path: str = None,
+    symbol_levels: Any = _REVIEW_LEVEL_PATCHES_UNSET,
 ) -> List[Dict[str, Any]]:
-    """替换指定复盘日的结构化操作计划，并只删除当前 archive_date 下缺失的行。"""
+    """原子替换日计划及显式补丁；省略/[]不改价位，NULL无效，不更新市场结构。"""
+    patches = _normalize_review_level_patches(symbol_levels)  # 所有补丁在写入前校验。
     normalized: List[Dict[str, Any]] = []
     seen_keys: set[tuple[int, str]] = set()
     for index, item in enumerate(action_plans or []):
@@ -561,73 +679,105 @@ def replace_review_action_plans(
         if not plan or key in seen_keys:
             continue
         seen_keys.add(key)
+        # normalizer 的旧 key_levels 生成逻辑不用于此新写路径。
+        supplied_key = item.get("key_levels") if "key_levels" in item else item.get("keyLevels")
+        plan["key_levels"] = supplied_key if isinstance(supplied_key, str) else ""
         normalized.append(plan)
 
     conn = get_db_connection(db_path)
-    cursor = conn.cursor()
-    now = now_cst()
-    for index, plan in enumerate(normalized):
-        cursor.execute(
-            '''
-            INSERT INTO daily_review_action_plans (
-                archive_date, account_id, symbol, action_type, entry_plan, take_profit_plan,
-                stop_loss_plan, key_levels, support_levels, resistance_levels,
-                current_position, thinking, market_type, sort_order, created_at, updated_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            ON CONFLICT(archive_date, account_id, symbol) DO UPDATE SET
-                action_type = excluded.action_type,
-                entry_plan = excluded.entry_plan,
-                take_profit_plan = excluded.take_profit_plan,
-                stop_loss_plan = excluded.stop_loss_plan,
-                key_levels = excluded.key_levels,
-                support_levels = excluded.support_levels,
-                resistance_levels = excluded.resistance_levels,
-                current_position = excluded.current_position,
-                thinking = excluded.thinking,
-                market_type = excluded.market_type,
-                sort_order = excluded.sort_order,
-                updated_at = excluded.updated_at
-            ''',
-            (
-                archive_date,
-                plan["account_id"],
-                plan["symbol"],
-                plan["action_type"],
-                plan["entry_plan"],
-                plan["take_profit_plan"],
-                plan["stop_loss_plan"],
-                plan["key_levels"],
-                plan["support_levels"],
-                plan["resistance_levels"],
-                plan["current_position"],
-                plan["thinking"],
-                plan["market_type"],
-                int(plan.get("sort_order", index)),
-                now,
-                now,
-            ),
-        )
+    try:
+        conn.execute("BEGIN IMMEDIATE")  # 首次初值必须来自同一事务中的写前材料。
+        now = now_cst()
+        if patches:
+            before = _select_review_action_plan_rows(conn, archive_date)
+            initial = _review_initial_symbol_levels(conn, archive_date, before)
+            allowed_symbols = {row["symbol"] for row in conn.execute(
+                "SELECT symbol FROM tracked_symbols WHERE is_active = 1"
+            )}
+            # 历史身份只取目标日已存材料，不信任本次请求的新计划或展示代码。
+            allowed_symbols.update(row["symbol"] for row in before)
+            for row in conn.execute(
+                "SELECT symbol, support_levels, resistance_levels FROM daily_review_symbol_levels WHERE archive_date = ?",
+                (archive_date,),
+            ):
+                allowed_symbols.add(row["symbol"])
+                initial[row["symbol"]] = {field: row[field] for field in ("support_levels", "resistance_levels")}
+            archive = conn.execute(
+                "SELECT market_review_json FROM daily_review_archive WHERE archive_date = ?", (archive_date,),
+            ).fetchone()
+            if archive and archive["market_review_json"] is not None:
+                document = json.loads(archive["market_review_json"])
+                if not isinstance(document, dict) or not isinstance(document.get("blocks"), list):
+                    raise ValueError("已存市场文档必须包含 blocks 数组")
+                allowed_symbols.update(
+                    block["symbol"] for block in document["blocks"]
+                    if isinstance(block, dict) and block.get("type") == "symbol"
+                    and isinstance(block.get("symbol"), str)
+                )
+            for patch in patches:
+                if patch["symbol"] not in allowed_symbols:
+                    raise ValueError(f"价位标的不可用：{patch['symbol']}")
+            for patch in patches:
+                values = dict(initial.get(patch["symbol"], {"support_levels": "", "resistance_levels": ""}))
+                values.update({field: patch[field] for field in ("support_levels", "resistance_levels") if field in patch})
+                conn.execute(
+                    '''INSERT INTO daily_review_symbol_levels
+                       (archive_date, symbol, support_levels, resistance_levels, created_at, updated_at)
+                       VALUES (?, ?, ?, ?, ?, ?)
+                       ON CONFLICT(archive_date, symbol) DO UPDATE SET
+                           support_levels = excluded.support_levels,
+                           resistance_levels = excluded.resistance_levels,
+                           updated_at = excluded.updated_at''',
+                    (archive_date, patch["symbol"], values["support_levels"], values["resistance_levels"], now, now),
+                )
 
-    if normalized:
-        conditions = " OR ".join("(account_id = ? AND symbol = ?)" for _ in normalized)
-        values = [value for plan in normalized for value in (plan["account_id"], plan["symbol"])]
-        cursor.execute(
-            f'''
-            DELETE FROM daily_review_action_plans
-            WHERE archive_date = ?
-              AND NOT ({conditions})
-            ''',
-            (archive_date, *values),
-        )
-    else:
-        cursor.execute(
-            'DELETE FROM daily_review_action_plans WHERE archive_date = ?',
-            (archive_date,),
-        )
+        for index, plan in enumerate(normalized):
+            conn.execute(
+                '''
+                INSERT INTO daily_review_action_plans (
+                    archive_date, account_id, symbol, action_type, entry_plan, take_profit_plan,
+                    stop_loss_plan, key_levels, support_levels, resistance_levels,
+                    current_position, thinking, market_type, sort_order, created_at, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, NULL, NULL, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(archive_date, account_id, symbol) DO UPDATE SET
+                    action_type = excluded.action_type,
+                    entry_plan = excluded.entry_plan,
+                    take_profit_plan = excluded.take_profit_plan,
+                    stop_loss_plan = excluded.stop_loss_plan,
+                    current_position = excluded.current_position,
+                    thinking = excluded.thinking,
+                    market_type = excluded.market_type,
+                    sort_order = excluded.sort_order,
+                    updated_at = excluded.updated_at
+                ''',
+                (archive_date, plan["account_id"], plan["symbol"], plan["action_type"],
+                 plan["entry_plan"], plan["take_profit_plan"], plan["stop_loss_plan"], plan["key_levels"],
+                 plan["current_position"], plan["thinking"], plan["market_type"],
+                 int(plan.get("sort_order", index)), now, now),
+            )
 
-    conn.commit()
-    conn.close()
-    return normalized
+        if normalized:
+            conditions = " OR ".join("(account_id = ? AND symbol = ?)" for _ in normalized)
+            values = [value for plan in normalized for value in (plan["account_id"], plan["symbol"])]
+            conn.execute(
+                f'''DELETE FROM daily_review_action_plans
+                    WHERE archive_date = ? AND NOT ({conditions})''', (archive_date, *values),
+            )
+        else:
+            conn.execute("DELETE FROM daily_review_action_plans WHERE archive_date = ?", (archive_date,))
+
+        saved = {(row["account_id"], row["symbol"]): row for row in _read_review_action_plans(conn, archive_date)}
+        for plan in normalized:
+            row = saved[(plan["account_id"], plan["symbol"])]
+            for field in ("support_levels", "resistance_levels", "key_levels"):
+                plan[field] = row[field]
+        conn.commit()
+        return normalized
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        conn.close()
 
 
 def count_review_action_plans(archive_date: str, db_path: str = None) -> int:

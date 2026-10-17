@@ -1,5 +1,5 @@
 import { test, expect } from '@playwright/test';
-import { execFileSync } from 'node:child_process';
+import { queryLocalSql } from '../helpers/market-review-local.mjs';
 
 const BASE_URL = process.env.BASE_URL || 'http://127.0.0.1:8787';
 const TEST_SYMBOL = 'APLRT';
@@ -15,17 +15,9 @@ function sqlQuote(value) {
   return `'${String(value).replaceAll("'", "''")}'`;
 }
 
+// Same isolated local test D1 the 8787 Worker reads.
 function d1(command) {
-  const output = execFileSync(
-    'npx',
-    ['wrangler', 'd1', 'execute', 'my-financial-agent', '--config', 'wrangler.toml', '--local', '--command', command],
-    { cwd: process.cwd(), encoding: 'utf8' },
-  );
-  const clean = output.replace(/\u001b\[[0-9;]*m/g, '');
-  const start = clean.lastIndexOf('\n[');
-  const jsonText = start >= 0 ? clean.slice(start + 1) : clean.slice(clean.indexOf('['));
-  if (!jsonText.trim().startsWith('[')) return [];
-  return JSON.parse(jsonText)[0]?.results || [];
+  return queryLocalSql(command);
 }
 
 function liveInsertSql(row) {

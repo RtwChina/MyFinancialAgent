@@ -1,0 +1,301 @@
+{
+  "config": {
+    "rootDir": "/Users/ruantianwei/my_project/MyFinancialAgent",
+    "forbidOnly": false,
+    "fullyParallel": false,
+    "globalSetup": null,
+    "globalTeardown": null,
+    "globalTimeout": 0,
+    "grep": {},
+    "grepInvert": null,
+    "maxFailures": 0,
+    "metadata": {
+      "actualWorkers": 1
+    },
+    "preserveOutput": "always",
+    "projects": [
+      {
+        "outputDir": "/Users/ruantianwei/my_project/MyFinancialAgent/tests/reports/market-review-desktop/green",
+        "repeatEach": 1,
+        "retries": 0,
+        "metadata": {
+          "actualWorkers": 1
+        },
+        "id": "",
+        "name": "",
+        "testDir": "/Users/ruantianwei/my_project/MyFinancialAgent",
+        "testIgnore": [],
+        "testMatch": [
+          "**/*.@(spec|test).?(c|m)[jt]s?(x)"
+        ],
+        "timeout": 30000
+      }
+    ],
+    "quiet": false,
+    "reporter": [
+      [
+        "list"
+      ],
+      [
+        "json"
+      ]
+    ],
+    "reportSlowTests": {
+      "max": 5,
+      "threshold": 300000
+    },
+    "runAgents": "none",
+    "shard": null,
+    "tags": [],
+    "updateSnapshots": "missing",
+    "updateSourceMethod": "patch",
+    "version": "1.58.2",
+    "workers": 1,
+    "webServer": null
+  },
+  "suites": [
+    {
+      "title": "tests/smoke/market_review.spec.js",
+      "file": "tests/smoke/market_review.spec.js",
+      "column": 0,
+      "line": 0,
+      "specs": [
+        {
+          "title": "US1 real empty day desktop 1440: table, picker, detail, save and reopen",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 60000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "",
+              "projectName": "",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 4325,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [
+                    {
+                      "text": "(node:80327) [DEP0040] DeprecationWarning: The `punycode` module is deprecated. Please use a userland alternative instead.\n(Use `Qoder --trace-deprecation ...` to show where the warning was created)\n"
+                    }
+                  ],
+                  "retry": 0,
+                  "startTime": "2026-10-16T01:39:57.421Z",
+                  "annotations": [],
+                  "attachments": [
+                    {
+                      "name": "runtime",
+                      "contentType": "application/json",
+                      "body": "eyJlcnJvcnMiOltdLCJjb25zb2xlRXJyb3JzIjpbeyJ0ZXh0IjoiRmFpbGVkIHRvIGxvYWQgcmVzb3VyY2U6IHRoZSBzZXJ2ZXIgcmVzcG9uZGVkIHdpdGggYSBzdGF0dXMgb2YgNDA0IChOb3QgRm91bmQpIiwidXJsIjoiaHR0cDovLzEyNy4wLjAuMTo4Nzg3L2Zhdmljb24uaWNvIn1dfQ=="
+                    }
+                  ]
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "37a6d2e57d81d63f9a36-1932c4c55b07e260e594",
+          "file": "tests/smoke/market_review.spec.js",
+          "line": 40,
+          "column": 3
+        },
+        {
+          "title": "US1 real empty day desktop 1920: table, picker, detail, save and reopen",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 60000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "",
+              "projectName": "",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 4061,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-10-16T01:40:02.525Z",
+                  "annotations": [],
+                  "attachments": [
+                    {
+                      "name": "runtime",
+                      "contentType": "application/json",
+                      "body": "eyJlcnJvcnMiOltdLCJjb25zb2xlRXJyb3JzIjpbXX0="
+                    }
+                  ]
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "37a6d2e57d81d63f9a36-b2b70fcd4a1cc8520ad7",
+          "file": "tests/smoke/market_review.spec.js",
+          "line": 40,
+          "column": 3
+        },
+        {
+          "title": "US1 catalog retry blocks real network only and preserves the draft; delete stays local until save",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 60000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "",
+              "projectName": "",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 2127,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-10-16T01:40:06.591Z",
+                  "annotations": [],
+                  "attachments": [
+                    {
+                      "name": "runtime",
+                      "contentType": "application/json",
+                      "body": "eyJlcnJvcnMiOltdLCJjb25zb2xlRXJyb3JzIjpbeyJ0ZXh0IjoiRmFpbGVkIHRvIGxvYWQgcmVzb3VyY2U6IG5ldDo6RVJSX0ZBSUxFRCIsInVybCI6Imh0dHA6Ly8xMjcuMC4wLjE6ODc4Ny9hcGkvc3ltYm9scyJ9XX0="
+                    }
+                  ]
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "37a6d2e57d81d63f9a36-bfec6b18e76be926641e",
+          "file": "tests/smoke/market_review.spec.js",
+          "line": 134,
+          "column": 1
+        },
+        {
+          "title": "US1 thinking-only existing block can change symbol without losing stable ids or text",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 60000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "",
+              "projectName": "",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 2326,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-10-16T01:40:08.723Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "37a6d2e57d81d63f9a36-6da7cef5c094daa6be34",
+          "file": "tests/smoke/market_review.spec.js",
+          "line": 155,
+          "column": 1
+        },
+        {
+          "title": "US1 actual Worker rejection preserves draft and real retry saves it",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 60000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "",
+              "projectName": "",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 3079,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-10-16T01:40:11.053Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "37a6d2e57d81d63f9a36-eb92eefd7698d9279e71",
+          "file": "tests/smoke/market_review.spec.js",
+          "line": 181,
+          "column": 1
+        },
+        {
+          "title": "US1 reviewed market stays read-only while rows and outline remain usable",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 60000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "",
+              "projectName": "",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 2136,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-10-16T01:40:14.139Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "37a6d2e57d81d63f9a36-f60a33ee00673d7860b3",
+          "file": "tests/smoke/market_review.spec.js",
+          "line": 200,
+          "column": 1
+        }
+      ]
+    }
+  ],
+  "errors": [],
+  "stats": {
+    "startTime": "2026-10-16T01:39:56.766Z",
+    "duration": 20170.648,
+    "expected": 6,
+    "skipped": 0,
+    "unexpected": 0,
+    "flaky": 0
+  }
+}
