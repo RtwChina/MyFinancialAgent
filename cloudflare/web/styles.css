@@ -3825,10 +3825,23 @@ textarea[name="reviewerNewsNotes"] {
 
 .market-detail-fields [data-market-title] {
   box-sizing: border-box;
+  min-height: 28px;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  color: inherit;
+  padding: 0;
+  font: inherit;
+  box-shadow: none;
+}
+
+.market-detail-fields [data-market-title]:focus {
+  border-color: transparent;
+  box-shadow: none;
 }
 
 .market-detail-fields [data-market-title][aria-invalid="true"] {
-  border-color: #dc2626;
+  box-shadow: inset 0 -2px #dc2626;
 }
 
 .market-child-actions {
@@ -3843,6 +3856,12 @@ textarea[name="reviewerNewsNotes"] {
   padding: 0 6px;
   border-radius: 8px;
   font-size: 0.74rem;
+}
+
+.market-title-edit-btn svg {
+  display: block;
+  width: 14px;
+  height: 14px;
 }
 
 .market-detail-fields textarea {

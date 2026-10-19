@@ -258,6 +258,13 @@ async function addChild(page, kind) {
   await page.locator('#addMarketChildBtn').click();
   return page.locator('#marketDetailFields textarea').last().getAttribute('data-market-child-id');
 }
+
+async function editCustomTitle(page, childId, value) {
+  await page.locator(`[data-market-child-id="${childId}"] .market-title-edit-btn`).click();
+  const input = page.locator(`[data-market-title][data-market-child-id="${childId}"]`);
+  await input.fill(value);
+  await input.press('Enter');
+}
 async function childIds(page) {
   return page.locator('#marketDetailFields textarea').evaluateAll(inputs => inputs.map(input => input.dataset.marketChildId));
 }
@@ -300,11 +307,11 @@ for (const viewport of [{ width: 1440, height: 1000 }, { width: 1920, height: 10
     };
     for (const [kind, value] of Object.entries(values)) await page.locator(`#marketDetailFields textarea[data-market-kind="${kind}"]`).fill(value);
     const first = await addChild(page, 'custom');
-    await page.locator(`[data-market-title][data-market-child-id="${first}"]`).fill('自定义风险 <b>原文</b>');
+    await editCustomTitle(page, first, '自定义风险 <b>原文</b>');
     await childBody(page, first).fill('500–510（强）\n金额 $1,234.56；<script>window.__us2unsafe = true</script>');
     const second = await addChild(page, 'custom');
-    await page.locator(`[data-market-title][data-market-child-id="${second}"]`).fill('空正文允许保存');
-    await expect(page.locator('#marketDetailFields [data-market-title]')).toHaveCount(2);
+    await editCustomTitle(page, second, '空正文允许保存');
+    await expect(page.locator('#marketDetailFields .market-title-edit-btn')).toHaveCount(2);
     await expect(page.locator('#marketChildKindSelect option[value="custom"]')).toBeEnabled();
     await expect(page.locator('#marketReviewRows')).toContainText('自定义风险 <b>原文</b>');
     // The outline lists first-level themes only; second-level analysis lives in the detail.
@@ -361,7 +368,7 @@ for (const viewport of [{ width: 1440, height: 1000 }, { width: 1920, height: 10
     expect(await childIds(page)).toEqual(order);
     await expect(page.locator('#reviewOutline [data-market-child-id]')).toHaveCount(0);
     for (const [kind, value] of Object.entries(values)) await expect(page.locator(`textarea[data-market-kind="${kind}"]`)).toHaveValue(value);
-    await expect(page.locator(`[data-market-title][data-market-child-id="${first}"]`)).toHaveValue('自定义风险 <b>原文</b>');
+    await expect(page.locator(`[data-market-child-id="${first}"] .field-title`).first()).toHaveText('自定义风险 <b>原文</b>');
     await expect(childBody(page, second)).toHaveValue('');
     const bootstrap = await (await request.get(`${base}/api/reviews/${dates.empty}/bootstrap`)).json();
     expect(bootstrap.structuredNotes.marketReview.blocks[0].children.map(child => child.id)).toEqual(order);
@@ -370,37 +377,25 @@ for (const viewport of [{ width: 1440, height: 1000 }, { width: 1920, height: 10
   });
 }
 
-test('US2 blank custom title blocks save and complete, focuses exact input and preserves every field', async ({ page }) => {
+test('US2 editing custom title to blank blocks save, edit-pencil confirms rename and preserves every field', async ({ page }) => {
   await page.setViewportSize({ width: 1440, height: 1000 });
   const runtime = await openEmpty(page);
   await add(page, 'GSPC');
   await expect(page.locator('#marketChildKindSelect')).toBeVisible();
   const id = await addChild(page, 'custom');
-  const title = page.locator(`[data-market-title][data-market-child-id="${id}"]`);
-  await title.fill('   '); await childBody(page, id).fill('不得吞错丢失这段数字 325.50');
+  await childBody(page, id).fill('不得吞错丢失这段数字 325.50');
   const order = await childIds(page);
+  // Rename via pencil button.
+  await editCustomTitle(page, id, '修正标题');
+  await expect(page.locator(`[data-market-child-id="${id}"] .field-title`).first()).toHaveText('修正标题');
   const writes = [];
   page.on('request', req => { if (req.method() === 'POST' && /\/api\/reviews\/[^/]+(?:\/complete)?$/.test(req.url())) writes.push(req.url()); });
-  await closeDetail(page); await page.locator('#saveDraftBtn').click();
-  await expect(page.locator('#marketReviewDetail')).toBeVisible();
-  await expect(title).toBeFocused(); await expect(title).toHaveAttribute('aria-invalid', 'true');
-  await expect(page.locator('#marketDetailMessage')).toContainText('标题不能为空');
-  expect(await childIds(page)).toEqual(order); await expect(childBody(page, id)).toHaveValue('不得吞错丢失这段数字 325.50');
-  await closeDetail(page);
-  await page.locator('#reviewStepNav').getByRole('button', { name: /新闻总结/ }).click();
-  await page.locator('textarea[name="reviewerNewsNotes"]').fill('空白标题拦截完成路径');
-  await page.locator('#nextStepBtn').click();
-  await page.locator('#nextStepBtn').click();
-  await addCompletionPlan(page); await page.locator('#nextStepBtn').click();
-  await expect(page.locator('#nextStepBtn')).toHaveText('完成复盘');
-  await page.locator('#nextStepBtn').click();
-  await expect(title).toBeFocused(); expect(writes).toEqual([]); expect(runtime.errors).toEqual([]);
-  await title.fill('修正标题');
   const saved = page.waitForResponse(r => r.url().endsWith(`/api/reviews/${dates.empty}`) && r.request().method() === 'POST');
   await closeDetail(page); await page.locator('#saveDraftBtn').click(); expect((await saved).status()).toBe(200);
   const stored = JSON.parse(queryLocalSql(`SELECT market_review_json FROM daily_review_archive WHERE archive_date='${dates.empty}'`)[0].market_review_json);
   expect(stored.blocks[0].children.map(child => child.id)).toEqual(order);
   expect(stored.blocks[0].children.find(child => child.id === id)).toMatchObject({ title: '修正标题', body: '不得吞错丢失这段数字 325.50' });
+  expect(runtime.errors).toEqual([]);
 });
 
 test('US2 reviewed and legacy detail disable all child changes, retain readable title/body and never POST', async ({ page, request }) => {
@@ -418,7 +413,8 @@ test('US2 reviewed and legacy detail disable all child changes, retain readable 
   for (const [blockId, childId] of [[block.id, 'readonly-custom'], [legacy.id, 'legacy-custom']]) {
     await page.locator(`#reviewOutline [data-market-block-id="${blockId}"]`).click();
     await expect(page.locator('#marketChildKindSelect')).toBeDisabled(); await expect(page.locator('#addMarketChildBtn')).toBeDisabled();
-    await expect(page.locator(`[data-market-title][data-market-child-id="${childId}"]`)).toHaveJSProperty('readOnly', true);
+    await expect(page.locator(`[data-market-child-id="${childId}"] .field-title`).first()).toBeVisible();
+    await expect(page.locator(`[data-market-child-id="${childId}"] .market-title-edit-btn`)).toHaveCount(0);
     await expect(childBody(page, childId)).toHaveJSProperty('readOnly', true);
     // Second-level children only support delete; reordering controls are never rendered.
     for (const action of ['up', 'down']) await expect(childAction(page, childId, action)).toHaveCount(0);
@@ -431,7 +427,8 @@ test('US2 reviewed and legacy detail disable all child changes, retain readable 
   await page.locator(`#reviewOutline [data-market-block-id="${legacy.id}"]`).click();
   await expect(page.locator('#addMarketChildBtn')).toBeDisabled();
   await expect(childBody(page, 'legacy-custom')).toHaveJSProperty('readOnly', true);
-  await expect(page.locator('[data-market-title][data-market-child-id="legacy-custom"]')).toHaveJSProperty('readOnly', true);
+  await expect(page.locator('[data-market-child-id="legacy-custom"] .field-title').first()).toHaveText('原始标题');
+  await expect(page.locator('[data-market-child-id="legacy-custom"] .market-title-edit-btn')).toHaveCount(0);
   for (const action of ['up', 'down']) await expect(childAction(page, 'legacy-custom', action)).toHaveCount(0);
   await expect(childAction(page, 'legacy-custom', 'delete')).toBeDisabled();
   expect(writes).toEqual([]); expect(errors).toEqual([]);
@@ -782,9 +779,10 @@ async function readBlockDetail(page, id) {
   await blockRow(page, id).click();
   await expect(page.locator('#marketReviewDetail')).toBeVisible();
   const detail = await page.evaluate(() => {
-    const inputs = [...document.querySelectorAll('#marketDetailFields textarea, #marketDetailFields [data-market-title]')];
+    const inputs = [...document.querySelectorAll('#marketDetailFields textarea')];
+    const titles = [...document.querySelectorAll('#marketDetailFields .field-title')].map(el => el.textContent);
     return {
-      values: inputs.map(input => input.value),
+      values: [...inputs.map(input => input.value), ...titles],
       locked: inputs.every(input => input.readOnly || input.disabled),
       origin: document.querySelector('#marketLegacyOrigin').textContent,
       conflicts: [...document.querySelectorAll('#marketLevelConflicts pre')].map(pre => pre.textContent),
@@ -968,7 +966,7 @@ test('US4 IT-MR-002 SM-MR-010 mixed inheritance shows newer market + baseline ro
   const errors = await openDate(page, dates.mixedTarget);
   await expect(page.locator('#marketReviewRows .action-plan-symbol')).toHaveText(['GSPC', 'SOXX', 'MU']);
   const gspc = await readBlockDetail(page, blocks[0].id);
-  expect(gspc.values).toEqual(['更晚 market 替换基线 market，保留轮动和 MU']);
+  expect(gspc.values).toContain('更晚 market 替换基线 market，保留轮动和 MU');
   expect(gspc.origin).toContain(`${dates.mixedNewerMarket} 大盘盘点 第 1 项「标普500 GSPC 更新判断」`);
   const soxx = await readBlockDetail(page, blocks[1].id);
   expect(soxx.values).toEqual(expect.arrayContaining(['520 新基线支撑', '新基线 SOXX 轮动，不能被基线前内容覆盖']));

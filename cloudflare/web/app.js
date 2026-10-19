@@ -107,8 +107,6 @@ const state = {
   marketSymbolCatalog: [],
   marketSymbolPickerFilter: "all",
   marketCatalogFailed: false,
-  // Unfinished custom titles stay visible without feeding invalid data to the pure model.
-  marketChildTitleDrafts: {},
   actionPlans: [],
   accountLiveActionPlans: [],
   liveSymbolLevels: {},
@@ -1297,7 +1295,6 @@ async function openReviewDrawer(archiveDate, options = {}) {
   state.symbolLevels = structuredClone(data.symbolLevels || {});
   state.dirtySymbolLevels = {};
   state.marketReview = assembleMarketReview(createMarketReview(data.structuredNotes?.marketReview || {}), state.symbolLevels);
-  state.marketChildTitleDrafts = {};
   state.selectedMarketBlockId = state.marketReview.blocks[0]?.id || null;
   state.marketSymbolCatalog = (data.marketReviewSymbols || []).map(normalizeActionPlanSymbolItem);
   state.marketCatalogFailed = !Array.isArray(data.marketReviewSymbols);
@@ -1681,7 +1678,7 @@ function selectedMarketBlock() {
 }
 
 function marketChildTitle(child) {
-  return Object.hasOwn(state.marketChildTitleDrafts, child.id) ? state.marketChildTitleDrafts[child.id] : child.title;
+  return child.title;
 }
 
 function replaceMarketDraftBlock(block) {
@@ -1701,9 +1698,9 @@ function validateMarketChildTitlesForSave() {
     for (const child of block.children) {
       if (child.kind !== "custom") continue;
       const title = marketChildTitle(child);
-      if (!title.trim() || Object.hasOwn(state.marketChildTitleDrafts, child.id)) {
+      if (!title.trim()) {
         openMarketDetail(block.id, null, child.id);
-        const message = !title.trim() ? "标题不能为空，请填写标题后再保存。" : "标题尚未更新，请重新编辑标题后再保存。";
+        const message = "标题不能为空，请填写标题后再保存。";
         document.querySelector("#marketDetailMessage").textContent = message;
         focusMarketChild(child.id);
         throw new Error(message);
@@ -1806,7 +1803,6 @@ function deleteSelectedMarketChild(childId) {
   try {
     const changed = deleteMarketChild(block, childId);
     replaceMarketDraftBlock(changed);
-    delete state.marketChildTitleDrafts[childId];
     renderStructuredNoteEditors();
     renderMarketDetail();
     const nextId = changed.children[Math.min(index, changed.children.length - 1)]?.id;
@@ -1848,48 +1844,70 @@ function renderMarketDetail() {
     const card = document.createElement("section");
     const isLevel = child.kind === "support" || child.kind === "resistance";
     card.className = `market-detail-field ${isLevel ? "market-level-card" : "market-wide-card"}`;
+    card.dataset.marketChildId = child.id;
     const header = document.createElement("div");
     header.className = "market-child-header";
-    if (child.kind === "custom") {
-      const label = document.createElement("label");
-      label.className = "market-child-title-label";
-      const titleInput = document.createElement("input");
-      titleInput.type = "text";
-      titleInput.dataset.marketTitle = "";
-      titleInput.dataset.marketChildId = child.id;
-      titleInput.value = marketChildTitle(child);
-      titleInput.readOnly = readOnly;
-      titleInput.setAttribute("aria-label", "二级标题");
-      titleInput.setAttribute("aria-describedby", "marketDetailMessage");
-      titleInput.setAttribute("aria-invalid", String(!readOnly && !titleInput.value.trim()));
-      titleInput.addEventListener("input", () => {
-        const current = selectedMarketBlock();
-        if (isMarketBlockLocked(current) || isMarketReviewReadOnly()) return;
-        state.marketChildTitleDrafts[child.id] = titleInput.value;
-        titleInput.setAttribute("aria-invalid", String(!titleInput.value.trim()));
-        const message = document.querySelector("#marketDetailMessage");
-        if (titleInput.value.trim()) {
-          try {
-            replaceMarketDraftBlock(updateMarketChildTitle(current, child.id, titleInput.value));
-            delete state.marketChildTitleDrafts[child.id];
-            message.textContent = "";
-          } catch (error) {
-            message.textContent = error.message;
-          }
-        } else message.textContent = "标题不能为空，请填写标题后再保存。";
-        input.setAttribute("aria-label", titleInput.value || "自定义正文");
-        renderStructuredNoteEditors();
-      });
-      label.append(titleInput);
-      header.appendChild(label);
-    } else {
-      const title = document.createElement("span");
-      title.className = "field-title";
-      title.textContent = child.title;
-      header.appendChild(title);
-    }
+    const title = document.createElement("span");
+    title.className = "field-title";
+    title.textContent = child.title;
+    header.appendChild(title);
     const actions = document.createElement("div");
     actions.className = "market-child-actions";
+    if (child.kind === "custom" && !readOnly) {
+      const editButton = document.createElement("button");
+      editButton.type = "button";
+      editButton.className = "ghost compact-button market-title-edit-btn";
+      editButton.innerHTML = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 20h4.2L19 9.2 14.8 5 4 15.8V20Zm12.2-16.4 4.2 4.2 1.4-1.4a2 2 0 0 0 0-2.8l-1.4-1.4a2 2 0 0 0-2.8 0l-1.4 1.4Z" fill="currentColor"/></svg>';
+      editButton.setAttribute("aria-label", `编辑 ${child.title}`);
+      editButton.addEventListener("click", () => {
+        const titleInput = document.createElement("input");
+        titleInput.type = "text";
+        titleInput.dataset.marketTitle = "";
+        titleInput.dataset.marketChildId = child.id;
+        titleInput.value = child.title;
+        titleInput.setAttribute("aria-label", "二级标题");
+        titleInput.setAttribute("aria-describedby", "marketDetailMessage");
+        title.replaceWith(titleInput);
+        let finished = false;
+        const finish = (cancel = false) => {
+          if (finished) return;
+          if (cancel) {
+            finished = true;
+            renderMarketDetail();
+            return;
+          }
+          const value = titleInput.value.trim();
+          if (!value) {
+            titleInput.setAttribute("aria-invalid", "true");
+            document.querySelector("#marketDetailMessage").textContent = "标题不能为空，请填写标题后再保存。";
+            titleInput.focus();
+            return;
+          }
+          try {
+            replaceMarketDraftBlock(updateMarketChildTitle(selectedMarketBlock(), child.id, value));
+            finished = true;
+            document.querySelector("#marketDetailMessage").textContent = "";
+            renderStructuredNoteEditors();
+            renderMarketDetail();
+          } catch (error) {
+            document.querySelector("#marketDetailMessage").textContent = error.message;
+          }
+        };
+        titleInput.addEventListener("blur", () => finish());
+        titleInput.addEventListener("keydown", (event) => {
+          if (event.key === "Enter") {
+            event.preventDefault();
+            titleInput.blur();
+          } else if (event.key === "Escape") {
+            event.preventDefault();
+            finish(true);
+          }
+        });
+        titleInput.focus();
+        titleInput.select();
+      });
+      actions.appendChild(editButton);
+    }
     const button = document.createElement("button");
     button.type = "button";
     button.className = "ghost compact-button";
@@ -2011,7 +2029,6 @@ function deleteSelectedMarketBlock() {
   if (!block || isMarketReviewReadOnly() || !window.confirm(prompt)) return;
   const index = state.marketReview.blocks.indexOf(block);
   state.marketReview.blocks.splice(index, 1);
-  for (const child of block.children) delete state.marketChildTitleDrafts[child.id];
   state.selectedMarketBlockId = state.marketReview.blocks[Math.min(index, state.marketReview.blocks.length - 1)]?.id || null;
   closeMarketDetail({ restoreFocus: false });
   renderStructuredNoteEditors();
