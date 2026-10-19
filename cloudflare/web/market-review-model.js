@@ -287,10 +287,15 @@ export function createMarketReview({ blocks = [], conflicts = [], sourceDates = 
 }
 
 const LEGACY_CHILD_KINDS = new Map([
-  ...['支撑位', '支撑', '支持', '支持位', '支撑位(support)'].map(title => [title, 'support']),
-  ...['压力位', '压力', '阻力位', '阻力', '压力位(resistance)', '阻力位(resistance)'].map(title => [title, 'resistance']),
-  ['思考', 'thinking'], ['cta', 'cta'], ['cta流动性', 'cta'], ['jpmcollar', 'collar'], ['eps预计', 'eps'],
+  ...['支撑位', '支撑', '支持', '支持位', '支撑位(support)', '支撑位(support):'].map(title => [title, 'support']),
+  ...['压力位', '压力', '阻力位', '阻力', '压力位(resistance)', '阻力位(resistance)', '压力位(resistance):'].map(title => [title, 'resistance']),
+  ['思考', 'thinking'], ['cta', 'cta'], ['cta流动性', 'cta'],
+  ['jpmcollar', 'collar'],
+  ['eps预计', 'eps'], ['eps预计(估)', 'eps'],
 ]);
+const LEGACY_CHILD_PREFIX_KINDS = [
+  ['jpmcollar', 'collar'],
+];
 const UNTITLED_LEGACY_CHILD = '未命名原二级';
 
 function rawText(value) {
@@ -298,8 +303,13 @@ function rawText(value) {
 }
 
 function legacyChildKind(title) {
-  const key = title.replace(/[（]/g, '(').replace(/[）]/g, ')').replace(/\s+/g, '').toLowerCase();
-  return LEGACY_CHILD_KINDS.get(key) ?? 'custom';
+  const key = title.replace(/[（]/g, '(').replace(/[）]/g, ')').replace(/[：]/g, ':').replace(/[""]/g, '"').replace(/\s+/g, '').toLowerCase();
+  const exact = LEGACY_CHILD_KINDS.get(key);
+  if (exact) return exact;
+  for (const [prefix, kind] of LEGACY_CHILD_PREFIX_KINDS) {
+    if (key.startsWith(prefix)) return kind;
+  }
+  return 'custom';
 }
 
 function itemAliases(item) {

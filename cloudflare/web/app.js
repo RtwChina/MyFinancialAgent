@@ -1,5 +1,5 @@
 import { buildZoneExport } from "./zone-export.js?v=20261016-market-review";
-import { MARKET_REVIEW_PRESETS, createMarketReview, assembleMarketReview, serializeMarketReview, createSymbolMarketBlock, changeMarketBlockSymbol, linkLegacyMarketBlock, searchMarketReviewSymbols, addMarketChild, updateMarketChildTitle, deleteMarketChild, patchMarketReviewLevels } from "./market-review-model.js";
+import { MARKET_REVIEW_PRESETS, createMarketReview, assembleMarketReview, serializeMarketReview, createSymbolMarketBlock, searchMarketReviewSymbols, addMarketChild, updateMarketChildTitle, deleteMarketChild, patchMarketReviewLevels } from "./market-review-model.js";
 
 // ===== snarkdown (inline, ~1KB) — Markdown → HTML =====
 const _sdTags={'':['\x3cem>','</em>'],_:['\x3cstrong>','</strong>'],'*':['\x3cstrong>','</strong>'],'~':['\x3cs>','</s>'],'\n':['\x3cbr />'],' ':['\x3cbr />'],'-':['\x3chr />']};
@@ -103,12 +103,9 @@ const state = {
   marketReview: createMarketReview(),
   symbolLevels: {},
   dirtySymbolLevels: {},
-  // 本次草稿刚关联的历史块：服务端要求关联时原文逐项不变，保存前锁定编辑。
-  pendingLegacyLinks: new Set(),
   selectedMarketBlockId: null,
   marketSymbolCatalog: [],
   marketSymbolPickerFilter: "all",
-  marketSymbolPickerMode: "add",
   marketCatalogFailed: false,
   // Unfinished custom titles stay visible without feeding invalid data to the pure model.
   marketChildTitleDrafts: {},
@@ -1299,7 +1296,6 @@ async function openReviewDrawer(archiveDate, options = {}) {
   state.accountImpactSummary = normalizeAccountImpactSummary(data.accountImpactSummary || data.account_impact_summary || []);
   state.symbolLevels = structuredClone(data.symbolLevels || {});
   state.dirtySymbolLevels = {};
-  state.pendingLegacyLinks = new Set();
   state.marketReview = assembleMarketReview(createMarketReview(data.structuredNotes?.marketReview || {}), state.symbolLevels);
   state.marketChildTitleDrafts = {};
   state.selectedMarketBlockId = state.marketReview.blocks[0]?.id || null;
@@ -1308,7 +1304,7 @@ async function openReviewDrawer(archiveDate, options = {}) {
   closeMarketDetail({ restoreFocus: false });
   closeMarketSymbolPicker({ restoreFocus: false });
   setReviewFooterMessage("");
-  setMarketReviewMessage(state.marketCatalogFailed ? "标的目录读取失败，暂不能添加或更换标的；草稿已保留，可保存后重新打开复盘。" : "");
+  setMarketReviewMessage(state.marketCatalogFailed ? "标的目录读取失败，暂不能添加标的；草稿已保留，可保存后重新打开复盘。" : "");
 
   applyFormValues({
     reviewerNewsNotes: data.draft?.reviewer_news_notes || data.draft?.news_brief || buildDefaultNewsBrief(data.analysis, data.news),
@@ -1400,7 +1396,6 @@ async function saveReview({ forCompletion = false } = {}) {
   state.symbolLevels = structuredClone(response.symbolLevels || {});
   state.marketReview = assembleMarketReview(createMarketReview(response.marketReview), state.symbolLevels);
   state.dirtySymbolLevels = {};
-  state.pendingLegacyLinks = new Set();
   if (!marketReviewDetail.classList.contains("hidden")) renderMarketDetail();
   state.actionPlans = projectActionPlanLevels(normalizeActionPlans(response.actionPlans || payload.actionPlans), state.symbolLevels);
   state.activeBootstrap.actionPlans = state.actionPlans;
@@ -1644,7 +1639,7 @@ function marketBlockLabel(block) {
 }
 
 function isMarketBlockLocked(block) {
-  return !block || block.type !== "symbol" || state.pendingLegacyLinks.has(block.id);
+  return !block || block.type !== "symbol";
 }
 
 const LEGACY_GROUP_LABELS = { market: "大盘盘点", rotation: "大宗商品与板块轮动" };
@@ -1708,7 +1703,7 @@ function validateMarketChildTitlesForSave() {
       const title = marketChildTitle(child);
       if (!title.trim() || Object.hasOwn(state.marketChildTitleDrafts, child.id)) {
         openMarketDetail(block.id, null, child.id);
-        const message = !title.trim() ? "自定义标题不能为空，请填写标题后再保存。" : "自定义标题尚未更新，请重新编辑标题后再保存。";
+        const message = !title.trim() ? "标题不能为空，请填写标题后再保存。" : "标题尚未更新，请重新编辑标题后再保存。";
         document.querySelector("#marketDetailMessage").textContent = message;
         focusMarketChild(child.id);
         throw new Error(message);
@@ -1827,8 +1822,7 @@ function renderMarketDetail() {
   if (!block) { closeMarketDetail(); return; }
   const readOnly = isMarketReviewReadOnly() || isMarketBlockLocked(block);
   const legacy = block.type === "legacy";
-  const pendingLink = state.pendingLegacyLinks.has(block.id);
-  document.querySelector("#marketDetailTitle").textContent = legacy ? `未关联历史原文 · ${block.title || "无标题"}` : `${marketBlockLabel(block)} · ${block.identity?.displayName || block.title || ""}`;
+  document.querySelector("#marketDetailTitle").textContent = legacy ? `历史原文 · ${block.title || "无标题"}` : `${marketBlockLabel(block)} · ${block.identity?.displayName || block.title || ""}`;
   document.querySelector("#marketSharedLevelsHint").textContent = block.type === "symbol" ? sharedLevelsHint(block.symbol) : "";
   const metricsContainer = document.querySelector("#marketDetailMetrics");
   metricsContainer.classList.toggle("hidden", block.type !== "symbol");
@@ -1840,20 +1834,13 @@ function renderMarketDetail() {
     metric.classList.toggle("metric-down", value.startsWith("-"));
   }
   const hasLevels = block.children.some((child) => child.kind === "support" || child.kind === "resistance");
-  const changeButton = document.querySelector("#changeMarketSymbolBtn");
-  changeButton.textContent = legacy ? "关联标的" : "更换标的";
-  changeButton.disabled = legacy ? isMarketReviewReadOnly() || state.marketCatalogFailed : readOnly || hasLevels || state.marketCatalogFailed;
-  document.querySelector("#marketChangeSymbolHint").textContent = legacy
-    ? "未关联历史原标题与正文只读；可删除，或关联一个尚未使用的标的（原文保留为自定义二级，不写入共用价位）。"
-    : pendingLink ? "已关联历史原文，请先保存复盘，再编辑该主题。"
-      : hasLevels ? "含支撑位或压力位二级的主题不能更换标的（空正文也不能更换）。" : "更换标的保留当前二级正文。";
   const origin = document.querySelector("#marketLegacyOrigin");
   origin.textContent = legacyOriginText(block.legacyOrigin);
   origin.classList.toggle("hidden", !block.legacyOrigin);
   renderMarketLevelConflicts(block);
   document.querySelector("#finishMarketDetailBtn").textContent = readOnly ? "关闭详情" : "完成编辑";
   const invalidTitle = block.type === "symbol" && block.children.some((child) => child.kind === "custom" && !marketChildTitle(child).trim());
-  document.querySelector("#marketDetailMessage").textContent = invalidTitle ? "自定义标题不能为空，请填写标题后再保存。" : "";
+  document.querySelector("#marketDetailMessage").textContent = invalidTitle ? "标题不能为空，请填写标题后再保存。" : "";
   renderMarketChildMenu(block, readOnly);
   const fields = document.querySelector("#marketDetailFields");
   fields.innerHTML = "";
@@ -1866,16 +1853,13 @@ function renderMarketDetail() {
     if (child.kind === "custom") {
       const label = document.createElement("label");
       label.className = "market-child-title-label";
-      const caption = document.createElement("span");
-      caption.className = "field-title";
-      caption.textContent = "自定义标题";
       const titleInput = document.createElement("input");
       titleInput.type = "text";
       titleInput.dataset.marketTitle = "";
       titleInput.dataset.marketChildId = child.id;
       titleInput.value = marketChildTitle(child);
       titleInput.readOnly = readOnly;
-      titleInput.setAttribute("aria-label", "自定义标题");
+      titleInput.setAttribute("aria-label", "二级标题");
       titleInput.setAttribute("aria-describedby", "marketDetailMessage");
       titleInput.setAttribute("aria-invalid", String(!readOnly && !titleInput.value.trim()));
       titleInput.addEventListener("input", () => {
@@ -1892,11 +1876,11 @@ function renderMarketDetail() {
           } catch (error) {
             message.textContent = error.message;
           }
-        } else message.textContent = "自定义标题不能为空，请填写标题后再保存。";
+        } else message.textContent = "标题不能为空，请填写标题后再保存。";
         input.setAttribute("aria-label", titleInput.value || "自定义正文");
         renderStructuredNoteEditors();
       });
-      label.append(caption, titleInput);
+      label.append(titleInput);
       header.appendChild(label);
     } else {
       const title = document.createElement("span");
@@ -1946,13 +1930,12 @@ function renderMarketDetail() {
   });
 }
 
-function openMarketSymbolPicker(mode = "add") {
+function openMarketSymbolPicker() {
   if (isMarketReviewReadOnly() || state.marketCatalogFailed) return;
-  state.marketSymbolPickerMode = mode;
   state.marketSymbolPickerFilter = "all";
   marketPickerReturnFocus = document.activeElement;
   document.querySelector("#marketSymbolSearchInput").value = "";
-  document.querySelector("#marketSymbolPickerTitle").textContent = { add: "添加市场标的", change: "更换市场标的", link: "关联历史原文到标的" }[mode];
+  document.querySelector("#marketSymbolPickerTitle").textContent = "添加市场标的";
   marketSymbolPicker.classList.remove("hidden");
   renderMarketSymbolPicker();
   requestAnimationFrame(() => document.querySelector("#marketSymbolSearchInput").focus());
@@ -1977,7 +1960,7 @@ function renderMarketSymbolPicker() {
 
 function chooseMarketSymbol(symbol) {
   if (isMarketReviewReadOnly()) return;
-  const duplicate = state.marketReview.blocks.find((block) => block.type === "symbol" && block.symbol === symbol && (state.marketSymbolPickerMode === "add" || block.id !== state.selectedMarketBlockId));
+  const duplicate = state.marketReview.blocks.find((block) => block.type === "symbol" && block.symbol === symbol);
   if (duplicate) {
     closeMarketSymbolPicker({ restoreFocus: false });
     setMarketReviewMessage(`${symbol} 已存在，已定位首个主题，原内容未修改。`);
@@ -1986,20 +1969,9 @@ function chooseMarketSymbol(symbol) {
     return;
   }
   try {
-    if (state.marketSymbolPickerMode === "add") {
-      const block = createSymbolMarketBlock({ symbol, catalog: state.marketSymbolCatalog, blocks: state.marketReview.blocks, id: `market-${crypto.randomUUID()}` });
-      state.marketReview.blocks.push(assembleMarketReview(createMarketReview({ blocks: [block] }), state.symbolLevels).blocks[0]);
-      state.selectedMarketBlockId = block.id;
-    } else if (state.marketSymbolPickerMode === "link") {
-      const block = selectedMarketBlock();
-      const linked = linkLegacyMarketBlock(block, { symbol, catalog: state.marketSymbolCatalog, blocks: state.marketReview.blocks });
-      replaceMarketDraftBlock(linked);
-      state.pendingLegacyLinks.add(linked.id);
-    } else {
-      const block = selectedMarketBlock();
-      const changed = changeMarketBlockSymbol(block, { symbol, catalog: state.marketSymbolCatalog, blocks: state.marketReview.blocks });
-      state.marketReview.blocks = state.marketReview.blocks.map((item) => item.id === block.id ? changed : item);
-    }
+    const block = createSymbolMarketBlock({ symbol, catalog: state.marketSymbolCatalog, blocks: state.marketReview.blocks, id: `market-${crypto.randomUUID()}` });
+    state.marketReview.blocks.push(assembleMarketReview(createMarketReview({ blocks: [block] }), state.symbolLevels).blocks[0]);
+    state.selectedMarketBlockId = block.id;
     closeMarketSymbolPicker({ restoreFocus: false });
     setMarketReviewMessage("");
     openMarketDetail(state.selectedMarketBlockId);
@@ -2056,7 +2028,6 @@ function trapMarketDialogFocus(event, root) {
 marketReviewDetail.addEventListener("keydown", (event) => trapMarketDialogFocus(event, marketReviewDetail));
 marketSymbolPicker.addEventListener("keydown", (event) => trapMarketDialogFocus(event, marketSymbolPicker));
 document.querySelector("#addMarketBlockBtn").addEventListener("click", () => openMarketSymbolPicker());
-document.querySelector("#changeMarketSymbolBtn").addEventListener("click", () => openMarketSymbolPicker(selectedMarketBlock()?.type === "legacy" ? "link" : "change"));
 document.querySelector("#addMarketChildBtn").addEventListener("click", addSelectedMarketChild);
 document.querySelector("#closeMarketDetailBtn").addEventListener("click", () => closeMarketDetail());
 document.querySelector("#finishMarketDetailBtn").addEventListener("click", () => closeMarketDetail());
@@ -5108,7 +5079,6 @@ async function refreshOpenLatestReviewActionPlans() {
     state.symbolLevels = structuredClone(data.symbolLevels || {});
     state.marketReview = assembleMarketReview(createMarketReview(data.structuredNotes?.marketReview || {}), state.symbolLevels);
     state.dirtySymbolLevels = {};
-  state.pendingLegacyLinks = new Set();
     const plans = projectActionPlanLevels(normalizeActionPlans(data.actionPlans || []), state.symbolLevels);
     if (isLiveActionPlanMode()) {
       if (state.activeActionPlanEditor?.context) state.activeActionPlanEditor.context.plans = plans;

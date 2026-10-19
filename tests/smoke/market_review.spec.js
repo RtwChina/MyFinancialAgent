@@ -63,7 +63,6 @@ for (const viewport of [{ width: 1440, height: 1000 }, { width: 1920, height: 10
     // Long enough to overflow the wider 1920 detail panel as well; textareas auto-grow.
     const body = '保持用户原文 <script>window.__unsafe = true</script> "思考"\n' + '长期判断与风险线 '.repeat(480);
     await page.locator('#marketDetailFields [data-market-kind="thinking"]').fill(body);
-    await expect(page.locator('#changeMarketSymbolBtn')).toBeDisabled(); // empty support/resistance still prohibit replacement
     await expect(page.locator('#finishMarketDetailBtn')).toBeInViewport();
     expect(await page.locator('#marketReviewDetail .market-detail-body').evaluate(el => el.scrollHeight > el.clientHeight)).toBe(true);
     await page.screenshot({ path: `${reports}us2-us1-detail-${viewport.width}.png` });
@@ -201,32 +200,6 @@ test('US1 bootstrap without catalog shows the hint, blocks adding and keeps the 
   expect(runtime.errors).toEqual([]);
 });
 
-test('US1 thinking-only existing block can change symbol without losing stable ids or text', async ({ page, request }) => {
-  const bootstrap = await (await request.get(`${base}/api/reviews/${dates.empty}/bootstrap`)).json();
-  const block = createSymbolMarketBlock({ symbol: 'MU', catalog: bootstrap.marketReviewSymbols, id: 'thinking-only-us1' });
-  block.children = block.children.filter(child => child.kind === 'thinking');
-  block.children[0].body = '只思考保留原文、标点和稳定id';
-  const json = serializeMarketReview(createMarketReview({ blocks: [block] }));
-  executeLocalSql(`UPDATE daily_review_archive SET market_review_json='${json.replaceAll("'", "''")}' WHERE archive_date='${dates.empty}'`);
-  const runtime = await openEmpty(page);
-  await page.locator('#marketReviewRows tr').click();
-  await expect(page.locator('#changeMarketSymbolBtn')).toBeEnabled();
-  await page.locator('#changeMarketSymbolBtn').click();
-  await page.locator('#marketSymbolSearchInput').fill('软件ETF');
-  await page.locator('[data-market-symbol="IGV"]').click();
-  await expect(page.locator('#marketDetailTitle')).toContainText('IGV');
-  await expect(page.locator('#marketDetailFields textarea')).toHaveCount(1);
-  await expect(page.locator('#marketDetailFields textarea')).toHaveValue(block.children[0].body);
-  await expect(page.locator('#marketDetailFields textarea')).toHaveAttribute('data-market-child-id', block.children[0].id);
-  await expect(page.locator('#marketReviewRows tr')).toHaveAttribute('data-market-block-id', block.id);
-  await closeDetail(page);
-  const saved = page.waitForResponse(r => r.url().endsWith(`/api/reviews/${dates.empty}`) && r.request().method() === 'POST');
-  await page.locator('#saveDraftBtn').click(); expect((await saved).status()).toBe(200);
-  const stored = JSON.parse(queryLocalSql(`SELECT market_review_json FROM daily_review_archive WHERE archive_date='${dates.empty}'`)[0].market_review_json).blocks[0];
-  expect(stored.symbol).toBe('IGV'); expect(stored.id).toBe(block.id); expect(stored.children[0]).toEqual(block.children[0]);
-  expect(runtime.errors).toEqual([]);
-});
-
 test('US1 actual Worker rejection preserves draft and real retry saves it', async ({ page }) => {
   const runtime = await openEmpty(page);
   await add(page, 'MU');
@@ -268,7 +241,6 @@ test('US1 reviewed market stays read-only while rows and outline remain usable',
   await expect(page.locator('#marketReviewDetail')).toBeVisible();
   await expect(page.locator('#marketDetailFields textarea').first()).toHaveAttribute('readonly', '');
   await expect(page.locator('#marketDetailFields textarea').last()).toHaveAttribute('readonly', '');
-  await expect(page.locator('#changeMarketSymbolBtn')).toBeDisabled();
   await closeDetail(page);
   for (const id of ['addMarketBlockBtn', 'marketAutoSortBtn', 'marketMoveUpBtn', 'marketMoveDownBtn', 'marketDeleteBlockBtn']) await expect(page.locator(`#${id}`)).toBeDisabled();
   await page.locator('#marketReviewRows tr').focus(); await page.keyboard.press('Enter');
@@ -866,34 +838,16 @@ for (const viewport of [{ width: 1440, height: 1000 }, { width: 1920, height: 10
   expect(levelEvidence(dates.history)).toEqual([]);
 });
 
-test('US4 SM-MR-006 legacy blocks: delete, link only to an unused symbol, original text survives save and reopen', async ({ page, request }) => {
+test('US4 SM-MR-006 legacy blocks: delete preserves stable ids and never changes plans or live state', async ({ page, request }) => {
   await page.setViewportSize({ width: 1440, height: 1000 });
   const blocks = (await (await request.get(`${base}/api/reviews/${dates.history}/bootstrap`)).json()).structuredNotes.marketReview.blocks;
   const id = (group, index) => blocks.find(b => b.legacyOrigin?.group === group && b.legacyOrigin.index === index).id;
-  const breadth = id('market', 1), cross = id('rotation', 9), micron = id('rotation', 10);
-  // A history save rewrites its own plans (timestamps, pre-existing global sort renumbering) but no plan content.
+  const breadth = id('market', 1);
   const planContent = () => queryLocalSql(`SELECT * FROM daily_review_action_plans WHERE archive_date=${sqlText(dates.history)} ORDER BY id`).map(({ updated_at, sort_order, ...plan }) => plan);
   const accountOrder = () => queryLocalSql(`SELECT account_id, group_concat(symbol) symbols FROM (SELECT account_id, symbol FROM daily_review_action_plans WHERE archive_date=${sqlText(dates.history)} ORDER BY account_id, sort_order, id) GROUP BY account_id`);
   const before = archiveEvidence(dates.history), liveBefore = liveEvidence(), plansBefore = planContent(), orderBefore = accountOrder();
   const errors = await openDate(page, dates.history, '查看');
   await page.locator('#initializeBtn').click();
-  await blockRow(page, cross).click();
-  await expect(page.locator('#changeMarketSymbolBtn')).toHaveText('关联标的');
-  await page.locator('#changeMarketSymbolBtn').click();
-  await expect(page.locator('#marketSymbolPickerTitle')).toHaveText('关联历史原文到标的');
-  await page.locator('#marketSymbolSearchInput').fill('SOXX');
-  await page.locator('#marketSymbolResultList [data-market-symbol="SOXX"]').click();
-  await expect(page.locator('#marketReviewMessage')).toContainText('SOXX 已存在');
-  await closeDetail(page);
-  await expect(blockRow(page, cross).locator('.market-legacy-badge')).toBeVisible();
-  await blockRow(page, micron).click();
-  await page.locator('#changeMarketSymbolBtn').click();
-  await page.locator('#marketSymbolSearchInput').fill('MU');
-  await page.locator('#marketSymbolResultList [data-market-symbol="MU"]').click();
-  await expect(page.locator('#marketChangeSymbolHint')).toContainText('请先保存复盘');
-  await expect(page.locator('#marketDetailFields textarea')).toHaveValue('SNDK 和 MU 共享历史别名，保留原文');
-  await expect(page.locator('#marketLegacyOrigin')).toContainText('「Micron」');
-  await closeDetail(page);
   await blockRow(page, breadth).click(); await closeDetail(page);
   page.once('dialog', dialog => { expect(dialog.message()).toContain('市场广度'); dialog.accept(); });
   await page.locator('#marketDeleteBlockBtn').click();
@@ -902,24 +856,13 @@ test('US4 SM-MR-006 legacy blocks: delete, link only to an unused symbol, origin
   await page.locator('#saveDraftBtn').click(); expect((await pending).status()).toBe(200);
   const stored = storedReview(dates.history);
   expect(stored.blocks.some(b => b.id === breadth)).toBe(false);
-  expect(stored.blocks.find(b => b.id === cross)).toMatchObject({ type: 'legacy', legacyOrigin: { group: 'rotation', index: 9 } });
-  const linked = stored.blocks.find(b => b.id === micron);
-  expect(linked).toMatchObject({ type: 'symbol', symbol: 'MU', legacyOrigin: { date: dates.history, group: 'rotation', index: 10, title: 'Micron' } });
-  expect(linked.children).toEqual([expect.objectContaining({ kind: 'custom', body: 'SNDK 和 MU 共享历史别名，保留原文' })]);
   const originalIds = new Set(blocks.map(b => b.id));
   expect(stored.blocks.every(b => originalIds.has(b.id))).toBe(true);
   const after = archiveEvidence(dates.history);
   expect(after.market_sentiment_blocks_json).toBe(before.market_sentiment_blocks_json);
   expect(after.sector_rotation_blocks_json).toBe(before.sector_rotation_blocks_json);
-  const muLevel = levelEvidence(dates.history).find(row => row.symbol === 'MU');
-  expect(!muLevel || (muLevel.support_levels === '' && muLevel.resistance_levels === ''), 'legacy text must never become shared levels').toBe(true);
   expect(liveEvidence()).toEqual(liveBefore);
   expect(planContent()).toEqual(plansBefore); expect(accountOrder()).toEqual(orderBefore);
-  await page.locator('#closeDrawerBtn').click();
-  await openDate(page, dates.history, '查看');
-  const reopened = await readBlockDetail(page, micron);
-  expect(reopened.values).toContain('SNDK 和 MU 共享历史别名，保留原文'); expect(reopened.origin).toContain('「Micron」');
-  await expect(blockRow(page, micron).locator('.action-plan-symbol')).toHaveText('MU');
   expect(errors).toEqual([]);
 });
 
