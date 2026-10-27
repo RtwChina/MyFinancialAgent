@@ -3714,11 +3714,12 @@ function normalizeOptionalText(value) {
   return text || null;
 }
 
-// 以 GSPC（S&P 500）作为 NYSE 收盘日代理：当 GSPC 有价格记录时，说明 NYSE 当天已收盘。
+// 以标普500（S&P 500）作为 NYSE 收盘日代理：有价格记录说明 NYSE 当天已收盘。
 // 这样可以避免亚洲指数/汇率/商品先进入下一自然日时把复盘候选日错误推进。
 async function getLatestClosedNyseTradingDay(env) {
+  // 标的管理里该标的的系统代码历史上叫 GSPC，后改名为 SPX，两个代码都要认。
   const row = await env.DB.prepare(
-    `SELECT MAX(k_date) AS latest FROM stock_raw WHERE symbol = 'GSPC'`,
+    `SELECT MAX(k_date) AS latest FROM stock_raw WHERE symbol IN ('GSPC', 'SPX')`,
   ).first();
   return row?.latest || null;
 }
