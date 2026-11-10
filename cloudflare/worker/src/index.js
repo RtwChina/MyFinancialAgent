@@ -3982,11 +3982,16 @@ async function extractValuation(env, body) {
   const llmModel = env.LLM_MODEL_ID || "qwen3.5-flash";
 
   let parsed = null;
+  let debug = { hasKey: Boolean(llmApiKey), model: llmModel, llmMs: null, error: "no_key" };
   if (llmApiKey) {
-    parsed = await callLLMForValuation(llmApiKey, llmBaseUrl, llmModel, symbol, text);
+    const started = Date.now();
+    const out = await callLLMForValuation(llmApiKey, llmBaseUrl, llmModel, symbol, text);
+    debug = { hasKey: true, model: llmModel, llmMs: Date.now() - started, error: out.error, rawText: (out.rawText || "").slice(0, 400) };
+    parsed = out.parsed;
   }
   const valuation = validateValuation(parsed, text);
-  return { symbol, valuation };
+  debug.validationPassed = Boolean(valuation);
+  return { symbol, valuation, debug };
 }
 
 async function callLLMForValuation(apiKey, baseUrl, model, symbol, text) {
@@ -4033,17 +4038,23 @@ ${text}
         ],
         max_tokens: 600,
         temperature: 0,
+        // 关闭思考模式：纯提取任务不需要思维链，开启会让单次调用到 30s+
+        enable_thinking: false,
       }),
-      signal: AbortSignal.timeout(20000),
+      signal: AbortSignal.timeout(60000),
     });
-    if (!resp.ok) return null;
+    if (!resp.ok) return { parsed: null, error: `http_${resp.status}` };
     const data = await resp.json();
-    const textOut = data?.choices?.[0]?.message?.content || "";
-    const jsonMatch = textOut.match(/\{[\s\S]*\}/);
-    if (!jsonMatch) return null;
-    return JSON.parse(jsonMatch[0]);
-  } catch {
-    return null;
+    const rawText = data?.choices?.[0]?.message?.content || "";
+    const jsonMatch = rawText.match(/\{[\s\S]*\}/);
+    if (!jsonMatch) return { parsed: null, rawText, error: "no_json" };
+    try {
+      return { parsed: JSON.parse(jsonMatch[0]), rawText, error: null };
+    } catch {
+      return { parsed: null, rawText, error: "bad_json" };
+    }
+  } catch (err) {
+    return { parsed: null, error: `fetch_${err?.name || "error"}` };
   }
 }
 
