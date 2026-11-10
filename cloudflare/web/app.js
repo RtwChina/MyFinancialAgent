@@ -1,4 +1,4 @@
-import { buildZoneExport } from "./zone-export.js?v=20261016-market-review";
+import { buildValuationExport, buildZoneExport } from "./zone-export.js?v=20261109-valuation";
 import { MARKET_REVIEW_PRESETS, createMarketReview, assembleMarketReview, serializeMarketReview, createSymbolMarketBlock, searchMarketReviewSymbols, addMarketChild, updateMarketChildTitle, deleteMarketChild, patchMarketReviewLevels } from "./market-review-model.js";
 
 // ===== snarkdown (inline, ~1KB) — Markdown → HTML =====
@@ -2284,14 +2284,67 @@ function closeActionPlanZoneExport() {
   if (actionPlanZoneExportCopyStatus) actionPlanZoneExportCopyStatus.textContent = "";
 }
 
-function openActionPlanZoneExport({ includeRotation = true } = {}) {
+// ── 前瞻估值识别：收集各标的的思考/自定义文本，调 /api/valuation-extract 提取 ──
+const valuationExtractCache = new Map();
+const VALUATION_HINT_PATTERN = /估值|前瞻|倍数|EPS|eps|目标价|\d+\s*[-–—~～至]\s*\d+/;
+
+function collectValuationCandidates({ includeRotation }) {
+  const texts = new Map();
+  const add = (symbol, body) => {
+    const s = String(symbol || "").trim().toUpperCase();
+    const t = String(body || "").trim();
+    if (!s || !t || s === "GSPC" || !VALUATION_HINT_PATTERN.test(t)) return;
+    texts.set(s, texts.has(s) ? `${texts.get(s)}\n${t}` : t);
+  };
+  if (includeRotation) {
+    state.marketReview.blocks.forEach((block) => {
+      if (block?.type !== "symbol" || !block.symbol) return;
+      (block.children || []).forEach((child) => {
+        if (child?.kind === "thinking" || child?.kind === "custom") add(block.symbol, child.body);
+      });
+    });
+  }
+  state.actionPlans.forEach((plan) => add(plan?.symbol, plan?.thinking));
+  return [...texts].map(([symbol, text]) => ({ symbol, text }));
+}
+
+async function extractValuations(candidates) {
+  const results = [];
+  let skipped = 0;
+  await Promise.all(candidates.map(async ({ symbol, text }) => {
+    const key = `${symbol}\n${text}`;
+    try {
+      if (!valuationExtractCache.has(key)) {
+        valuationExtractCache.set(key, fetchJson("/api/valuation-extract", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ symbol, text }),
+        }));
+      }
+      const data = await valuationExtractCache.get(key);
+      if (data?.valuation) results.push({ symbol, valuation: data.valuation });
+      else skipped += 1;
+    } catch {
+      skipped += 1; // 识别失败不阻塞区间导出
+    }
+  }));
+  results.sort((a, b) => a.symbol.localeCompare(b.symbol));
+  return { results, skipped };
+}
+
+async function openActionPlanZoneExport({ includeRotation = true } = {}) {
   const result = buildZoneExport({
     marketReviewBlocks: includeRotation ? state.marketReview.blocks : [],
     symbolLevels: activeSymbolLevels(),
     actionPlans: state.actionPlans,
     includeMarket: includeRotation,
   });
-  const output = result.text;
+  const candidates = collectValuationCandidates({ includeRotation });
+  const { results: valuationResults, skipped: valuationSkipped } = candidates.length
+    ? await extractValuations(candidates)
+    : { results: [], skipped: 0 };
+  const valuationExport = buildValuationExport(valuationResults);
+  const output = [result.text, valuationExport.text].filter(Boolean).join("\n\n");
   if (actionPlanZoneExportOutput) {
     actionPlanZoneExportOutput.value = output;
     actionPlanZoneExportOutput.classList.toggle("hidden", !output);
@@ -2300,13 +2353,19 @@ function openActionPlanZoneExport({ includeRotation = true } = {}) {
   if (copyActionPlanZoneExportBtn) copyActionPlanZoneExportBtn.disabled = !output;
   if (actionPlanZoneExportDescription) {
     actionPlanZoneExportDescription.textContent = includeRotation
-      ? "合并标普500支撑与关键破位点、大宗商品与板块轮动、个股与资产操作计划，并生成 draw_zone 命令。"
-      : "将当前操作计划里的压力位、支撑位转为 draw_zone 命令。";
+      ? "合并标普500支撑与关键破位点、大宗商品与板块轮动、个股与资产操作计划生成 draw_zone 命令，并从思考文本识别前瞻估值生成 draw_valuation 命令。"
+      : "将当前操作计划里的压力位、支撑位转为 draw_zone 命令，并从思考文本识别前瞻估值生成 draw_valuation 命令。";
   }
   if (actionPlanZoneExportSummary) {
     const skippedText = result.skippedCount ? `，跳过 ${result.skippedCount} 行无法识别的内容` : "";
+    const valuationText = valuationExport.count
+      ? `，含前瞻估值 ${valuationExport.count} 个标的`
+      : "";
+    const valuationSkippedText = valuationSkipped
+      ? `，${valuationSkipped} 个标的估值文本未识别（已跳过）`
+      : "";
     actionPlanZoneExportSummary.textContent = output
-      ? `已识别 ${result.groups.length} 个标的、${result.zoneCount} 个区间${skippedText}。`
+      ? `已识别 ${result.groups.length} 个标的、${result.zoneCount} 个区间${valuationText}${valuationSkippedText}${skippedText}。`
       : result.skippedCount
         ? `未识别到可导出区间，已跳过 ${result.skippedCount} 行。`
         : "";

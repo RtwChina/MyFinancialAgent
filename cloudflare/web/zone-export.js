@@ -246,3 +246,43 @@ export function buildZoneExport({
     skippedCount: skipped,
   };
 }
+
+function escapePineString(value) {
+  // 明细行里的 \n 是给 Pine 的换行转义，不能翻倍反斜杠；只清掉会干扰转义的反斜杠并转义单引号
+  return String(value || "").replace(/\\/g, "").replace(/'/g, "\\'");
+}
+
+function valuationTitle(symbol, multiple) {
+  if (multiple && Number(multiple.lo) > 0 && Number(multiple.hi) >= Number(multiple.lo)) {
+    return `${formatZoneNumber(multiple.lo)}-${formatZoneNumber(multiple.hi)}倍 高倍参考`;
+  }
+  return `${symbol} 前瞻估值`;
+}
+
+function valuationCommand({ symbol, valuation }) {
+  const title = escapePineString(valuationTitle(symbol, valuation.multiple));
+  const lines = (valuation.periods || []).map((p) => (
+    `${p.label}: ${formatZoneNumber(p.low)}-${formatZoneNumber(p.high)} (中位 ${formatZoneNumber((p.low + p.high) / 2)})`
+  ));
+  if (valuation.note) lines.push(valuation.note);
+  const body = lines.map((line) => escapePineString(line)).join("\\n");
+  return `draw_valuation('${escapeDrawZoneString(symbol)}', '${title}', '${body}')`;
+}
+
+// items: [{ symbol, valuation: { multiple: {lo,hi}|null, periods: [{label, low, high}], note } }]
+// 只接收已通过 /api/valuation-extract 校验的结果；valuation 为 null 或 period 为空的条目跳过。
+export function buildValuationExport(items = []) {
+  const commands = (Array.isArray(items) ? items : [])
+    .filter((item) => item && item.symbol && item.valuation
+      && Array.isArray(item.valuation.periods) && item.valuation.periods.length)
+    .map(valuationCommand);
+  if (!commands.length) return { text: "", count: 0 };
+  const text = [
+    "// =========================================================================",
+    "// 📈 前瞻估值参考（右上角卡片，由站点“导出画线”生成 draw_valuation 命令）",
+    "// =========================================================================",
+    ...commands,
+  ].join("\n");
+  return { text, count: commands.length };
+}
+

@@ -137,6 +137,10 @@ async function handleApi(request, env, url, appEnv) {
       const body = await request.json();
       return json(await resolveSymbol(env, body), 200, request);
     }
+    if (url.pathname === "/api/valuation-extract" && request.method === "POST") {
+      const body = await request.json();
+      return json(await extractValuation(env, body), 200, request);
+    }
     if (url.pathname === "/api/symbols/validate" && request.method === "POST") {
       const body = await request.json();
       return json(await fetchYahooValidation(body.yahoo_symbol || body.symbol), 200, request);
@@ -3964,6 +3968,104 @@ async function resolveSymbol(env, body) {
     validation,
     isDuplicate: resolved ? existingSymbols.includes(resolved.symbol) : false,
   };
+}
+
+// ── 前瞻估值提取（AI）：只提取原文出现的数字，代码侧再做一次原文匹配校验 ──
+async function extractValuation(env, body) {
+  const symbol = String(body.symbol || "").trim().toUpperCase();
+  const text = String(body.text || "").trim();
+  if (!symbol) { const e = new Error("symbol is required"); e.statusCode = 400; throw e; }
+  if (!text) { const e = new Error("text is required"); e.statusCode = 400; throw e; }
+
+  const llmApiKey = env.LLM_API_KEY;
+  const llmBaseUrl = env.LLM_BASE_URL || "https://dashscope.aliyuncs.com/compatible-mode/v1";
+  const llmModel = env.LLM_MODEL_ID || "qwen3.5-flash";
+
+  let parsed = null;
+  if (llmApiKey) {
+    parsed = await callLLMForValuation(llmApiKey, llmBaseUrl, llmModel, symbol, text);
+  }
+  const valuation = validateValuation(parsed, text);
+  return { symbol, valuation };
+}
+
+async function callLLMForValuation(apiKey, baseUrl, model, symbol, text) {
+  const prompt = `从下面关于标的 ${symbol} 的思考文本中，提取"前瞻估值参考"信息。
+
+【提取规则】
+1. 只提取原文中明确写出来的数字，禁止计算、换算、推测。每个数字必须能在原文中原样找到。
+2. 估值区间必须是股价（如 544-726），不是市值、不是 EPS（除非同时给出了目标倍数）。
+3. 如果有目标倍数（如"30-40倍"、"30~40x"、"按35倍"），提取倍数区间；写法不全（如只有"35倍"）则 lo 和 hi 都填 35。
+4. 每个估值区间标注它对应的时间（如"27年6月"、"2027年6月"、"FY2027"），保持原文写法作为 label。
+5. 中位数不用提取（系统自己算）。
+6. 原文没有估值相关内容时，has_valuation 返回 false，其余字段为 null。
+7. 每个字段必须给出 evidence：原文中包含该数字的原句摘录。
+
+【输出格式】（只返回 JSON）
+{
+  "has_valuation": true,
+  "multiple": { "lo": 30, "hi": 40, "evidence": "原文原句" },
+  "periods": [
+    { "label": "27年6月", "low": 544, "high": 726, "evidence": "原文原句" }
+  ],
+  "note": "一句话备注，没有则空字符串",
+  "confidence": "high 或 medium 或 low"
+}
+
+【示例】
+输入：30-40 高倍参考\n27年6月前瞻估值 544-726（中位 635）\n28年6月前瞻估值 868-1158（中位 1013）
+输出：{"has_valuation": true, "multiple": {"lo": 30, "hi": 40, "evidence": "30-40 高倍参考"}, "periods": [{"label": "27年6月", "low": 544, "high": 726, "evidence": "27年6月前瞻估值 544-726（中位 635）"}, {"label": "28年6月", "low": 868, "high": 1158, "evidence": "28年6月前瞻估值 868-1158（中位 1013）"}], "note": "", "confidence": "high"}
+
+【待提取文本】
+"""
+${text}
+"""`;
+
+  try {
+    const resp = await fetch(`${baseUrl.replace(/\/$/, "")}/chat/completions`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Authorization: `Bearer ${apiKey}` },
+      body: JSON.stringify({
+        model,
+        messages: [
+          { role: "system", content: "你是金融笔记结构化提取助手。只输出 JSON，不输出解释，不计算任何数字。" },
+          { role: "user", content: prompt },
+        ],
+        max_tokens: 600,
+        temperature: 0,
+      }),
+      signal: AbortSignal.timeout(20000),
+    });
+    if (!resp.ok) return null;
+    const data = await resp.json();
+    const textOut = data?.choices?.[0]?.message?.content || "";
+    const jsonMatch = textOut.match(/\{[\s\S]*\}/);
+    if (!jsonMatch) return null;
+    return JSON.parse(jsonMatch[0]);
+  } catch {
+    return null;
+  }
+}
+
+// 代码侧校验：所有数字必须能在原文中原样匹配到，否则丢弃。这是防幻觉的最后防线。
+function validateValuation(parsed, sourceText) {
+  if (!parsed || parsed.has_valuation !== true) return null;
+  const src = String(sourceText);
+  const inSrc = (n) => n !== null && n !== undefined && n !== "" && src.includes(String(n));
+
+  const m = parsed.multiple;
+  const multiple = m && inSrc(m.lo) && inSrc(m.hi) && Number(m.lo) > 0 && Number(m.hi) >= Number(m.lo)
+    ? { lo: Number(m.lo), hi: Number(m.hi) }
+    : null;
+
+  const periods = (Array.isArray(parsed.periods) ? parsed.periods : [])
+    .filter((p) => p && inSrc(p.low) && inSrc(p.high) && Number(p.low) > 0 && Number(p.low) < Number(p.high))
+    .slice(0, 6)
+    .map((p) => ({ label: String(p.label || "").trim(), low: Number(p.low), high: Number(p.high) }));
+  if (periods.length === 0) return null;
+
+  const note = String(parsed.note || "").trim().slice(0, 100);
+  return { multiple, periods, note };
 }
 
 async function callLLMForSymbol(apiKey, baseUrl, model, userInput, existingSymbols) {

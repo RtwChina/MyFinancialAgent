@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
+  buildValuationExport,
   buildZoneExport,
   extractMarketSp500Zones,
   parseZoneLine,
@@ -159,4 +160,59 @@ test("account-page export skips the market review and reads plans through shared
     "draw_zone('MU', 120, 125, '压力: 120-125')",
     "draw_zone('MU', 90, 95, '支撑: 90-95')",
   ].join("\n"));
+});
+
+test("buildValuationExport renders draw_valuation commands with computed midpoints", () => {
+  const { text, count } = buildValuationExport([
+    {
+      symbol: "LITE",
+      valuation: {
+        multiple: { lo: 30, hi: 40 },
+        periods: [
+          { label: "27年6月", low: 544, high: 726 },
+          { label: "28年6月", low: 868, high: 1158 },
+        ],
+        note: "",
+      },
+    },
+  ]);
+  assert.equal(count, 1);
+  assert.equal(text, [
+    "// =========================================================================",
+    "// 📈 前瞻估值参考（右上角卡片，由站点“导出画线”生成 draw_valuation 命令）",
+    "// =========================================================================",
+    "draw_valuation('LITE', '30-40倍 高倍参考', '27年6月: 544-726 (中位 635)\\n28年6月: 868-1158 (中位 1013)')",
+  ].join("\n"));
+});
+
+test("buildValuationExport keeps decimals, falls back title without multiple, and skips invalid items", () => {
+  const { text, count } = buildValuationExport([
+    {
+      symbol: "MU",
+      valuation: {
+        multiple: null,
+        periods: [{ label: "27年6月", low: 544.5, high: 725 }],
+        note: "按滚动12个月",
+      },
+    },
+    { symbol: "EMPTY", valuation: null },
+    { symbol: "NOPPERIODS", valuation: { multiple: { lo: 30, hi: 40 }, periods: [], note: "" } },
+  ]);
+  assert.equal(count, 1);
+  assert.ok(text.includes("draw_valuation('MU', 'MU 前瞻估值', '27年6月: 544.5-725 (中位 634.75)\\n按滚动12个月')"));
+});
+
+test("buildValuationExport escapes quotes and strips backslashes", () => {
+  const { text } = buildValuationExport([
+    {
+      symbol: "BABA",
+      valuation: {
+        multiple: null,
+        periods: [{ label: "27年6月", low: 100, high: 120 }],
+        note: "it's \\ 确认",
+      },
+    },
+  ]);
+  assert.ok(text.includes("it\\'s  确认"));
+  assert.ok(!text.includes("\\ 确认"));
 });
