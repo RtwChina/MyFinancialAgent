@@ -1,3 +1,4 @@
+import { buildPineExport, collectSpxCtaText } from "./cta-export.js";
 import { buildValuationExport, buildZoneExport } from "./zone-export.js?v=20261109-valuation";
 import { MARKET_REVIEW_PRESETS, createMarketReview, assembleMarketReview, serializeMarketReview, createSymbolMarketBlock, searchMarketReviewSymbols, addMarketChild, updateMarketChildTitle, deleteMarketChild, patchMarketReviewLevels } from "./market-review-model.js";
 
@@ -2333,18 +2334,25 @@ async function extractValuations(candidates) {
 }
 
 async function openActionPlanZoneExport({ includeRotation = true } = {}) {
+  const candidates = collectValuationCandidates({ includeRotation });
+  const ctaText = includeRotation ? collectSpxCtaText(state.marketReview.blocks) : "";
+  const [{ results: valuationResults, skipped: valuationSkipped }, ctaResult] = await Promise.all([
+    candidates.length ? extractValuations(candidates) : { results: [], skipped: 0 },
+    ctaText ? fetchJson("/api/spx-cta-extract", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ text: ctaText }),
+    }).catch(() => ({ cta: null, error: "request_failed" })) : { cta: null },
+  ]);
   const result = buildZoneExport({
     marketReviewBlocks: includeRotation ? state.marketReview.blocks : [],
     symbolLevels: activeSymbolLevels(),
     actionPlans: state.actionPlans,
     includeMarket: includeRotation,
+    ctaPrices: ctaResult.cta?.levels.map(({ price }) => price),
   });
-  const candidates = collectValuationCandidates({ includeRotation });
-  const { results: valuationResults, skipped: valuationSkipped } = candidates.length
-    ? await extractValuations(candidates)
-    : { results: [], skipped: 0 };
   const valuationExport = buildValuationExport(valuationResults);
-  const output = [result.text, valuationExport.text].filter(Boolean).join("\n\n");
+  const output = buildPineExport({ zones: result.text, valuation: valuationExport.text, cta: ctaResult.cta });
   if (actionPlanZoneExportOutput) {
     actionPlanZoneExportOutput.value = output;
     actionPlanZoneExportOutput.classList.toggle("hidden", !output);
@@ -2353,8 +2361,8 @@ async function openActionPlanZoneExport({ includeRotation = true } = {}) {
   if (copyActionPlanZoneExportBtn) copyActionPlanZoneExportBtn.disabled = !output;
   if (actionPlanZoneExportDescription) {
     actionPlanZoneExportDescription.textContent = includeRotation
-      ? "合并标普500支撑与关键破位点、大宗商品与板块轮动、个股与资产操作计划生成 draw_zone 命令，并从思考文本识别前瞻估值生成 draw_valuation 命令。"
-      : "将当前操作计划里的压力位、支撑位转为 draw_zone 命令，并从思考文本识别前瞻估值生成 draw_valuation 命令。";
+      ? "将本次复盘的区间、前瞻估值与 SPX CTA 触发位生成完整 Pine v6 脚本。"
+      : "将当前操作计划的区间与前瞻估值生成完整 Pine v6 脚本。";
   }
   if (actionPlanZoneExportSummary) {
     const skippedText = result.skippedCount ? `，跳过 ${result.skippedCount} 行无法识别的内容` : "";
@@ -2364,11 +2372,15 @@ async function openActionPlanZoneExport({ includeRotation = true } = {}) {
     const valuationSkippedText = valuationSkipped
       ? `，${valuationSkipped} 个标的估值文本未识别（已跳过）`
       : "";
-    actionPlanZoneExportSummary.textContent = output
+    const ctaStatus = ctaResult.cta
+      ? `SPX CTA ${ctaResult.cta.levels.length} 条`
+      : ctaText ? (ctaResult.error ? "SPX CTA 识别失败" : "未识别到可导出的 SPX CTA 触发位") : "";
+    const summary = output
       ? `已识别 ${result.groups.length} 个标的、${result.zoneCount} 个区间${valuationText}${valuationSkippedText}${skippedText}。`
       : result.skippedCount
         ? `未识别到可导出区间，已跳过 ${result.skippedCount} 行。`
         : "";
+    actionPlanZoneExportSummary.textContent = [summary, ctaStatus].filter(Boolean).join(" ");
   }
   if (actionPlanZoneExportCopyStatus) actionPlanZoneExportCopyStatus.textContent = "";
   actionPlanZoneExportModal?.classList.remove("hidden");

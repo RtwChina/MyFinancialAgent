@@ -182,6 +182,7 @@ export function buildZoneExport({
   symbolLevels = {},
   actionPlans = [],
   includeMarket = true,
+  ctaPrices = [],
 } = {}) {
   const themes = includeMarket
     ? (Array.isArray(marketReviewBlocks) ? marketReviewBlocks : []).filter((block) => block?.type === "symbol" && block.symbol)
@@ -189,6 +190,9 @@ export function buildZoneExport({
   const market = includeMarket
     ? extractMarketSp500Zones(themes, symbolLevels)
     : { supportZones: [], negativeGammaZones: [], accelerationZones: [], skipped: 0 };
+
+  const ctaPriceSet = new Set(ctaPrices);
+  market.accelerationZones = market.accelerationZones.filter(({ pointText }) => !ctaPriceSet.has(Number(pointText)));
 
   const exported = new Map();
   const include = (symbol, kinds, fallback = {}) => {
